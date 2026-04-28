@@ -2,7 +2,7 @@
 
 Web-based server monitoring with real-time SSH terminal.
 
-Built with ❤️  Claude Code & DeepSeek-v4-pro
+Built with ❤️ using Claude Code & DeepSeek-v4-pro
 ## Quick Start
 
 ```bash
