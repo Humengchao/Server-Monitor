@@ -19,7 +19,10 @@ import (
 func main() {
 	loadEnv()
 
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("Config error: %v", err)
+	}
 
 	db, err := database.Connect(cfg.DatabaseURL)
 	if err != nil {
