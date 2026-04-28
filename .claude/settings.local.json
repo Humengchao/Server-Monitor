@@ -6,7 +6,13 @@
       "Bash(npm install *)",
       "Bash(go build *)",
       "Bash(npx tsc *)",
-      "Bash(npx vite *)"
+      "Bash(npx vite *)",
+      "Bash(npm ls *)",
+      "Bash(curl -s http://localhost:5173/src/main.tsx)",
+      "Bash(curl -s http://localhost:5173/src/App.tsx)",
+      "Bash(curl -s http://localhost:5173/src/components/Layout.tsx)",
+      "Bash(curl *)",
+      "Bash(go fmt *)"
     ]
   }
 }

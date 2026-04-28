@@ -33,11 +33,12 @@ type LatestMetrics struct {
 }
 
 func CreateServer(db *sql.DB, s *Server) error {
+	s.ID = uuid.New()
 	return db.QueryRow(
-		`INSERT INTO servers (user_id, name, host, port, ssh_username, ssh_password, ssh_key)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, created_at`,
-		s.UserID, s.Name, s.Host, s.Port, s.SSHUsername, s.SSHPassword, s.SSHKey,
-	).Scan(&s.ID, &s.CreatedAt)
+		`INSERT INTO servers (id, user_id, name, host, port, ssh_username, ssh_password, ssh_key)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING created_at`,
+		s.ID, s.UserID, s.Name, s.Host, s.Port, s.SSHUsername, s.SSHPassword, s.SSHKey,
+	).Scan(&s.CreatedAt)
 }
 
 func GetServersByUserID(db *sql.DB, userID uuid.UUID) ([]Server, error) {

@@ -15,11 +15,11 @@ type User struct {
 }
 
 func CreateUser(db *sql.DB, username, passwordHash string) (*User, error) {
-	u := &User{Username: username, PasswordHash: passwordHash}
+	u := &User{ID: uuid.New(), Username: username, PasswordHash: passwordHash}
 	err := db.QueryRow(
-		"INSERT INTO users (username, password_hash) VALUES ($1, $2) RETURNING id, created_at",
-		username, passwordHash,
-	).Scan(&u.ID, &u.CreatedAt)
+		"INSERT INTO users (id, username, password_hash) VALUES ($1, $2, $3) RETURNING created_at",
+		u.ID, username, passwordHash,
+	).Scan(&u.CreatedAt)
 	if err != nil {
 		return nil, err
 	}

@@ -8,6 +8,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"server-monitor/internal/models"
@@ -16,13 +17,21 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+type prevNet struct {
+	rxBytes int64
+	txBytes int64
+	time    time.Time
+}
+
 type Collector struct {
 	db       *sql.DB
 	interval time.Duration
+	mu       sync.Mutex
+	prev     map[uuid.UUID]*prevNet
 }
 
 func NewCollector(db *sql.DB, interval time.Duration) *Collector {
-	return &Collector{db: db, interval: interval}
+	return &Collector{db: db, interval: interval, prev: make(map[uuid.UUID]*prevNet)}
 }
 
 func (c *Collector) Start() {
@@ -93,8 +102,19 @@ func (c *Collector) collectOne(s *models.Server) (*models.MetricPoint, error) {
 	// Memory from /proc/meminfo
 	m.MemoryUsed, m.MemoryTotal = collectMemory(client)
 
-	// Network from /proc/net/dev
-	m.NetworkRxBytes, m.NetworkTxBytes = collectNetwork(client)
+	// Network from /proc/net/dev (cumulative counters -> bytes/sec)
+	rxRaw, txRaw := collectNetwork(client)
+	now := m.RecordedAt
+	c.mu.Lock()
+	if prev, ok := c.prev[s.ID]; ok && prev.rxBytes <= rxRaw && prev.txBytes <= txRaw {
+		elapsed := now.Sub(prev.time).Seconds()
+		if elapsed > 0 {
+			m.NetworkRxBytes = int64(float64(rxRaw-prev.rxBytes) / elapsed)
+			m.NetworkTxBytes = int64(float64(txRaw-prev.txBytes) / elapsed)
+		}
+	}
+	c.prev[s.ID] = &prevNet{rxBytes: rxRaw, txBytes: txRaw, time: now}
+	c.mu.Unlock()
 
 	// Uptime
 	m.UptimeSeconds = collectUptime(client)
@@ -162,7 +182,8 @@ func collectMemory(client *ssh.Client) (int64, int64) {
 			memAvailable = val
 		}
 	}
-	return (memTotal - memAvailable), memTotal
+	// /proc/meminfo is in kB, convert to bytes
+	return (memTotal - memAvailable) * 1024, memTotal * 1024
 }
 
 func collectNetwork(client *ssh.Client) (int64, int64) {

@@ -15,10 +15,11 @@ type Tag struct {
 }
 
 func CreateTag(db *sql.DB, t *Tag) error {
-	return db.QueryRow(
-		"INSERT INTO tags (user_id, name, color) VALUES ($1,$2,$3) RETURNING id",
-		t.UserID, t.Name, t.Color,
-	).Scan(&t.ID)
+	t.ID = uuid.New()
+	_, err := db.Exec(
+		"INSERT INTO tags (id, user_id, name, color) VALUES ($1,$2,$3,$4)",
+		t.ID, t.UserID, t.Name, t.Color)
+	return err
 }
 
 func GetTagsByUserID(db *sql.DB, userID uuid.UUID) ([]Tag, error) {
