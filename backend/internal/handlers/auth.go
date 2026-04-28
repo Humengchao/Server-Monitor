@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"server-monitor/internal/config"
@@ -37,7 +38,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to hash password"})
 		return
@@ -45,7 +46,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	db := c.MustGet("db").(*models.DB) // will be set in main
 	_, err = models.CreateUser(db.Raw, req.Username, string(hash))
 	if err != nil {
-		if err.Error() == `pq: duplicate key value violates unique constraint "users_username_key"` {
+		if strings.Contains(err.Error(), "duplicate key") {
 			c.JSON(http.StatusConflict, gin.H{"error": "username already exists"})
 			return
 		}

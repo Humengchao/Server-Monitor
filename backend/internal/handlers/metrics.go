@@ -23,7 +23,7 @@ func (h *MetricsHandler) GetLatest(c *gin.Context) {
 	}
 	db := c.MustGet("db").(*models.DB)
 	// verify ownership
-	if _, err := models.GetServerByIDAndUser(db.Raw, id, userID); err != nil {
+	if _, err := models.GetServerByIDAndUser(db, id, userID); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
 		return
 	}
@@ -43,7 +43,7 @@ func (h *MetricsHandler) GetHistory(c *gin.Context) {
 		return
 	}
 	db := c.MustGet("db").(*models.DB)
-	if _, err := models.GetServerByIDAndUser(db.Raw, id, userID); err != nil {
+	if _, err := models.GetServerByIDAndUser(db, id, userID); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
 		return
 	}

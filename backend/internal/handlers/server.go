@@ -72,7 +72,7 @@ func (h *ServerHandler) Create(c *gin.Context) {
 		SSHPassword: req.SSHPassword,
 		SSHKey:      req.SSHKey,
 	}
-	if err := models.CreateServer(db.Raw, s); err != nil {
+	if err := models.CreateServer(db, s); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create server"})
 		return
 	}
@@ -105,7 +105,7 @@ func (h *ServerHandler) Update(c *gin.Context) {
 		SSHPassword: req.SSHPassword,
 		SSHKey:      req.SSHKey,
 	}
-	if err := models.UpdateServer(db.Raw, s); err != nil {
+	if err := models.UpdateServer(db, s); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update server"})
 		return
 	}

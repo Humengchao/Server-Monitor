@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"time"
 
+	"server-monitor/internal/crypto"
+
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
@@ -17,6 +19,7 @@ type Server struct {
 	SSHUsername   string         `json:"ssh_username"`
 	SSHPassword   string         `json:"-"`
 	SSHKey        string         `json:"-"`
+	SSHHostKey    string         `json:"ssh_host_key,omitempty"`
 	LastSeenAt    *time.Time     `json:"last_seen_at"`
 	CreatedAt     time.Time      `json:"created_at"`
 	Tags          []Tag          `json:"tags,omitempty"`
@@ -32,18 +35,27 @@ type LatestMetrics struct {
 	RecordedAt     time.Time `json:"recorded_at"`
 }
 
-func CreateServer(db *sql.DB, s *Server) error {
+func CreateServer(db *DB, s *Server) error {
 	s.ID = uuid.New()
-	return db.QueryRow(
-		`INSERT INTO servers (id, user_id, name, host, port, ssh_username, ssh_password, ssh_key)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING created_at`,
-		s.ID, s.UserID, s.Name, s.Host, s.Port, s.SSHUsername, s.SSHPassword, s.SSHKey,
+	encPassword, err := crypto.Encrypt(s.SSHPassword, db.EncryptionKey)
+	if err != nil {
+		return err
+	}
+	encKey, err := crypto.Encrypt(s.SSHKey, db.EncryptionKey)
+	if err != nil {
+		return err
+	}
+	return db.Raw.QueryRow(
+		`INSERT INTO servers (id, user_id, name, host, port, ssh_username, ssh_password, ssh_key, ssh_host_key)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING created_at`,
+		s.ID, s.UserID, s.Name, s.Host, s.Port, s.SSHUsername, encPassword, encKey, s.SSHHostKey,
 	).Scan(&s.CreatedAt)
 }
 
 func GetServersByUserID(db *sql.DB, userID uuid.UUID) ([]Server, error) {
 	rows, err := db.Query(
 		`SELECT s.id, s.user_id, s.name, s.host, s.port, s.ssh_username, s.last_seen_at, s.created_at,
+		 COALESCE(s.ssh_host_key, ''),
 		 COALESCE(sm.cpu_percent, 0), COALESCE(sm.memory_used, 0), COALESCE(sm.memory_total, 0),
 		 COALESCE(sm.network_rx_bytes, 0), COALESCE(sm.network_tx_bytes, 0), sm.recorded_at
 		 FROM servers s
@@ -63,7 +75,7 @@ func GetServersByUserID(db *sql.DB, userID uuid.UUID) ([]Server, error) {
 		var m LatestMetrics
 		var recordedAt sql.NullTime
 		if err := rows.Scan(&s.ID, &s.UserID, &s.Name, &s.Host, &s.Port,
-			&s.SSHUsername, &s.LastSeenAt, &s.CreatedAt,
+			&s.SSHUsername, &s.LastSeenAt, &s.CreatedAt, &s.SSHHostKey,
 			&m.CPUPercent, &m.MemoryUsed, &m.MemoryTotal,
 			&m.NetworkRxBytes, &m.NetworkTxBytes, &recordedAt); err != nil {
 			return nil, err
@@ -77,24 +89,41 @@ func GetServersByUserID(db *sql.DB, userID uuid.UUID) ([]Server, error) {
 	return servers, nil
 }
 
-func GetServerByIDAndUser(db *sql.DB, id, userID uuid.UUID) (*Server, error) {
+func GetServerByIDAndUser(db *DB, id, userID uuid.UUID) (*Server, error) {
 	s := &Server{}
-	err := db.QueryRow(
-		`SELECT id, user_id, name, host, port, ssh_username, ssh_password, ssh_key, last_seen_at, created_at
+	var encPassword, encKey string
+	err := db.Raw.QueryRow(
+		`SELECT id, user_id, name, host, port, ssh_username, ssh_password, ssh_key, COALESCE(ssh_host_key, ''), last_seen_at, created_at
 		 FROM servers WHERE id=$1 AND user_id=$2`, id, userID,
 	).Scan(&s.ID, &s.UserID, &s.Name, &s.Host, &s.Port,
-		&s.SSHUsername, &s.SSHPassword, &s.SSHKey, &s.LastSeenAt, &s.CreatedAt)
+		&s.SSHUsername, &encPassword, &encKey, &s.SSHHostKey, &s.LastSeenAt, &s.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	s.SSHPassword, err = crypto.Decrypt(encPassword, db.EncryptionKey)
+	if err != nil {
+		return nil, err
+	}
+	s.SSHKey, err = crypto.Decrypt(encKey, db.EncryptionKey)
 	if err != nil {
 		return nil, err
 	}
 	return s, nil
 }
 
-func UpdateServer(db *sql.DB, s *Server) error {
-	_, err := db.Exec(
-		`UPDATE servers SET name=$1, host=$2, port=$3, ssh_username=$4, ssh_password=$5, ssh_key=$6
-		 WHERE id=$7 AND user_id=$8`,
-		s.Name, s.Host, s.Port, s.SSHUsername, s.SSHPassword, s.SSHKey, s.ID, s.UserID)
+func UpdateServer(db *DB, s *Server) error {
+	encPassword, err := crypto.Encrypt(s.SSHPassword, db.EncryptionKey)
+	if err != nil {
+		return err
+	}
+	encKey, err := crypto.Encrypt(s.SSHKey, db.EncryptionKey)
+	if err != nil {
+		return err
+	}
+	_, err = db.Raw.Exec(
+		`UPDATE servers SET name=$1, host=$2, port=$3, ssh_username=$4, ssh_password=$5, ssh_key=$6, ssh_host_key=$7
+		 WHERE id=$8 AND user_id=$9`,
+		s.Name, s.Host, s.Port, s.SSHUsername, encPassword, encKey, s.SSHHostKey, s.ID, s.UserID)
 	return err
 }
 
@@ -148,18 +177,19 @@ func GetServerTags(db *sql.DB, serverID uuid.UUID) ([]Tag, error) {
 func GetServerByID(db *sql.DB, id uuid.UUID) (*Server, error) {
 	s := &Server{}
 	err := db.QueryRow(
-		`SELECT id, user_id, name, host, port, ssh_username, ssh_password, ssh_key, last_seen_at, created_at
+		`SELECT id, user_id, name, host, port, ssh_username, ssh_password, ssh_key, COALESCE(ssh_host_key, ''), last_seen_at, created_at
 		 FROM servers WHERE id=$1`, id,
 	).Scan(&s.ID, &s.UserID, &s.Name, &s.Host, &s.Port,
-		&s.SSHUsername, &s.SSHPassword, &s.SSHKey, &s.LastSeenAt, &s.CreatedAt)
+		&s.SSHUsername, &s.SSHPassword, &s.SSHKey, &s.SSHHostKey, &s.LastSeenAt, &s.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
 	return s, nil
 }
 
-func GetAllServers(db *sql.DB) ([]Server, error) {
-	rows, err := db.Query(`SELECT id, user_id, name, host, port, ssh_username, ssh_password, ssh_key FROM servers`)
+// GetAllServers returns all servers with decrypted credentials (for collector).
+func GetAllServers(db *DB) ([]Server, error) {
+	rows, err := db.Raw.Query(`SELECT id, user_id, name, host, port, ssh_username, ssh_password, ssh_key, COALESCE(ssh_host_key, '') FROM servers`)
 	if err != nil {
 		return nil, err
 	}
@@ -167,10 +197,13 @@ func GetAllServers(db *sql.DB) ([]Server, error) {
 	var servers []Server
 	for rows.Next() {
 		var s Server
+		var encPassword, encKey string
 		if err := rows.Scan(&s.ID, &s.UserID, &s.Name, &s.Host, &s.Port,
-			&s.SSHUsername, &s.SSHPassword, &s.SSHKey); err != nil {
+			&s.SSHUsername, &encPassword, &encKey, &s.SSHHostKey); err != nil {
 			return nil, err
 		}
+		s.SSHPassword, _ = crypto.Decrypt(encPassword, db.EncryptionKey)
+		s.SSHKey, _ = crypto.Decrypt(encKey, db.EncryptionKey)
 		servers = append(servers, s)
 	}
 	return servers, nil

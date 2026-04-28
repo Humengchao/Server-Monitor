@@ -39,7 +39,7 @@ export default function SshTerminal({ serverId }: Props) {
     fitAddon.fit();
 
     const token = localStorage.getItem('token');
-    const ws = new WebSocket(`ws://localhost:8080/api/ssh/${serverId}?token=${token}`);
+    const ws = new WebSocket(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.hostname}:8080/api/ssh/${serverId}?token=${token}`);
     wsRef.current = ws;
 
     ws.onopen = () => {

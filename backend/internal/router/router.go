@@ -2,6 +2,7 @@ package router
 
 import (
 	"database/sql"
+	"time"
 
 	"server-monitor/internal/config"
 	"server-monitor/internal/handlers"
@@ -16,7 +17,10 @@ func Setup(db *sql.DB, cfg *config.Config) *gin.Engine {
 
 	// CORS
 	r.Use(func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
+		origin := c.GetHeader("Origin")
+		if origin == cfg.CORSOrigin || cfg.CORSOrigin == "*" {
+			c.Header("Access-Control-Allow-Origin", origin)
+		}
 		c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Authorization,Content-Type")
 		if c.Request.Method == "OPTIONS" {
@@ -27,7 +31,7 @@ func Setup(db *sql.DB, cfg *config.Config) *gin.Engine {
 	})
 
 	// Inject DB
-	dbWrapper := &models.DB{Raw: db}
+	dbWrapper := &models.DB{Raw: db, EncryptionKey: cfg.EncryptionKey}
 	r.Use(func(c *gin.Context) {
 		c.Set("db", dbWrapper)
 		c.Next()
@@ -39,12 +43,14 @@ func Setup(db *sql.DB, cfg *config.Config) *gin.Engine {
 	metricsH := handlers.NewMetricsHandler()
 	sshH := handlers.NewSSHHandler()
 
+	rateLimit := middleware.RateLimit(5, 1*time.Minute)
+
 	api := r.Group("/api")
 	{
 		auth := api.Group("/auth")
 		{
-			auth.POST("/register", authH.Register)
-			auth.POST("/login", authH.Login)
+			auth.POST("/register", rateLimit, authH.Register)
+			auth.POST("/login", rateLimit, authH.Login)
 			auth.GET("/me", middleware.AuthRequired(cfg), authH.Me)
 		}
 
@@ -66,7 +72,7 @@ func Setup(db *sql.DB, cfg *config.Config) *gin.Engine {
 			tags.DELETE("/:id", tagH.Delete)
 		}
 
-		api.GET("/ssh/:id", middleware.AuthRequired(cfg), sshH.Handle)
+		api.GET("/ssh/:id", middleware.WSAuthRequired(cfg), sshH.Handle)
 	}
 
 	return r

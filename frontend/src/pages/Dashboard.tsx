@@ -62,6 +62,7 @@ export default function Dashboard() {
       host: server.host,
       port: server.port,
       ssh_username: server.ssh_username,
+      ssh_host_key: server.ssh_host_key || '',
     });
     setTagValues(server.tags?.map((t) => t.id) || []);
     setModalOpen(true);
@@ -140,6 +141,9 @@ export default function Dashboard() {
           </Form.Item>
           <Form.Item name="ssh_key" label="SSH Private Key">
             <Input.TextArea rows={4} placeholder="Paste private key content" />
+          </Form.Item>
+          <Form.Item name="ssh_host_key" label="SSH Host Key (optional)">
+            <Input.TextArea rows={2} placeholder="Paste server public key for host verification" />
           </Form.Item>
           <Form.Item label="Tags">
             <TagSelect value={tagValues} onChange={setTagValues} />

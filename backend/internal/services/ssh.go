@@ -128,10 +128,19 @@ func (ts *TerminalSession) Close() {
 	ts.client.Close()
 }
 
-func DialSSH(host string, port int, username, password, key string) (*ssh.Client, error) {
+func DialSSH(host string, port int, username, password, key, hostKey string) (*ssh.Client, error) {
+	hostKeyCallback := ssh.InsecureIgnoreHostKey()
+	if hostKey != "" {
+		parsedKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(hostKey))
+		if err != nil {
+			log.Printf("SSH: failed to parse host key: %v", err)
+		} else {
+			hostKeyCallback = ssh.FixedHostKey(parsedKey)
+		}
+	}
 	config := &ssh.ClientConfig{
 		User:            username,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: hostKeyCallback,
 		Timeout:         10 * time.Second,
 	}
 	if password != "" {

@@ -3,5 +3,6 @@ package models
 import "database/sql"
 
 type DB struct {
-	Raw *sql.DB
+	Raw           *sql.DB
+	EncryptionKey string
 }

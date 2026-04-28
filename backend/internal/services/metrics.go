@@ -2,7 +2,6 @@ package services
 
 import (
 	"bytes"
-	"database/sql"
 	"fmt"
 	"io"
 	"log"
@@ -24,13 +23,13 @@ type prevNet struct {
 }
 
 type Collector struct {
-	db       *sql.DB
+	db       *models.DB
 	interval time.Duration
 	mu       sync.Mutex
 	prev     map[uuid.UUID]*prevNet
 }
 
-func NewCollector(db *sql.DB, interval time.Duration) *Collector {
+func NewCollector(db *models.DB, interval time.Duration) *Collector {
 	return &Collector{db: db, interval: interval, prev: make(map[uuid.UUID]*prevNet)}
 }
 
@@ -44,7 +43,7 @@ func (c *Collector) Start() {
 }
 
 func (c *Collector) PollNow(serverID uuid.UUID) (*models.MetricPoint, error) {
-	s, err := models.GetServerByID(c.db, serverID)
+	s, err := models.GetServerByID(c.db.Raw, serverID)
 	if err != nil {
 		return nil, fmt.Errorf("server not found: %w", err)
 	}
@@ -63,7 +62,7 @@ func (c *Collector) pollAll() {
 			log.Printf("collector: poll %s failed: %v", s.Name, err)
 			continue
 		}
-		if err := models.InsertMetric(c.db, s.ID, m); err != nil {
+		if err := models.InsertMetric(c.db.Raw, s.ID, m); err != nil {
 			log.Printf("collector: insert metric for %s failed: %v", s.Name, err)
 		}
 	}

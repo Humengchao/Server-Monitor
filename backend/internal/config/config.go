@@ -3,19 +3,39 @@ package config
 import "os"
 
 type Config struct {
-	DatabaseURL  string
-	JWTSecret    string
-	ServerPort   string
-	PollInterval int // seconds between metrics polls
+	DatabaseURL   string
+	JWTSecret     string
+	EncryptionKey string
+	ServerPort    string
+	TLSCertFile   string
+	TLSKeyFile    string
+	CORSOrigin    string
+	PollInterval  int // seconds between metrics polls
 }
 
 func Load() *Config {
-	return &Config{
-		DatabaseURL:  getEnv("DATABASE_URL", "postgres://monitor:monitor123@localhost:5432/server_monitor?sslmode=disable"),
-		JWTSecret:    getEnv("JWT_SECRET", "server-monitor-secret-change-me"),
-		ServerPort:   getEnv("SERVER_PORT", "8080"),
-		PollInterval: 30,
+	cfg := &Config{
+		DatabaseURL:   requireEnv("DATABASE_URL"),
+		JWTSecret:     requireEnv("JWT_SECRET"),
+		EncryptionKey: requireEnv("ENCRYPTION_KEY"),
+		ServerPort:    getEnv("SERVER_PORT", "8080"),
+		TLSCertFile:   os.Getenv("TLS_CERT_FILE"),
+		TLSKeyFile:    os.Getenv("TLS_KEY_FILE"),
+		CORSOrigin:    getEnv("CORS_ORIGIN", "http://localhost:5173"),
+		PollInterval:  30,
 	}
+	if len(cfg.EncryptionKey) != 32 {
+		panic("ENCRYPTION_KEY must be exactly 32 bytes")
+	}
+	return cfg
+}
+
+func requireEnv(key string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		panic("missing required environment variable: " + key)
+	}
+	return v
 }
 
 func getEnv(key, fallback string) string {

@@ -28,7 +28,7 @@ func (h *SSHHandler) Handle(c *gin.Context) {
 		return
 	}
 	db := c.MustGet("db").(*models.DB)
-	server, err := models.GetServerByIDAndUser(db.Raw, id, userID)
+	server, err := models.GetServerByIDAndUser(db, id, userID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
 		return
@@ -41,7 +41,7 @@ func (h *SSHHandler) Handle(c *gin.Context) {
 	}
 	defer conn.Close()
 
-	client, err := services.DialSSH(server.Host, server.Port, server.SSHUsername, server.SSHPassword, server.SSHKey)
+	client, err := services.DialSSH(server.Host, server.Port, server.SSHUsername, server.SSHPassword, server.SSHKey, server.SSHHostKey)
 	if err != nil {
 		conn.WriteMessage(websocket.TextMessage, []byte("SSH connection failed: "+err.Error()))
 		return

@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS servers (
     ssh_username VARCHAR(128) NOT NULL DEFAULT 'root',
     ssh_password TEXT DEFAULT '',
     ssh_key TEXT DEFAULT '',
+    ssh_host_key TEXT DEFAULT '',
     last_seen_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );

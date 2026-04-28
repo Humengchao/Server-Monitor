@@ -12,7 +12,9 @@
       "Bash(curl -s http://localhost:5173/src/App.tsx)",
       "Bash(curl -s http://localhost:5173/src/components/Layout.tsx)",
       "Bash(curl *)",
-      "Bash(go fmt *)"
+      "Bash(go fmt *)",
+      "Bash(git *)",
+      "Bash(python3 *)"
     ]
   }
 }
