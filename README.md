@@ -123,7 +123,7 @@ npm install && npm run dev
 ## TODO
 
 - [x] **CI/CD 集成** — GitHub Actions 自动 lint / build / test / deploy
-- [ ] **修改机器信息** — 已添加的服务器支持修改 host / port / SSH 凭据等配置
+- [x] **修改机器信息** — 已添加的服务器支持修改 host / port / SSH 凭据等配置
 - [ ] **登录历史** — 登录成功后右下角弹窗显示上次登录的 IP、时间和地理位置
 - [ ] **Docker 管理** — 机器详情页可查看 Docker 容器列表及状态
 - [ ] **SSH 密钥管理** — 独立管理 SSH 密钥（创建、命名、关联服务器），避免重复粘贴
