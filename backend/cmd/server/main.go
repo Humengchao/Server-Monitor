@@ -30,10 +30,6 @@ func main() {
 	}
 	defer db.Close()
 
-	if err := database.RunMigrations(db); err != nil {
-		log.Fatalf("Migration failed: %v", err)
-	}
-
 	// Start metrics collector
 	dbWrapper := &models.DB{Raw: db, EncryptionKey: cfg.EncryptionKey}
 	collector := services.NewCollector(dbWrapper, time.Duration(cfg.PollInterval)*time.Second)

@@ -2,13 +2,14 @@ package database
 
 import (
 	"database/sql"
+	_ "embed"
 	"fmt"
-	"os"
-	"path/filepath"
-	"runtime"
 
 	_ "github.com/lib/pq"
 )
+
+//go:embed migrations.sql
+var migrationsSQL string
 
 func Connect(databaseURL string) (*sql.DB, error) {
 	db, err := sql.Open("postgres", databaseURL)
@@ -22,13 +23,7 @@ func Connect(databaseURL string) (*sql.DB, error) {
 }
 
 func RunMigrations(db *sql.DB) error {
-	_, filename, _, _ := runtime.Caller(0)
-	migrationFile := filepath.Join(filepath.Dir(filename), "migrations.sql")
-	sqlBytes, err := os.ReadFile(migrationFile)
-	if err != nil {
-		return fmt.Errorf("read migrations: %w", err)
-	}
-	_, err = db.Exec(string(sqlBytes))
+	_, err := db.Exec(migrationsSQL)
 	if err != nil {
 		return fmt.Errorf("exec migrations: %w", err)
 	}
