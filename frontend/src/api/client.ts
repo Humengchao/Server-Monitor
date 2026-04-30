@@ -18,7 +18,7 @@ client.interceptors.request.use((config) => {
 client.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401) {
+    if (err.response?.status === 401 && !['/login', '/register'].includes(window.location.pathname)) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       window.location.href = '/login';
