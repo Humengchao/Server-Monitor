@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Typography, Descriptions, Tag, Space, Button, Card, Tabs, Spin, Modal, Form, Input, InputNumber, message } from 'antd';
-import { ArrowLeftOutlined, EditOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import { serversApi, Server } from '../api/servers';
 import { useMetrics } from '../hooks/useMetrics';
 import MetricsChart from '../components/MetricsChart';
@@ -61,6 +61,25 @@ export default function ServerDetail() {
     }
   };
 
+  const handleDelete = () => {
+    if (!server) return;
+    Modal.confirm({
+      title: 'Delete Server',
+      content: `Are you sure you want to delete "${server.name}"?`,
+      okText: 'Delete',
+      okType: 'danger',
+      onOk: async () => {
+        try {
+          await serversApi.delete(server.id);
+          message.success('Server deleted');
+          navigate('/dashboard');
+        } catch {
+          message.error('Failed to delete server');
+        }
+      },
+    });
+  };
+
   if (loading) return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}><Spin size="large" /></div>;
   if (!server) return <div>Server not found</div>;
 
@@ -74,7 +93,10 @@ export default function ServerDetail() {
             <Tag key={t.id} color={t.color}>{t.name}</Tag>
           ))}
         </Space>
-        <Button icon={<EditOutlined />} onClick={handleEdit}>Edit</Button>
+        <Space>
+          <Button icon={<EditOutlined />} onClick={handleEdit}>Edit</Button>
+          <Button danger icon={<DeleteOutlined />} onClick={handleDelete}>Delete</Button>
+        </Space>
       </div>
 
       <Descriptions bordered size="small" column={2} style={{ marginBottom: 24 }}>
