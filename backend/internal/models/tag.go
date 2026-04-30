@@ -50,21 +50,23 @@ type MetricPoint struct {
 	MemoryTotal    int64     `json:"memory_total"`
 	NetworkRxBytes int64     `json:"network_rx_bytes"`
 	NetworkTxBytes int64     `json:"network_tx_bytes"`
+	DiskRxBytes    int64     `json:"disk_rx_bytes"`
+	DiskTxBytes    int64     `json:"disk_tx_bytes"`
 	UptimeSeconds  int64     `json:"uptime_seconds"`
 	RecordedAt     time.Time `json:"recorded_at"`
 }
 
 func InsertMetric(db *sql.DB, serverID uuid.UUID, m *MetricPoint) error {
 	_, err := db.Exec(
-		`INSERT INTO server_metrics (server_id, cpu_percent, memory_used, memory_total, network_rx_bytes, network_tx_bytes, uptime_seconds)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-		serverID, m.CPUPercent, m.MemoryUsed, m.MemoryTotal, m.NetworkRxBytes, m.NetworkTxBytes, m.UptimeSeconds)
+		`INSERT INTO server_metrics (server_id, cpu_percent, memory_used, memory_total, network_rx_bytes, network_tx_bytes, disk_rx_bytes, disk_tx_bytes, uptime_seconds)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		serverID, m.CPUPercent, m.MemoryUsed, m.MemoryTotal, m.NetworkRxBytes, m.NetworkTxBytes, m.DiskRxBytes, m.DiskTxBytes, m.UptimeSeconds)
 	return err
 }
 
 func GetMetrics(db *sql.DB, serverID uuid.UUID, since time.Time) ([]MetricPoint, error) {
 	rows, err := db.Query(
-		`SELECT cpu_percent, memory_used, memory_total, network_rx_bytes, network_tx_bytes, uptime_seconds, recorded_at
+		`SELECT cpu_percent, memory_used, memory_total, network_rx_bytes, network_tx_bytes, disk_rx_bytes, disk_tx_bytes, uptime_seconds, recorded_at
 		 FROM server_metrics WHERE server_id=$1 AND recorded_at >= $2 ORDER BY recorded_at ASC`, serverID, since)
 	if err != nil {
 		return nil, err
@@ -74,7 +76,7 @@ func GetMetrics(db *sql.DB, serverID uuid.UUID, since time.Time) ([]MetricPoint,
 	for rows.Next() {
 		var m MetricPoint
 		if err := rows.Scan(&m.CPUPercent, &m.MemoryUsed, &m.MemoryTotal,
-			&m.NetworkRxBytes, &m.NetworkTxBytes, &m.UptimeSeconds, &m.RecordedAt); err != nil {
+			&m.NetworkRxBytes, &m.NetworkTxBytes, &m.DiskRxBytes, &m.DiskTxBytes, &m.UptimeSeconds, &m.RecordedAt); err != nil {
 			return nil, err
 		}
 		points = append(points, m)
@@ -85,9 +87,9 @@ func GetMetrics(db *sql.DB, serverID uuid.UUID, since time.Time) ([]MetricPoint,
 func GetLatestMetric(db *sql.DB, serverID uuid.UUID) (*MetricPoint, error) {
 	m := &MetricPoint{}
 	err := db.QueryRow(
-		`SELECT cpu_percent, memory_used, memory_total, network_rx_bytes, network_tx_bytes, uptime_seconds, recorded_at
+		`SELECT cpu_percent, memory_used, memory_total, network_rx_bytes, network_tx_bytes, disk_rx_bytes, disk_tx_bytes, uptime_seconds, recorded_at
 		 FROM server_metrics WHERE server_id=$1 ORDER BY recorded_at DESC LIMIT 1`, serverID,
-	).Scan(&m.CPUPercent, &m.MemoryUsed, &m.MemoryTotal, &m.NetworkRxBytes, &m.NetworkTxBytes, &m.UptimeSeconds, &m.RecordedAt)
+	).Scan(&m.CPUPercent, &m.MemoryUsed, &m.MemoryTotal, &m.NetworkRxBytes, &m.NetworkTxBytes, &m.DiskRxBytes, &m.DiskTxBytes, &m.UptimeSeconds, &m.RecordedAt)
 	if err != nil {
 		return nil, err
 	}

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { serversApi, MetricPoint } from '../api/servers';
 
-export function useMetrics(serverId: string, interval = 10000) {
+export function useMetrics(serverId: string, interval = 3000) {
   const [metrics, setMetrics] = useState<MetricPoint | null>(null);
   const [history, setHistory] = useState<MetricPoint[]>([]);
   const [loading, setLoading] = useState(true);

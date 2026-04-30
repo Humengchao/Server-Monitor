@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   Row, Col, Button, Modal, Form, Input, InputNumber, Select, message, Typography, Space
 } from 'antd';
@@ -17,20 +17,22 @@ export default function Dashboard() {
   const [form] = Form.useForm();
   const [tagValues, setTagValues] = useState<string[]>([]);
 
-  const loadServers = async () => {
-    setLoading(true);
+  const loadServers = useCallback(async (showLoading = true) => {
+    if (showLoading) setLoading(true);
     try {
       const res = await serversApi.list();
       setServers(res.data || []);
     } catch {
-      message.error('Failed to load servers');
+      if (showLoading) message.error('Failed to load servers');
     }
-    setLoading(false);
-  };
+    if (showLoading) setLoading(false);
+  }, []);
 
   useEffect(() => {
     loadServers();
-  }, []);
+    const timer = setInterval(() => loadServers(false), 3000);
+    return () => clearInterval(timer);
+  }, [loadServers]);
 
   const handleSubmit = async (values: any) => {
     try {

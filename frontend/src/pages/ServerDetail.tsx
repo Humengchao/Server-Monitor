@@ -18,7 +18,7 @@ export default function ServerDetail() {
   const [modalOpen, setModalOpen] = useState(false);
   const [form] = Form.useForm();
   const [tagValues, setTagValues] = useState<string[]>([]);
-  const { metrics, history, loading: metricsLoading } = useMetrics(id!, 10000);
+  const { metrics, history, loading: metricsLoading } = useMetrics(id!);
 
   const loadServer = async () => {
     try {

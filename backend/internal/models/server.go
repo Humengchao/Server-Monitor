@@ -20,6 +20,9 @@ type Server struct {
 	SSHPassword   string         `json:"-"`
 	SSHKey        string         `json:"-"`
 	SSHHostKey    string         `json:"ssh_host_key,omitempty"`
+	CPUCores      int            `json:"cpu_cores"`
+	MemoryTotal   int64          `json:"memory_total"`
+	DiskTotal     int64          `json:"disk_total"`
 	LastSeenAt    *time.Time     `json:"last_seen_at"`
 	CreatedAt     time.Time      `json:"created_at"`
 	Tags          []Tag          `json:"tags,omitempty"`
@@ -32,6 +35,8 @@ type LatestMetrics struct {
 	MemoryTotal    int64     `json:"memory_total"`
 	NetworkRxBytes int64     `json:"network_rx_bytes"`
 	NetworkTxBytes int64     `json:"network_tx_bytes"`
+	DiskRxBytes    int64     `json:"disk_rx_bytes"`
+	DiskTxBytes    int64     `json:"disk_tx_bytes"`
 	RecordedAt     time.Time `json:"recorded_at"`
 }
 
@@ -56,8 +61,11 @@ func GetServersByUserID(db *sql.DB, userID uuid.UUID) ([]Server, error) {
 	rows, err := db.Query(
 		`SELECT s.id, s.user_id, s.name, s.host, s.port, s.ssh_username, s.last_seen_at, s.created_at,
 		 COALESCE(s.ssh_host_key, ''),
+		 COALESCE(s.cpu_cores, 0), COALESCE(s.memory_total_bytes, 0), COALESCE(s.disk_total_bytes, 0),
 		 COALESCE(sm.cpu_percent, 0), COALESCE(sm.memory_used, 0), COALESCE(sm.memory_total, 0),
-		 COALESCE(sm.network_rx_bytes, 0), COALESCE(sm.network_tx_bytes, 0), sm.recorded_at
+		 COALESCE(sm.network_rx_bytes, 0), COALESCE(sm.network_tx_bytes, 0),
+		 COALESCE(sm.disk_rx_bytes, 0), COALESCE(sm.disk_tx_bytes, 0),
+		 sm.recorded_at
 		 FROM servers s
 		 LEFT JOIN LATERAL (
 			 SELECT * FROM server_metrics WHERE server_id = s.id ORDER BY recorded_at DESC LIMIT 1
@@ -76,8 +84,10 @@ func GetServersByUserID(db *sql.DB, userID uuid.UUID) ([]Server, error) {
 		var recordedAt sql.NullTime
 		if err := rows.Scan(&s.ID, &s.UserID, &s.Name, &s.Host, &s.Port,
 			&s.SSHUsername, &s.LastSeenAt, &s.CreatedAt, &s.SSHHostKey,
+			&s.CPUCores, &s.MemoryTotal, &s.DiskTotal,
 			&m.CPUPercent, &m.MemoryUsed, &m.MemoryTotal,
-			&m.NetworkRxBytes, &m.NetworkTxBytes, &recordedAt); err != nil {
+			&m.NetworkRxBytes, &m.NetworkTxBytes,
+			&m.DiskRxBytes, &m.DiskTxBytes, &recordedAt); err != nil {
 			return nil, err
 		}
 		if recordedAt.Valid {
@@ -124,6 +134,13 @@ func UpdateServer(db *DB, s *Server) error {
 		`UPDATE servers SET name=$1, host=$2, port=$3, ssh_username=$4, ssh_password=$5, ssh_key=$6, ssh_host_key=$7
 		 WHERE id=$8 AND user_id=$9`,
 		s.Name, s.Host, s.Port, s.SSHUsername, encPassword, encKey, s.SSHHostKey, s.ID, s.UserID)
+	return err
+}
+
+func UpdateServerSystemInfo(db *sql.DB, id uuid.UUID, cpuCores int, memTotal, diskTotal int64) error {
+	_, err := db.Exec(
+		`UPDATE servers SET cpu_cores=$1, memory_total_bytes=$2, disk_total_bytes=$3 WHERE id=$4`,
+		cpuCores, memTotal, diskTotal, id)
 	return err
 }
 

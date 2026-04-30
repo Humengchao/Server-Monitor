@@ -16,21 +16,23 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-type prevNet struct {
-	rxBytes int64
-	txBytes int64
-	time    time.Time
+type prevStats struct {
+	netRx  int64
+	netTx  int64
+	diskRx int64
+	diskTx int64
+	time   time.Time
 }
 
 type Collector struct {
 	db       *models.DB
 	interval time.Duration
 	mu       sync.Mutex
-	prev     map[uuid.UUID]*prevNet
+	prev     map[uuid.UUID]*prevStats
 }
 
 func NewCollector(db *models.DB, interval time.Duration) *Collector {
-	return &Collector{db: db, interval: interval, prev: make(map[uuid.UUID]*prevNet)}
+	return &Collector{db: db, interval: interval, prev: make(map[uuid.UUID]*prevStats)}
 }
 
 func (c *Collector) Start() {
@@ -102,21 +104,31 @@ func (c *Collector) collectOne(s *models.Server) (*models.MetricPoint, error) {
 	m.MemoryUsed, m.MemoryTotal = collectMemory(client)
 
 	// Network from /proc/net/dev (cumulative counters -> bytes/sec)
-	rxRaw, txRaw := collectNetwork(client)
+	netRxRaw, netTxRaw := collectNetwork(client)
+	// Disk I/O from /proc/diskstats (cumulative counters -> bytes/sec)
+	diskRxRaw, diskTxRaw := collectDiskIO(client)
 	now := m.RecordedAt
 	c.mu.Lock()
-	if prev, ok := c.prev[s.ID]; ok && prev.rxBytes <= rxRaw && prev.txBytes <= txRaw {
+	if prev, ok := c.prev[s.ID]; ok && prev.netRx <= netRxRaw && prev.netTx <= netTxRaw {
 		elapsed := now.Sub(prev.time).Seconds()
 		if elapsed > 0 {
-			m.NetworkRxBytes = int64(float64(rxRaw-prev.rxBytes) / elapsed)
-			m.NetworkTxBytes = int64(float64(txRaw-prev.txBytes) / elapsed)
+			m.NetworkRxBytes = int64(float64(netRxRaw-prev.netRx) / elapsed)
+			m.NetworkTxBytes = int64(float64(netTxRaw-prev.netTx) / elapsed)
+			m.DiskRxBytes = int64(float64(diskRxRaw-prev.diskRx) / elapsed)
+			m.DiskTxBytes = int64(float64(diskTxRaw-prev.diskTx) / elapsed)
 		}
 	}
-	c.prev[s.ID] = &prevNet{rxBytes: rxRaw, txBytes: txRaw, time: now}
+	c.prev[s.ID] = &prevStats{netRx: netRxRaw, netTx: netTxRaw, diskRx: diskRxRaw, diskTx: diskTxRaw, time: now}
 	c.mu.Unlock()
 
 	// Uptime
 	m.UptimeSeconds = collectUptime(client)
+
+	// Collect and update system info (cores, memory total, disk total)
+	cpuCores, memTotal, diskTotal := collectSystemInfo(client)
+	if cpuCores > 0 {
+		models.UpdateServerSystemInfo(c.db.Raw, s.ID, cpuCores, memTotal, diskTotal)
+	}
 
 	return m, nil
 }
@@ -217,4 +229,73 @@ func collectUptime(client *ssh.Client) int64 {
 		return int64(sec)
 	}
 	return 0
+}
+
+// collectDiskIO reads /proc/diskstats and returns cumulative bytes read/written for all disks.
+// Fields: major minor name reads_completed reads_merged sectors_read time_reading writes_completed writes_merged sectors_written time_writing ...
+// Sector size is 512 bytes. We sum sda/sdb/vda/nvme* etc, skip partitions (numbered).
+func collectDiskIO(client *ssh.Client) (int64, int64) {
+	out, err := runCmd(client, "cat /proc/diskstats")
+	if err != nil {
+		return 0, 0
+	}
+	var readSectors, writeSectors int64
+	lines := strings.Split(out, "\n")
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) < 14 {
+			continue
+		}
+		name := fields[2]
+		// Only count whole disks, not partitions
+		if !(strings.HasPrefix(name, "sd") || strings.HasPrefix(name, "vd") || strings.HasPrefix(name, "nvme")) {
+			continue
+		}
+		// Skip partitions (e.g., sda1, vda1, nvme0n1p1)
+		last := name[len(name)-1]
+		if last >= '0' && last <= '9' && !strings.Contains(name, "nvme") {
+			// For sd/vd: ends with digit = partition, skip
+			continue
+		}
+		if strings.Contains(name, "p") && strings.Contains(name, "nvme") {
+			// nvme partition like nvme0n1p1
+			continue
+		}
+		sectorsRead, _ := strconv.ParseInt(fields[5], 10, 64)
+		sectorsWritten, _ := strconv.ParseInt(fields[9], 10, 64)
+		readSectors += sectorsRead
+		writeSectors += sectorsWritten
+	}
+	// 1 sector = 512 bytes
+	return readSectors * 512, writeSectors * 512
+}
+
+// collectSystemInfo returns cpu cores, total memory bytes, total disk bytes.
+func collectSystemInfo(client *ssh.Client) (int, int64, int64) {
+	// CPU cores
+	out, _ := runCmd(client, "nproc")
+	cores, _ := strconv.Atoi(strings.TrimSpace(out))
+
+	// Memory total from /proc/meminfo
+	out, _ = runCmd(client, "cat /proc/meminfo")
+	var memTotalKB int64
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "MemTotal:") {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 {
+				memTotalKB, _ = strconv.ParseInt(fields[1], 10, 64)
+			}
+			break
+		}
+	}
+
+	// Disk total from df (root filesystem)
+	out, _ = runCmd(client, "df -B1 / | tail -1")
+	var diskTotal int64
+	fields := strings.Fields(strings.TrimSpace(out))
+	if len(fields) >= 2 {
+		diskTotal, _ = strconv.ParseInt(fields[1], 10, 64)
+	}
+
+	return cores, memTotalKB * 1024, diskTotal
 }

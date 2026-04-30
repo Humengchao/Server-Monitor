@@ -47,3 +47,12 @@ CREATE TABLE IF NOT EXISTS server_metrics (
 
 CREATE INDEX IF NOT EXISTS idx_metrics_server_time ON server_metrics(server_id, recorded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_servers_user ON servers(user_id);
+
+-- Add system info columns to servers
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS cpu_cores INT DEFAULT 0;
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS memory_total_bytes BIGINT DEFAULT 0;
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS disk_total_bytes BIGINT DEFAULT 0;
+
+-- Add disk I/O columns to server_metrics
+ALTER TABLE server_metrics ADD COLUMN IF NOT EXISTS disk_rx_bytes BIGINT DEFAULT 0;
+ALTER TABLE server_metrics ADD COLUMN IF NOT EXISTS disk_tx_bytes BIGINT DEFAULT 0;

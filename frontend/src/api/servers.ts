@@ -8,6 +8,9 @@ export interface Server {
   port: number;
   ssh_username: string;
   ssh_host_key?: string;
+  cpu_cores: number;
+  memory_total: number;
+  disk_total: number;
   last_seen_at: string | null;
   created_at: string;
   tags: Tag[];
@@ -20,6 +23,8 @@ export interface LatestMetrics {
   memory_total: number;
   network_rx_bytes: number;
   network_tx_bytes: number;
+  disk_rx_bytes: number;
+  disk_tx_bytes: number;
   recorded_at: string;
 }
 
@@ -36,6 +41,8 @@ export interface MetricPoint {
   memory_total: number;
   network_rx_bytes: number;
   network_tx_bytes: number;
+  disk_rx_bytes: number;
+  disk_tx_bytes: number;
   uptime_seconds: number;
   recorded_at: string;
 }

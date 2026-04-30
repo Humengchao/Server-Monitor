@@ -1,8 +1,7 @@
 import React from 'react';
-import { Card, Tag, Progress, Row, Col, Typography, Space } from 'antd';
+import { Card, Tag, Progress, Typography, Space } from 'antd';
 import {
   CloudServerOutlined,
-  ClockCircleOutlined,
   ArrowUpOutlined,
   ArrowDownOutlined,
 } from '@ant-design/icons';
@@ -19,14 +18,15 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
+function formatGB(bytes: number): string {
+  if (!bytes) return '0 GB';
+  return (bytes / 1024 / 1024 / 1024).toFixed(0) + ' GB';
+}
+
 function formatUptime(seconds: number): string {
   if (!seconds) return '-';
   const d = Math.floor(seconds / 86400);
-  const h = Math.floor((seconds % 86400) / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  if (d > 0) return `${d}d ${h}h`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
+  return d > 0 ? `${d}d` : `${Math.floor(seconds / 3600)}h`;
 }
 
 interface Props {
@@ -36,6 +36,14 @@ interface Props {
 export default function ServerCard({ server }: Props) {
   const navigate = useNavigate();
   const m = server.latest_metrics;
+  const cpuPercent = m ? Math.round(m.cpu_percent) : 0;
+  const memPercent = m && m.memory_total ? Math.round((m.memory_used / m.memory_total) * 100) : 0;
+
+  const specs = [];
+  if (server.cpu_cores > 0) specs.push(`${server.cpu_cores} Core`);
+  if (server.memory_total > 0) specs.push(formatGB(server.memory_total));
+  if (server.disk_total > 0) specs.push(formatGB(server.disk_total));
+  if (m) specs.push(formatUptime(m.uptime_seconds));
 
   return (
     <Card
@@ -48,52 +56,66 @@ export default function ServerCard({ server }: Props) {
           <span>{server.name}</span>
         </Space>
       }
-      extra={
-        <Text type="secondary" copyable={{ text: server.host }}>
-          {server.host}:{server.port}
-        </Text>
-      }
     >
-      <Row gutter={[16, 16]}>
-        {server.tags?.map((tag) => (
-          <Tag key={tag.id} color={tag.color}>
-            {tag.name}
-          </Tag>
-        ))}
-      </Row>
+      {server.tags?.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          {server.tags.map((tag) => (
+            <Tag key={tag.id} color={tag.color}>
+              {tag.name}
+            </Tag>
+          ))}
+        </div>
+      )}
+
+      {specs.length > 0 && (
+        <div style={{ marginBottom: 12, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          {specs.map((s, i) => (
+            <Text key={i} type="secondary" style={{ fontSize: 12 }}>{s}</Text>
+          ))}
+        </div>
+      )}
 
       {m && (
-        <Row gutter={[16, 16]} style={{ marginTop: 12 }}>
-          <Col span={12}>
-            <Text type="secondary">CPU</Text>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ textAlign: 'center', flex: 1 }}>
             <Progress
-              percent={Math.round(m.cpu_percent)}
-              size="small"
-              strokeColor={m.cpu_percent > 80 ? '#ff4d4f' : '#52c41a'}
+              type="circle"
+              percent={cpuPercent}
+              size={64}
+              strokeColor={cpuPercent > 80 ? '#ff4d4f' : '#52c41a'}
             />
-          </Col>
-          <Col span={12}>
-            <Text type="secondary">Memory</Text>
+            <div style={{ marginTop: 2 }}><Text type="secondary" style={{ fontSize: 11 }}>CPU</Text></div>
+          </div>
+          <div style={{ textAlign: 'center', flex: 1 }}>
             <Progress
-              percent={Math.round((m.memory_used / m.memory_total) * 100) || 0}
-              size="small"
+              type="circle"
+              percent={memPercent}
+              size={64}
               strokeColor="#1890ff"
-              format={() => `${formatBytes(m.memory_used)} / ${formatBytes(m.memory_total)}`}
             />
-          </Col>
-          <Col span={12}>
-            <Space>
-              <ArrowDownOutlined style={{ color: '#52c41a' }} />
-              <Text>{formatBytes(m.network_rx_bytes)}/s</Text>
+            <div style={{ marginTop: 2 }}><Text type="secondary" style={{ fontSize: 11 }}>Memory</Text></div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, alignItems: 'center' }}>
+            <Space size={4}>
+              <ArrowDownOutlined style={{ color: '#52c41a', fontSize: 12 }} />
+              <Text type="secondary" style={{ fontSize: 12 }}>{formatBytes(m.network_rx_bytes)}/s</Text>
             </Space>
-          </Col>
-          <Col span={12}>
-            <Space>
-              <ArrowUpOutlined style={{ color: '#1890ff' }} />
-              <Text>{formatBytes(m.network_tx_bytes)}/s</Text>
+            <Space size={4}>
+              <ArrowUpOutlined style={{ color: '#1890ff', fontSize: 12 }} />
+              <Text type="secondary" style={{ fontSize: 12 }}>{formatBytes(m.network_tx_bytes)}/s</Text>
             </Space>
-          </Col>
-        </Row>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, alignItems: 'center' }}>
+            <Space size={4}>
+              <ArrowDownOutlined style={{ color: '#722ed1', fontSize: 12 }} />
+              <Text type="secondary" style={{ fontSize: 12 }}>{formatBytes(m.disk_rx_bytes)}/s</Text>
+            </Space>
+            <Space size={4}>
+              <ArrowUpOutlined style={{ color: '#eb2f96', fontSize: 12 }} />
+              <Text type="secondary" style={{ fontSize: 12 }}>{formatBytes(m.disk_tx_bytes)}/s</Text>
+            </Space>
+          </div>
+        </div>
       )}
     </Card>
   );

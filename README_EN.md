@@ -130,5 +130,5 @@ Add the following secrets in **Settings -> Secrets and variables -> actions**:
 - [ ] **Account Settings** -- Allow users to change passwords and manage account security
 - [ ] **Server Groups** -- Create server groups, filter and batch-operate by group
 - [ ] **Process List** -- Show current processes on detail page, sortable by CPU / Memory / Name / PID
-- [ ] **Disk Usage** -- Show current disk usage on detail page
+- [x] **Disk Usage** -- Show current disk usage on detail page
 - [ ] **Alert Notifications** -- Push notifications via email or Bark when a server goes offline or CPU exceeds 80%
