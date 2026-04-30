@@ -120,7 +120,7 @@ export default function Dashboard() {
               ))}
             </Select>
           )}
-          <Button icon={<ReloadOutlined />} onClick={loadServers}>Refresh</Button>
+          <Button icon={<ReloadOutlined />} onClick={() => loadServers()}>Refresh</Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={() => {
             setEditingServer(null);
             form.resetFields();
