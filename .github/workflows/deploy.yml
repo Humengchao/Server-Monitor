@@ -61,4 +61,23 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           password: ${{ secrets.DEPLOY_PASSWORD }}
           script: |
-            [ -d /opt/server-monitor ] || git clone https://github.com/${{ github.repository }}.git /opt/server-monitor && cd /opt/server-monitor && git pull origin main && export http_proxy=http://127.0.0.1:7890 && export https_proxy=http://127.0.0.1:7890 && IMAGE_PREFIX=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]') && printf "POSTGRES_HOST=${{ secrets.POSTGRES_HOST }}\nPOSTGRES_PORT=${{ secrets.POSTGRES_PORT }}\nPOSTGRES_USER=${{ secrets.POSTGRES_USER }}\nPOSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}\nPOSTGRES_DB=${{ secrets.POSTGRES_DB }}\nJWT_SECRET=${{ secrets.JWT_SECRET }}\nENCRYPTION_KEY=${{ secrets.ENCRYPTION_KEY }}\nDOMAIN=${{ secrets.DOMAIN }}\nBACKEND_IMAGE=ghcr.io/${IMAGE_PREFIX}/backend:latest\nFRONTEND_IMAGE=ghcr.io/${IMAGE_PREFIX}/frontend:latest\n" > .env && docker compose pull && docker compose up -d --remove-orphans
+            # 1. 强制设置 Git 全局代理 (直接指定 sing-box 的本地端口)
+            git config --global http.proxy http://127.0.0.1:7890
+            git config --global https.proxy http://127.0.0.1:7890
+            
+            # 2. 检查目录是否存在，不存在则 clone，存在则 pull
+            if [ ! -d "/opt/server-monitor" ]; then
+              git clone https://github.com/${{ github.repository }}.git /opt/server-monitor
+            fi
+            
+            # 3. 进入目录并拉取最新代码
+            cd /opt/server-monitor
+            git pull origin main
+            
+            # 4. 生成 .env 文件
+            IMAGE_PREFIX=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')
+            printf "POSTGRES_HOST=${{ secrets.POSTGRES_HOST }}\nPOSTGRES_PORT=${{ secrets.POSTGRES_PORT }}\nPOSTGRES_USER=${{ secrets.POSTGRES_USER }}\nPOSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}\nPOSTGRES_DB=${{ secrets.POSTGRES_DB }}\nJWT_SECRET=${{ secrets.JWT_SECRET }}\nENCRYPTION_KEY=${{ secrets.ENCRYPTION_KEY }}\nDOMAIN=${{ secrets.DOMAIN }}\nBACKEND_IMAGE=ghcr.io/${IMAGE_PREFIX}/backend:latest\nFRONTEND_IMAGE=ghcr.io/${IMAGE_PREFIX}/frontend:latest\n" > .env
+            
+            # 5. 拉取镜像并重启容器 (前提是你上一步已经按照教程配置了 Docker 的 systemd 代理)
+            docker compose pull
+            docker compose up -d --remove-orphans
