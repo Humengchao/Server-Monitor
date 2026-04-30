@@ -1,15 +1,23 @@
 version: "3.9"
 services:
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: server_monitor
-      POSTGRES_USER: monitor
-      POSTGRES_PASSWORD: monitor123
+  backend:
+    build: ./backend
     ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
+      - "19527:19527"
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-monitor}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-server_monitor}?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      SERVER_PORT: "19527"
+      CORS_ORIGIN: http://${DOMAIN:-localhost:19080}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
-volumes:
-  pgdata:
+  frontend:
+    build: ./frontend
+    ports:
+      - "19080:80"
+    environment:
+      - DOMAIN=${DOMAIN}
+    depends_on:
+      - backend
