@@ -60,18 +60,6 @@ jobs:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           password: ${{ secrets.DEPLOY_PASSWORD }}
+          script_stop: true
           script: |
-            cd /opt/server-monitor
-            git pull origin main
-            {
-              echo "POSTGRES_HOST=${{ secrets.POSTGRES_HOST }}"
-              echo "POSTGRES_PORT=${{ secrets.POSTGRES_PORT }}"
-              echo "POSTGRES_USER=${{ secrets.POSTGRES_USER }}"
-              echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}"
-              echo "POSTGRES_DB=${{ secrets.POSTGRES_DB }}"
-              echo "JWT_SECRET=${{ secrets.JWT_SECRET }}"
-              echo "ENCRYPTION_KEY=${{ secrets.ENCRYPTION_KEY }}"
-              echo "DOMAIN=${{ secrets.DOMAIN }}"
-            } > .env
-            docker compose pull
-            docker compose up -d --remove-orphans
+            [ -d /opt/server-monitor ] || git clone https://github.com/${{ github.repository }}.git /opt/server-monitor && cd /opt/server-monitor && git pull origin main && printf 'POSTGRES_HOST=${{ secrets.POSTGRES_HOST }}\nPOSTGRES_PORT=${{ secrets.POSTGRES_PORT }}\nPOSTGRES_USER=${{ secrets.POSTGRES_USER }}\nPOSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}\nPOSTGRES_DB=${{ secrets.POSTGRES_DB }}\nJWT_SECRET=${{ secrets.JWT_SECRET }}\nENCRYPTION_KEY=${{ secrets.ENCRYPTION_KEY }}\nDOMAIN=${{ secrets.DOMAIN }}\n' > .env && docker compose pull && docker compose up -d --remove-orphans
