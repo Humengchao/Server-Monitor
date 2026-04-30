@@ -25,6 +25,7 @@ export interface LatestMetrics {
   network_tx_bytes: number;
   disk_rx_bytes: number;
   disk_tx_bytes: number;
+  uptime_seconds: number;
   recorded_at: string;
 }
 

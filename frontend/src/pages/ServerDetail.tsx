@@ -61,7 +61,7 @@ export default function ServerDetail() {
     }
   };
 
-  if (loading) return <Spin size="large" style={{ display: 'block', margin: '100px auto' }} />;
+  if (loading) return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}><Spin size="large" /></div>;
   if (!server) return <div>Server not found</div>;
 
   return (
@@ -137,7 +137,7 @@ export default function ServerDetail() {
             <Input.Password placeholder="Leave blank to keep unchanged" />
           </Form.Item>
           <Form.Item name="ssh_key" label="SSH Private Key">
-            <Input.TextArea rows={4} placeholder="Paste private key content" />
+            <Input.TextArea rows={4} placeholder="Leave blank to keep unchanged" />
           </Form.Item>
           <Form.Item name="ssh_host_key" label="SSH Host Key (optional)">
             <Input.TextArea rows={2} placeholder="Paste server public key for host verification" />

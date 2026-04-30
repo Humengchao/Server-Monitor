@@ -37,6 +37,7 @@ type LatestMetrics struct {
 	NetworkTxBytes int64     `json:"network_tx_bytes"`
 	DiskRxBytes    int64     `json:"disk_rx_bytes"`
 	DiskTxBytes    int64     `json:"disk_tx_bytes"`
+	UptimeSeconds  int64     `json:"uptime_seconds"`
 	RecordedAt     time.Time `json:"recorded_at"`
 }
 
@@ -65,7 +66,7 @@ func GetServersByUserID(db *sql.DB, userID uuid.UUID) ([]Server, error) {
 		 COALESCE(sm.cpu_percent, 0), COALESCE(sm.memory_used, 0), COALESCE(sm.memory_total, 0),
 		 COALESCE(sm.network_rx_bytes, 0), COALESCE(sm.network_tx_bytes, 0),
 		 COALESCE(sm.disk_rx_bytes, 0), COALESCE(sm.disk_tx_bytes, 0),
-		 sm.recorded_at
+		 COALESCE(sm.uptime_seconds, 0), sm.recorded_at
 		 FROM servers s
 		 LEFT JOIN LATERAL (
 			 SELECT * FROM server_metrics WHERE server_id = s.id ORDER BY recorded_at DESC LIMIT 1
@@ -87,7 +88,7 @@ func GetServersByUserID(db *sql.DB, userID uuid.UUID) ([]Server, error) {
 			&s.CPUCores, &s.MemoryTotal, &s.DiskTotal,
 			&m.CPUPercent, &m.MemoryUsed, &m.MemoryTotal,
 			&m.NetworkRxBytes, &m.NetworkTxBytes,
-			&m.DiskRxBytes, &m.DiskTxBytes, &recordedAt); err != nil {
+			&m.DiskRxBytes, &m.DiskTxBytes, &m.UptimeSeconds, &recordedAt); err != nil {
 			return nil, err
 		}
 		if recordedAt.Valid {
@@ -122,19 +123,34 @@ func GetServerByIDAndUser(db *DB, id, userID uuid.UUID) (*Server, error) {
 }
 
 func UpdateServer(db *DB, s *Server) error {
-	encPassword, err := crypto.Encrypt(s.SSHPassword, db.EncryptionKey)
+	_, err := db.Raw.Exec(
+		`UPDATE servers SET name=$1, host=$2, port=$3, ssh_username=$4, ssh_host_key=$5
+		 WHERE id=$6 AND user_id=$7`,
+		s.Name, s.Host, s.Port, s.SSHUsername, s.SSHHostKey, s.ID, s.UserID)
 	if err != nil {
 		return err
 	}
-	encKey, err := crypto.Encrypt(s.SSHKey, db.EncryptionKey)
-	if err != nil {
-		return err
+	if s.SSHPassword != "" {
+		enc, err := crypto.Encrypt(s.SSHPassword, db.EncryptionKey)
+		if err != nil {
+			return err
+		}
+		_, err = db.Raw.Exec(`UPDATE servers SET ssh_password=$1 WHERE id=$2`, enc, s.ID)
+		if err != nil {
+			return err
+		}
 	}
-	_, err = db.Raw.Exec(
-		`UPDATE servers SET name=$1, host=$2, port=$3, ssh_username=$4, ssh_password=$5, ssh_key=$6, ssh_host_key=$7
-		 WHERE id=$8 AND user_id=$9`,
-		s.Name, s.Host, s.Port, s.SSHUsername, encPassword, encKey, s.SSHHostKey, s.ID, s.UserID)
-	return err
+	if s.SSHKey != "" {
+		enc, err := crypto.Encrypt(s.SSHKey, db.EncryptionKey)
+		if err != nil {
+			return err
+		}
+		_, err = db.Raw.Exec(`UPDATE servers SET ssh_key=$1 WHERE id=$2`, enc, s.ID)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func UpdateServerSystemInfo(db *sql.DB, id uuid.UUID, cpuCores int, memTotal, diskTotal int64) error {

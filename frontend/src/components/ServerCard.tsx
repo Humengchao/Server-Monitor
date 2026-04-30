@@ -1,9 +1,13 @@
 import React from 'react';
-import { Card, Tag, Progress, Typography, Space } from 'antd';
+import { Card, Tag, Progress, Typography, Space, Divider } from 'antd';
 import {
   CloudServerOutlined,
   ArrowUpOutlined,
   ArrowDownOutlined,
+  DashboardOutlined,
+  DatabaseOutlined,
+  HddOutlined,
+  ClockCircleOutlined,
 } from '@ant-design/icons';
 import { Server } from '../api/servers';
 import { useNavigate } from 'react-router-dom';
@@ -20,13 +24,13 @@ function formatBytes(bytes: number): string {
 
 function formatGB(bytes: number): string {
   if (!bytes) return '0 GB';
-  return (bytes / 1024 / 1024 / 1024).toFixed(0) + ' GB';
+  return (bytes / 1024 / 1024 / 1024).toFixed(1) + ' GB';
 }
 
 function formatUptime(seconds: number): string {
-  if (!seconds) return '-';
-  const d = Math.floor(seconds / 86400);
-  return d > 0 ? `${d}d` : `${Math.floor(seconds / 3600)}h`;
+  if (!seconds) return '0d';
+  const d = (seconds / 86400).toFixed(1);
+  return `${d}d`;
 }
 
 interface Props {
@@ -39,41 +43,39 @@ export default function ServerCard({ server }: Props) {
   const cpuPercent = m ? Math.round(m.cpu_percent) : 0;
   const memPercent = m && m.memory_total ? Math.round((m.memory_used / m.memory_total) * 100) : 0;
 
-  const specs = [];
-  if (server.cpu_cores > 0) specs.push(`${server.cpu_cores} Core`);
-  if (server.memory_total > 0) specs.push(formatGB(server.memory_total));
-  if (server.disk_total > 0) specs.push(formatGB(server.disk_total));
-  if (m) specs.push(formatUptime(m.uptime_seconds));
+  const isOnline = m?.recorded_at && (Date.now() - new Date(m.recorded_at).getTime()) < 120000;
 
   return (
     <Card
       hoverable
-      style={{ borderRadius: 12 }}
+      style={{ borderRadius: 12, minHeight: 240 }}
       onClick={() => navigate(`/servers/${server.id}`)}
       title={
-        <Space>
-          <CloudServerOutlined />
-          <span>{server.name}</span>
-        </Space>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Space>
+            <CloudServerOutlined />
+            <span>{server.name}</span>
+          </Space>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: isOnline ? '#52c41a' : '#ff4d4f', display: 'inline-block' }} />
+        </div>
       }
     >
-      {server.tags?.length > 0 && (
-        <div style={{ marginBottom: 8 }}>
-          {server.tags.map((tag) => (
-            <Tag key={tag.id} color={tag.color}>
-              {tag.name}
-            </Tag>
-          ))}
-        </div>
-      )}
+      <div style={{ marginBottom: 8, minHeight: 22, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {server.tags?.map((tag) => (
+          <Tag key={tag.id} color={tag.color}>
+            {tag.name}
+          </Tag>
+        ))}
+      </div>
 
-      {specs.length > 0 && (
-        <div style={{ marginBottom: 12, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-          {specs.map((s, i) => (
-            <Text key={i} type="secondary" style={{ fontSize: 12 }}>{s}</Text>
-          ))}
-        </div>
-      )}
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 8 }}>
+        <Space size={4}><DashboardOutlined style={{ color: '#8c8c8c' }} /><Text type="secondary" style={{ fontSize: 12 }}>{server.cpu_cores || 0} Core</Text></Space>
+        <Space size={4}><DatabaseOutlined style={{ color: '#8c8c8c' }} /><Text type="secondary" style={{ fontSize: 12 }}>{formatGB(server.memory_total)}</Text></Space>
+        <Space size={4}><HddOutlined style={{ color: '#8c8c8c' }} /><Text type="secondary" style={{ fontSize: 12 }}>{formatGB(server.disk_total)}</Text></Space>
+        <Space size={4}><ClockCircleOutlined style={{ color: '#8c8c8c' }} /><Text type="secondary" style={{ fontSize: 12 }}>{formatUptime(m?.uptime_seconds || 0)}</Text></Space>
+      </div>
+
+      <Divider style={{ margin: '8px 0' }} />
 
       {m && (
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -95,7 +97,8 @@ export default function ServerCard({ server }: Props) {
             />
             <div style={{ marginTop: 2 }}><Text type="secondary" style={{ fontSize: 11 }}>Memory</Text></div>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, alignItems: 'center' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, alignItems: 'center' }}>
+            <Text type="secondary" style={{ fontSize: 11, fontWeight: 500 }}>Network</Text>
             <Space size={4}>
               <ArrowDownOutlined style={{ color: '#52c41a', fontSize: 12 }} />
               <Text type="secondary" style={{ fontSize: 12 }}>{formatBytes(m.network_rx_bytes)}/s</Text>
@@ -105,7 +108,8 @@ export default function ServerCard({ server }: Props) {
               <Text type="secondary" style={{ fontSize: 12 }}>{formatBytes(m.network_tx_bytes)}/s</Text>
             </Space>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, alignItems: 'center' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, alignItems: 'center' }}>
+            <Text type="secondary" style={{ fontSize: 11, fontWeight: 500 }}>Disk</Text>
             <Space size={4}>
               <ArrowDownOutlined style={{ color: '#722ed1', fontSize: 12 }} />
               <Text type="secondary" style={{ fontSize: 12 }}>{formatBytes(m.disk_rx_bytes)}/s</Text>

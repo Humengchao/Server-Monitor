@@ -20,6 +20,7 @@ type CreateServerRequest struct {
 	SSHUsername string `json:"ssh_username" binding:"required"`
 	SSHPassword string `json:"ssh_password"`
 	SSHKey      string `json:"ssh_key"`
+	SSHHostKey  string `json:"ssh_host_key"`
 }
 
 type UpdateServerRequest struct {
@@ -29,6 +30,7 @@ type UpdateServerRequest struct {
 	SSHUsername string `json:"ssh_username" binding:"required"`
 	SSHPassword string `json:"ssh_password"`
 	SSHKey      string `json:"ssh_key"`
+	SSHHostKey  string `json:"ssh_host_key"`
 }
 
 func (h *ServerHandler) List(c *gin.Context) {
@@ -71,6 +73,7 @@ func (h *ServerHandler) Create(c *gin.Context) {
 		SSHUsername: req.SSHUsername,
 		SSHPassword: req.SSHPassword,
 		SSHKey:      req.SSHKey,
+		SSHHostKey:  req.SSHHostKey,
 	}
 	if err := models.CreateServer(db, s); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create server"})
@@ -104,6 +107,7 @@ func (h *ServerHandler) Update(c *gin.Context) {
 		SSHUsername: req.SSHUsername,
 		SSHPassword: req.SSHPassword,
 		SSHKey:      req.SSHKey,
+		SSHHostKey:  req.SSHHostKey,
 	}
 	if err := models.UpdateServer(db, s); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update server"})
