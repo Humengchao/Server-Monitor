@@ -1,7 +1,6 @@
-version: "3.9"
 services:
   backend:
-    build: ./backend
+    image: ${BACKEND_IMAGE}
     ports:
       - "19527:19527"
     environment:
@@ -14,7 +13,7 @@ services:
       - "host.docker.internal:host-gateway"
 
   frontend:
-    build: ./frontend
+    image: ${FRONTEND_IMAGE}
     ports:
       - "19080:80"
     environment:
