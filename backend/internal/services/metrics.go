@@ -42,6 +42,25 @@ func (c *Collector) Start() {
 			time.Sleep(c.interval)
 		}
 	}()
+	// Cleanup metrics older than 30 days every hour
+	go func() {
+		for {
+			time.Sleep(1 * time.Hour)
+			c.cleanupOldMetrics()
+		}
+	}()
+}
+
+func (c *Collector) cleanupOldMetrics() {
+	cutoff := time.Now().AddDate(0, 0, -30)
+	rows, err := models.DeleteOldMetrics(c.db.Raw, cutoff)
+	if err != nil {
+		log.Printf("collector: cleanup failed: %v", err)
+		return
+	}
+	if rows > 0 {
+		log.Printf("collector: cleaned up %d old metrics rows", rows)
+	}
 }
 
 func (c *Collector) PollNow(serverID uuid.UUID) (*models.MetricPoint, error) {

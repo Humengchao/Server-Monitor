@@ -2,13 +2,45 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Typography, Descriptions, Tag, Space, Button, Card, Tabs, Spin, Modal, Form, Input, InputNumber, message } from 'antd';
 import { ArrowLeftOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { DatePicker } from 'antd';
+import dayjs, { Dayjs } from 'dayjs';
 import { serversApi, Server } from '../api/servers';
-import { useMetrics } from '../hooks/useMetrics';
+import { useMetrics, TimeRange } from '../hooks/useMetrics';
 import MetricsChart from '../components/MetricsChart';
 import SshTerminal from '../components/SshTerminal';
 import TagSelect from '../components/TagSelect';
 
 const { Title } = Typography;
+const { RangePicker } = DatePicker;
+
+type PresetKey = '1h' | 'today' | 'yesterday' | '7d' | '30d';
+
+function getPresetRange(key: PresetKey): TimeRange {
+  const now = dayjs();
+  switch (key) {
+    case '1h':
+      return { since: now.subtract(1, 'hour').toISOString(), until: now.toISOString() };
+    case 'today':
+      return { since: now.startOf('day').toISOString(), until: now.toISOString() };
+    case 'yesterday':
+      return {
+        since: now.subtract(1, 'day').startOf('day').toISOString(),
+        until: now.subtract(1, 'day').endOf('day').toISOString(),
+      };
+    case '7d':
+      return { since: now.subtract(7, 'day').startOf('day').toISOString(), until: now.toISOString() };
+    case '30d':
+      return { since: now.subtract(30, 'day').startOf('day').toISOString(), until: now.toISOString() };
+  }
+}
+
+const presets: { key: PresetKey; label: string }[] = [
+  { key: '1h', label: 'Last 1 Hour' },
+  { key: 'today', label: 'Today' },
+  { key: 'yesterday', label: 'Yesterday' },
+  { key: '7d', label: 'Last 7 Days' },
+  { key: '30d', label: 'Last 30 Days' },
+];
 
 export default function ServerDetail() {
   const { id } = useParams<{ id: string }>();
@@ -18,7 +50,10 @@ export default function ServerDetail() {
   const [modalOpen, setModalOpen] = useState(false);
   const [form] = Form.useForm();
   const [tagValues, setTagValues] = useState<string[]>([]);
-  const { metrics, history, loading: metricsLoading } = useMetrics(id!);
+  const [activePreset, setActivePreset] = useState<PresetKey>('30d');
+  const [timeRange, setTimeRange] = useState<TimeRange>(() => getPresetRange('30d'));
+
+  const { metrics, history, loading: metricsLoading } = useMetrics(id!, timeRange);
 
   const loadServer = async () => {
     try {
@@ -34,6 +69,21 @@ export default function ServerDetail() {
   useEffect(() => {
     loadServer();
   }, [id]);
+
+  const handlePreset = (key: PresetKey) => {
+    setActivePreset(key);
+    setTimeRange(getPresetRange(key));
+  };
+
+  const handleRangeChange = (dates: [Dayjs | null, Dayjs | null] | null) => {
+    if (dates && dates[0] && dates[1]) {
+      setActivePreset(null as any);
+      setTimeRange({
+        since: dates[0].toISOString(),
+        until: dates[1].toISOString(),
+      });
+    }
+  };
 
   const handleEdit = () => {
     if (!server) return;
@@ -120,6 +170,20 @@ export default function ServerDetail() {
                   <Descriptions.Item label="Uptime">{Math.floor((metrics.uptime_seconds || 0) / 3600)}h</Descriptions.Item>
                 </Descriptions>
               )}
+
+              <Space style={{ marginBottom: 16 }} wrap>
+                {presets.map((p) => (
+                  <Button
+                    key={p.key}
+                    type={activePreset === p.key ? 'primary' : 'default'}
+                    onClick={() => handlePreset(p.key)}
+                  >
+                    {p.label}
+                  </Button>
+                ))}
+                <RangePicker showTime disabledDate={(current) => current && current.isAfter(dayjs(), 'day')} onChange={handleRangeChange} />
+              </Space>
+
               <MetricsChart history={history} />
             </Card>
           ),

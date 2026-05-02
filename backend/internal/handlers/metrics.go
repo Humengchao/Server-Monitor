@@ -53,7 +53,13 @@ func (h *MetricsHandler) GetHistory(c *gin.Context) {
 			since = t
 		}
 	}
-	points, err := models.GetMetrics(db.Raw, id, since)
+	until := time.Now()
+	if val := c.Query("until"); val != "" {
+		if t, err := time.Parse(time.RFC3339, val); err == nil {
+			until = t
+		}
+	}
+	points, err := models.GetMetrics(db.Raw, id, since, until)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load metrics"})
 		return

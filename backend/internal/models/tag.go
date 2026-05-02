@@ -64,10 +64,10 @@ func InsertMetric(db *sql.DB, serverID uuid.UUID, m *MetricPoint) error {
 	return err
 }
 
-func GetMetrics(db *sql.DB, serverID uuid.UUID, since time.Time) ([]MetricPoint, error) {
+func GetMetrics(db *sql.DB, serverID uuid.UUID, since, until time.Time) ([]MetricPoint, error) {
 	rows, err := db.Query(
 		`SELECT cpu_percent, memory_used, memory_total, network_rx_bytes, network_tx_bytes, disk_rx_bytes, disk_tx_bytes, uptime_seconds, recorded_at
-		 FROM server_metrics WHERE server_id=$1 AND recorded_at >= $2 ORDER BY recorded_at ASC`, serverID, since)
+		 FROM server_metrics WHERE server_id=$1 AND recorded_at >= $2 AND recorded_at <= $3 ORDER BY recorded_at ASC`, serverID, since, until)
 	if err != nil {
 		return nil, err
 	}
@@ -82,6 +82,14 @@ func GetMetrics(db *sql.DB, serverID uuid.UUID, since time.Time) ([]MetricPoint,
 		points = append(points, m)
 	}
 	return points, nil
+}
+
+func DeleteOldMetrics(db *sql.DB, before time.Time) (int64, error) {
+	result, err := db.Exec("DELETE FROM server_metrics WHERE recorded_at < $1", before)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 func GetLatestMetric(db *sql.DB, serverID uuid.UUID) (*MetricPoint, error) {

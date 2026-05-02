@@ -30,6 +30,13 @@ func Setup(db *sql.DB, cfg *config.Config) *gin.Engine {
 		c.Next()
 	})
 
+	// No-cache for API responses
+	r.Use(func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store, no-cache, must-revalidate")
+		c.Header("Pragma", "no-cache")
+		c.Next()
+	})
+
 	// Inject DB
 	dbWrapper := &models.DB{Raw: db, EncryptionKey: cfg.EncryptionKey}
 	r.Use(func(c *gin.Context) {

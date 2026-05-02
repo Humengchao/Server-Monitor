@@ -31,7 +31,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadServers();
-    const timer = setInterval(() => loadServers(false), 3000);
+    const timer = setInterval(() => loadServers(false), 1000);
     return () => clearInterval(timer);
   }, [loadServers]);
 

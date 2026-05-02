@@ -79,8 +79,8 @@ export const serversApi = {
   getLatestMetrics: (id: string) =>
     client.get<MetricPoint>(`/servers/${id}/metrics/latest`),
 
-  getMetricsHistory: (id: string, since?: string) =>
-    client.get<MetricPoint[]>(`/servers/${id}/metrics`, { params: { since } }),
+  getMetricsHistory: (id: string, since?: string, until?: string) =>
+    client.get<MetricPoint[]>(`/servers/${id}/metrics`, { params: { since, until } }),
 };
 
 export const tagsApi = {

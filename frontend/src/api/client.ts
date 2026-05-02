@@ -5,6 +5,10 @@ const baseURL = import.meta.env.VITE_API_URL || `${window.location.origin}/api`;
 const client = axios.create({
   baseURL,
   timeout: 10000,
+  headers: {
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Pragma': 'no-cache',
+  },
 });
 
 client.interceptors.request.use((config) => {
