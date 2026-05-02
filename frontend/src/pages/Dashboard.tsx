@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
-  Row, Col, Button, Modal, Form, Input, InputNumber, Select, message, Typography, Space
+  Row, Col, Button, Modal, Form, Input, InputNumber, Select, message, notification, Typography, Space
 } from 'antd';
-import { PlusOutlined, ReloadOutlined, FilterOutlined } from '@ant-design/icons';
+import { PlusOutlined, ReloadOutlined, FilterOutlined, SafetyOutlined } from '@ant-design/icons';
 import ServerCard from '../components/ServerCard';
 import TagSelect from '../components/TagSelect';
 import { serversApi, Server, Tag } from '../api/servers';
@@ -17,6 +17,23 @@ export default function Dashboard() {
   const [form] = Form.useForm();
   const [tagValues, setTagValues] = useState<string[]>([]);
   const [filterTagIds, setFilterTagIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    const raw = localStorage.getItem('last_login');
+    if (raw) {
+      localStorage.removeItem('last_login');
+      try {
+        const { ip, logged_at } = JSON.parse(raw);
+        notification.info({
+          message: 'Last Login',
+          description: `IP: ${ip}  Time: ${new Date(logged_at).toLocaleString()}`,
+          icon: <SafetyOutlined style={{ color: '#1890ff' }} />,
+          placement: 'bottomRight',
+          duration: 5,
+        });
+      } catch { /* ignore */ }
+    }
+  }, []);
 
   const loadServers = useCallback(async (showLoading = true) => {
     if (showLoading) setLoading(true);

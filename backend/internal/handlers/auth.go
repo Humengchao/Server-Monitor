@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -63,24 +65,52 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 	db := c.MustGet("db").(*models.DB)
+	ip := c.ClientIP()
+	// Strip port from RemoteAddr if present (e.g. "192.168.1.1:12345" or "[::1]:12345")
+	if host, _, err := net.SplitHostPort(ip); err == nil {
+		ip = host
+	}
+	// Normalize IPv6 loopback to IPv4
+	if ip == "::1" {
+		ip = "127.0.0.1"
+	}
+	ua := c.GetHeader("User-Agent")
+
 	user, err := models.GetUserByUsername(db.Raw, req.Username)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 		return
 	}
 	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)) != nil {
+		models.InsertLoginRecord(db.Raw, user.ID, ip, ua, false)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 		return
 	}
+
+	// Get last login BEFORE inserting the new record
+	lastLogin, _ := models.GetLastLogin(db.Raw, user.ID)
+
+	models.InsertLoginRecord(db.Raw, user.ID, ip, ua, true)
+
 	token, err := h.generateToken(user)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate token"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
+
+	resp := gin.H{
 		"token": token,
 		"user":  gin.H{"id": user.ID, "username": user.Username},
-	})
+	}
+
+	if lastLogin != nil {
+		resp["last_login"] = gin.H{
+			"ip":        lastLogin.IP,
+			"logged_at": lastLogin.LoggedAt,
+		}
+	}
+
+	c.JSON(http.StatusOK, resp)
 }
 
 func (h *AuthHandler) Me(c *gin.Context) {
@@ -92,6 +122,39 @@ func (h *AuthHandler) Me(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"id": user.ID, "username": user.Username, "created_at": user.CreatedAt})
+}
+
+func (h *AuthHandler) LoginHistory(c *gin.Context) {
+	userID := c.MustGet("user_id").(uuid.UUID)
+	db := c.MustGet("db").(*models.DB)
+
+	limit := 20
+	offset := 0
+	if v := c.Query("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+	if v := c.Query("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+
+	records, err := models.GetLoginHistory(db.Raw, userID, limit, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load login history"})
+		return
+	}
+	total, _ := models.CountLoginHistory(db.Raw, userID)
+	if records == nil {
+		records = []models.LoginHistory{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"records": records,
+		"total":   total,
+	})
 }
 
 func (h *AuthHandler) generateToken(user *models.User) (string, error) {

@@ -56,3 +56,15 @@ ALTER TABLE servers ADD COLUMN IF NOT EXISTS disk_total_bytes BIGINT DEFAULT 0;
 -- Add disk I/O columns to server_metrics
 ALTER TABLE server_metrics ADD COLUMN IF NOT EXISTS disk_rx_bytes BIGINT DEFAULT 0;
 ALTER TABLE server_metrics ADD COLUMN IF NOT EXISTS disk_tx_bytes BIGINT DEFAULT 0;
+
+-- Login history
+CREATE TABLE IF NOT EXISTS login_history (
+    id BIGSERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    ip VARCHAR(64),
+    user_agent TEXT,
+    success BOOLEAN NOT NULL DEFAULT FALSE,
+    logged_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_login_history_user_time ON login_history(user_id, logged_at DESC);

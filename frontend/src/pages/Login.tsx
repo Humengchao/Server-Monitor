@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Form, Input, Button, Card, Typography, message, Space } from 'antd';
+import { Form, Input, Button, Card, Typography, message } from 'antd';
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
@@ -17,7 +17,12 @@ export default function Login() {
     try {
       const res = await authApi.login(values.username, values.password);
       setAuth(res.data.token, res.data.user);
-      message.success('Login successful');
+
+      if (res.data.last_login) {
+        const { ip, logged_at } = res.data.last_login;
+        localStorage.setItem('last_login', JSON.stringify({ ip, logged_at }));
+      }
+
       navigate('/dashboard');
     } catch (err: any) {
       message.error(err.response?.data?.error || 'Login failed');

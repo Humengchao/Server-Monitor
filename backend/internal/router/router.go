@@ -59,6 +59,7 @@ func Setup(db *sql.DB, cfg *config.Config) *gin.Engine {
 			auth.POST("/register", rateLimit, authH.Register)
 			auth.POST("/login", rateLimit, authH.Login)
 			auth.GET("/me", middleware.AuthRequired(cfg), authH.Me)
+			auth.GET("/login-history", middleware.AuthRequired(cfg), authH.LoginHistory)
 		}
 
 		servers := api.Group("/servers", middleware.AuthRequired(cfg))

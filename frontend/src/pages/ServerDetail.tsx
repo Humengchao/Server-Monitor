@@ -50,8 +50,8 @@ export default function ServerDetail() {
   const [modalOpen, setModalOpen] = useState(false);
   const [form] = Form.useForm();
   const [tagValues, setTagValues] = useState<string[]>([]);
-  const [activePreset, setActivePreset] = useState<PresetKey>('30d');
-  const [timeRange, setTimeRange] = useState<TimeRange>(() => getPresetRange('30d'));
+  const [activePreset, setActivePreset] = useState<PresetKey>('1h');
+  const [timeRange, setTimeRange] = useState<TimeRange>(() => getPresetRange('1h'));
 
   const { metrics, history, loading: metricsLoading } = useMetrics(id!, timeRange);
 
