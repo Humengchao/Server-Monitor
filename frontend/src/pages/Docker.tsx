@@ -213,11 +213,12 @@ export default function Docker() {
       setServers(withDocker);
 
       if (expandServerId) {
-        const match = withDocker.find((s) => s.server.id === expandServerId);
-        if (match) {
-          setActiveKeys([expandServerId]);
-          loadContainers(expandServerId);
-        }
+        setActiveKeys([expandServerId]);
+      }
+
+      // Load containers for all Docker servers in parallel
+      for (const sd of withDocker) {
+        loadContainers(sd.server.id);
       }
     } catch {
       // ignore
