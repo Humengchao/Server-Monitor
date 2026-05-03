@@ -4,6 +4,7 @@ import { Typography, Descriptions, Tag, Space, Button, Card, Tabs, Spin, Modal, 
 import { ArrowLeftOutlined, EditOutlined, DeleteOutlined, DockerOutlined, KeyOutlined } from '@ant-design/icons';
 import { DatePicker } from 'antd';
 import dayjs, { Dayjs } from 'dayjs';
+import { useTranslation } from 'react-i18next';
 import { serversApi, Server } from '../api/servers';
 import { useMetrics, TimeRange } from '../hooks/useMetrics';
 import MetricsChart from '../components/MetricsChart';
@@ -35,15 +36,8 @@ function getPresetRange(key: PresetKey): TimeRange {
   }
 }
 
-const presets: { key: PresetKey; label: string }[] = [
-  { key: '1h', label: 'Last 1 Hour' },
-  { key: 'today', label: 'Today' },
-  { key: 'yesterday', label: 'Yesterday' },
-  { key: '7d', label: 'Last 7 Days' },
-  { key: '30d', label: 'Last 30 Days' },
-];
-
 export default function ServerDetail() {
+  const { t } = useTranslation();
   const { message } = App.useApp();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -59,6 +53,14 @@ export default function ServerDetail() {
 
   const { metrics, history, loading: metricsLoading } = useMetrics(id!, timeRange);
 
+  const presets: { key: PresetKey; label: string }[] = [
+    { key: '1h', label: t('preset.1h') },
+    { key: 'today', label: t('preset.today') },
+    { key: 'yesterday', label: t('preset.yesterday') },
+    { key: '7d', label: t('preset.7d') },
+    { key: '30d', label: t('preset.30d') },
+  ];
+
   const loadServer = async () => {
     try {
       const res = await serversApi.list();
@@ -68,7 +70,7 @@ export default function ServerDetail() {
         setDockerInstalled(found.has_docker);
       }
     } catch {
-      message.error('Failed to load server');
+      message.error(t('server.loadFailed'));
     }
     setLoading(false);
   };
@@ -112,41 +114,41 @@ export default function ServerDetail() {
       const payload = { ...values, credential_id: selectedCredential || null };
       await serversApi.update(server.id, payload);
       await serversApi.setTags(server.id, tagValues);
-      message.success('Server updated');
+      message.success(t('server.updated'));
       setModalOpen(false);
       loadServer();
     } catch (err: any) {
-      message.error(err.response?.data?.error || 'Update failed');
+      message.error(err.response?.data?.error || t('server.updateFailed'));
     }
   };
 
   const handleDelete = () => {
     if (!server) return;
     Modal.confirm({
-      title: 'Delete Server',
-      content: `Are you sure you want to delete "${server.name}"?`,
-      okText: 'Delete',
+      title: t('server.delete'),
+      content: t('server.deleteConfirm', { name: server.name }),
+      okText: t('common.delete'),
       okType: 'danger',
       onOk: async () => {
         try {
           await serversApi.delete(server.id);
-          message.success('Server deleted');
+          message.success(t('server.deleted'));
           navigate('/dashboard');
         } catch {
-          message.error('Failed to delete server');
+          message.error(t('server.deleteFailed'));
         }
       },
     });
   };
 
   if (loading) return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}><Spin size="large" /></div>;
-  if (!server) return <div>Server not found</div>;
+  if (!server) return <div>{t('server.notFound')}</div>;
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <Space>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/dashboard')}>Back</Button>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/dashboard')}>{t('common.back')}</Button>
           <Title level={4} style={{ margin: 0 }}>{server.name}</Title>
           {server.tags?.map((t) => (
             <Tag key={t.id} color={t.color}>{t.name}</Tag>
@@ -158,37 +160,37 @@ export default function ServerDetail() {
             disabled={dockerInstalled !== true}
             onClick={() => navigate(`/docker?server=${id}&expand=true`)}
           >
-            Docker
+            {t('server.docker')}
           </Button>
-          <Button icon={<EditOutlined />} onClick={handleEdit}>Edit</Button>
-          <Button danger icon={<DeleteOutlined />} onClick={handleDelete}>Delete</Button>
+          <Button icon={<EditOutlined />} onClick={handleEdit}>{t('common.edit')}</Button>
+          <Button danger icon={<DeleteOutlined />} onClick={handleDelete}>{t('common.delete')}</Button>
         </Space>
       </div>
 
       <Descriptions bordered size="small" column={2} style={{ marginBottom: 24 }}>
-        <Descriptions.Item label="Host">{server.host}</Descriptions.Item>
-        <Descriptions.Item label="SSH Port">{server.port}</Descriptions.Item>
-        <Descriptions.Item label="SSH User">{server.ssh_username}</Descriptions.Item>
+        <Descriptions.Item label={t('server.hostLabel')}>{server.host}</Descriptions.Item>
+        <Descriptions.Item label={t('server.sshPortLabel')}>{server.port}</Descriptions.Item>
+        <Descriptions.Item label={t('server.sshUserLabel')}>{server.ssh_username}</Descriptions.Item>
         {server.credential_name && (
-          <Descriptions.Item label="Credential">
+          <Descriptions.Item label={t('server.credentialLabel')}>
             <Space><KeyOutlined />{server.credential_name}</Space>
           </Descriptions.Item>
         )}
-        <Descriptions.Item label="Added">{new Date(server.created_at).toLocaleString()}</Descriptions.Item>
+        <Descriptions.Item label={t('server.addedLabel')}>{new Date(server.created_at).toLocaleString()}</Descriptions.Item>
       </Descriptions>
 
       <Tabs defaultActiveKey="metrics" items={[
         {
           key: 'metrics',
-          label: 'Metrics',
+          label: t('metrics.title'),
           children: (
             <Card loading={metricsLoading}>
               {metrics && (
                 <Descriptions bordered size="small" column={4} style={{ marginBottom: 16 }}>
-                  <Descriptions.Item label="CPU">{(metrics.cpu_percent || 0).toFixed(1)}%</Descriptions.Item>
-                  <Descriptions.Item label="Memory Used">{((metrics.memory_used || 0) / 1024 / 1024).toFixed(0)} MB</Descriptions.Item>
-                  <Descriptions.Item label="Memory Total">{((metrics.memory_total || 0) / 1024 / 1024).toFixed(0)} MB</Descriptions.Item>
-                  <Descriptions.Item label="Uptime">{Math.floor((metrics.uptime_seconds || 0) / 3600)}h</Descriptions.Item>
+                  <Descriptions.Item label={t('metrics.cpu')}>{(metrics.cpu_percent || 0).toFixed(1)}%</Descriptions.Item>
+                  <Descriptions.Item label={t('metrics.memoryUsed')}>{((metrics.memory_used || 0) / 1024 / 1024).toFixed(0)} MB</Descriptions.Item>
+                  <Descriptions.Item label={t('metrics.memoryTotal')}>{((metrics.memory_total || 0) / 1024 / 1024).toFixed(0)} MB</Descriptions.Item>
+                  <Descriptions.Item label={t('metrics.uptime')}>{Math.floor((metrics.uptime_seconds || 0) / 3600)}h</Descriptions.Item>
                 </Descriptions>
               )}
 
@@ -211,7 +213,7 @@ export default function ServerDetail() {
         },
         {
           key: 'terminal',
-          label: 'SSH Terminal',
+          label: t('terminal.title'),
           children: (
             <Card>
               <SshTerminal serverId={id!} />
@@ -221,42 +223,42 @@ export default function ServerDetail() {
       ]} />
 
       <Modal
-        title="Edit Server"
+        title={t('server.edit')}
         open={modalOpen}
         onCancel={() => setModalOpen(false)}
         onOk={() => form.submit()}
         width={520}
       >
         <Form form={form} layout="vertical" onFinish={handleSubmit}>
-          <Form.Item name="name" label="Server Name" rules={[{ required: true }]}>
-            <Input placeholder="My Web Server" />
+          <Form.Item name="name" label={t('server.serverName')} rules={[{ required: true }]}>
+            <Input placeholder={t('server.serverNamePlaceholder')} />
           </Form.Item>
-          <Form.Item name="host" label="Host / IP" rules={[{ required: true }]}>
-            <Input placeholder="192.168.1.100" />
+          <Form.Item name="host" label={t('server.host')} rules={[{ required: true }]}>
+            <Input placeholder={t('server.hostPlaceholder')} />
           </Form.Item>
-          <Form.Item name="port" label="SSH Port" initialValue={22}>
+          <Form.Item name="port" label={t('server.sshPort')} initialValue={22}>
             <InputNumber min={1} max={65535} style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item label="Credential">
+          <Form.Item label={t('server.credential')}>
             <CredentialSelect value={selectedCredential} onChange={setSelectedCredential} />
           </Form.Item>
           {!selectedCredential && (
             <>
-              <Form.Item name="ssh_username" label="SSH Username" rules={[{ required: true }]}>
-                <Input placeholder="root" />
+              <Form.Item name="ssh_username" label={t('server.sshUsername')} rules={[{ required: true }]}>
+                <Input placeholder={t('server.sshUsernamePlaceholder')} />
               </Form.Item>
-              <Form.Item name="ssh_password" label="SSH Password">
-                <Input.Password placeholder="Leave blank to keep unchanged" />
+              <Form.Item name="ssh_password" label={t('server.sshPassword')}>
+                <Input.Password placeholder={t('server.sshKeyEditPlaceholder')} />
               </Form.Item>
-              <Form.Item name="ssh_key" label="SSH Private Key">
-                <Input.TextArea rows={4} placeholder="Leave blank to keep unchanged" />
+              <Form.Item name="ssh_key" label={t('server.sshKey')}>
+                <Input.TextArea rows={4} placeholder={t('server.sshKeyEditPlaceholder')} />
               </Form.Item>
             </>
           )}
-          <Form.Item name="ssh_host_key" label="SSH Host Key (optional)">
-            <Input.TextArea rows={2} placeholder="Paste server public key for host verification" />
+          <Form.Item name="ssh_host_key" label={t('server.sshHostKey')}>
+            <Input.TextArea rows={2} placeholder={t('server.sshHostKeyPlaceholder')} />
           </Form.Item>
-          <Form.Item label="Tags">
+          <Form.Item label={t('server.tags')}>
             <TagSelect value={tagValues} onChange={setTagValues} />
           </Form.Item>
         </Form>

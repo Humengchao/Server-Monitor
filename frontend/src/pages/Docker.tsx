@@ -3,6 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Collapse, Table, Tag, Button, Space, Typography, Spin, Empty, Drawer, App } from 'antd';
 import { ReloadOutlined, CaretRightOutlined, PauseOutlined, SyncOutlined, ArrowRightOutlined, FileTextOutlined, CodeOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
+import { useTranslation } from 'react-i18next';
 import { serversApi, Server, DockerContainer } from '../api/servers';
 import { Terminal } from 'xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -33,19 +34,20 @@ function LogsModal({ serverId, containerId, containerName, onClose }: {
   containerName: string;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [logs, setLogs] = useState('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     serversApi.getContainerLogs(serverId, containerId, 500)
-      .then((r) => setLogs(r.data.logs || '(empty)'))
-      .catch(() => setLogs('Failed to load logs'))
+      .then((r) => setLogs(r.data.logs || t('docker.empty')))
+      .catch(() => setLogs(t('docker.loadLogsFailed')))
       .finally(() => setLoading(false));
-  }, [serverId, containerId]);
+  }, [serverId, containerId, t]);
 
   return (
     <Drawer
-      title={`Logs: ${containerName}`}
+      title={t('docker.logsTitle', { name: containerName })}
       open
       onClose={onClose}
       maskClosable={false}
@@ -81,13 +83,13 @@ function ExecDrawer({ serverId, containerId, containerName, open, onClose }: {
   open: boolean;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const termRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const termRef2 = useRef<Terminal | null>(null);
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
-    console.log('ExecDrawer effect:', { open, containerId, hasTerm: !!termRef.current });
     if (!open || !containerId || !termRef.current) return;
 
     const terminal = new Terminal({
@@ -110,13 +112,11 @@ function ExecDrawer({ serverId, containerId, containerName, open, onClose }: {
     const token = localStorage.getItem('token');
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${wsProtocol}//${window.location.host}/api/ws/servers/${serverId}/docker/containers/${containerId}/exec?token=${token}`;
-    console.log('Exec WS connecting:', wsUrl);
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
-      console.log('Exec WS connected');
       setConnected(true);
       terminal.focus();
     };
@@ -129,15 +129,13 @@ function ExecDrawer({ serverId, containerId, containerName, open, onClose }: {
       }
     };
 
-    ws.onclose = (ev) => {
-      console.log('Exec WS closed', ev.code, ev.reason);
+    ws.onclose = () => {
       setConnected(false);
-      terminal.write('\r\n\x1b[31mDisconnected\x1b[0m\r\n');
+      terminal.write(`\r\n\x1b[31m${t('docker.execDisconnected')}\x1b[0m\r\n`);
     };
 
-    ws.onerror = (ev) => {
-      console.error('Exec WS error', ev);
-      terminal.write('\r\n\x1b[31mConnection error\x1b[0m\r\n');
+    ws.onerror = () => {
+      terminal.write(`\r\n\x1b[31m${t('docker.execConnError')}\x1b[0m\r\n`);
     };
 
     terminal.onData((data) => {
@@ -150,13 +148,12 @@ function ExecDrawer({ serverId, containerId, containerName, open, onClose }: {
     window.addEventListener('resize', handleResize);
 
     return () => {
-      console.log('ExecDrawer cleanup');
       clearTimeout(fitTimer);
       window.removeEventListener('resize', handleResize);
       ws.close();
       terminal.dispose();
     };
-  }, [open, serverId, containerId]);
+  }, [open, serverId, containerId, t]);
 
   const handleClose = () => {
     if (wsRef.current) wsRef.current.close();
@@ -169,8 +166,8 @@ function ExecDrawer({ serverId, containerId, containerName, open, onClose }: {
       title={
         <Space>
           <CodeOutlined />
-          <span>Exec: {containerName}</span>
-          <Tag color={connected ? 'green' : 'red'}>{connected ? 'Connected' : 'Disconnected'}</Tag>
+          <span>{t('docker.execTitle', { name: containerName })}</span>
+          <Tag color={connected ? 'green' : 'red'}>{connected ? t('common.connected') : t('common.disconnected')}</Tag>
         </Space>
       }
       open={open}
@@ -186,6 +183,7 @@ function ExecDrawer({ serverId, containerId, containerName, open, onClose }: {
 }
 
 export default function Docker() {
+  const { t } = useTranslation();
   const { message } = App.useApp();
   const [servers, setServers] = useState<ServerDocker[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -233,7 +231,7 @@ export default function Docker() {
       const res = await serversApi.getContainers(serverId);
       setServers((prev) => prev.map((s) => (s.server.id === serverId ? { ...s, containers: res.data || [], loading: false } : s)));
     } catch {
-      message.error('Failed to load containers');
+      message.error(t('docker.loadFailed'));
       setServers((prev) => prev.map((s) => (s.server.id === serverId ? { ...s, loading: false } : s)));
     }
   };
@@ -241,10 +239,10 @@ export default function Docker() {
   const handleAction = async (serverId: string, containerId: string, action: 'start' | 'stop' | 'restart') => {
     try {
       await serversApi.containerAction(serverId, containerId, action);
-      message.success(`Container ${action} success`);
+      message.success(t('docker.actionSuccess', { action: t(`docker.${action}`) }));
       loadContainers(serverId);
     } catch {
-      message.error(`Failed to ${action} container`);
+      message.error(t('docker.actionFailed', { action: t(`docker.${action}`) }));
     }
   };
 
@@ -254,53 +252,53 @@ export default function Docker() {
 
   const getColumns = (serverId: string): ColumnsType<DockerContainer> => [
     {
-      title: 'Name',
+      title: t('common.name'),
       dataIndex: 'name',
       key: 'name',
       render: (v: string) => <Text strong>{v}</Text>,
     },
     {
-      title: 'Image',
+      title: t('docker.image'),
       dataIndex: 'image',
       key: 'image',
       ellipsis: true,
     },
     {
-      title: 'State',
+      title: t('docker.state'),
       dataIndex: 'state',
       key: 'state',
       width: 110,
       render: (v: string) => <Tag color={stateColor[v] || 'default'}>{v}</Tag>,
     },
     {
-      title: 'Status',
+      title: t('common.status'),
       dataIndex: 'status',
       key: 'status',
       ellipsis: true,
     },
     {
-      title: 'Ports',
+      title: t('docker.ports'),
       dataIndex: 'ports',
       key: 'ports',
       ellipsis: true,
       width: 200,
     },
     {
-      title: 'Actions',
+      title: t('common.actions'),
       key: 'actions',
       width: 320,
       render: (_, record) => (
         <Space size="small" wrap>
           {record.state !== 'running' ? (
-            <Button size="small" type="primary" icon={<CaretRightOutlined />} onClick={() => handleAction(serverId, record.id, 'start')}>Start</Button>
+            <Button size="small" type="primary" icon={<CaretRightOutlined />} onClick={() => handleAction(serverId, record.id, 'start')}>{t('docker.start')}</Button>
           ) : (
             <>
-              <Button size="small" icon={<PauseOutlined />} onClick={() => handleAction(serverId, record.id, 'stop')}>Stop</Button>
-              <Button size="small" icon={<SyncOutlined />} onClick={() => handleAction(serverId, record.id, 'restart')}>Restart</Button>
+              <Button size="small" icon={<PauseOutlined />} onClick={() => handleAction(serverId, record.id, 'stop')}>{t('docker.stop')}</Button>
+              <Button size="small" icon={<SyncOutlined />} onClick={() => handleAction(serverId, record.id, 'restart')}>{t('docker.restart')}</Button>
             </>
           )}
-          <Button size="small" icon={<FileTextOutlined />} onClick={() => setLogsTarget({ serverId, containerId: record.id, containerName: record.name })}>Logs</Button>
-          <Button size="small" icon={<CodeOutlined />} onClick={() => setExecTarget({ serverId, containerId: record.id, containerName: record.name })}>Exec</Button>
+          <Button size="small" icon={<FileTextOutlined />} onClick={() => setLogsTarget({ serverId, containerId: record.id, containerName: record.name })}>{t('docker.logs')}</Button>
+          <Button size="small" icon={<CodeOutlined />} onClick={() => setExecTarget({ serverId, containerId: record.id, containerName: record.name })}>{t('docker.exec')}</Button>
         </Space>
       ),
     },
@@ -312,8 +310,8 @@ export default function Docker() {
       <Space>
         <Text strong>{sd.server.name}</Text>
         <Text type="secondary">({sd.server.host})</Text>
-        <Tag color="blue">Docker {sd.version}</Tag>
-        <Text type="secondary">{sd.containers.length} containers</Text>
+        <Tag color="blue">{t('docker.version', { version: sd.version })}</Tag>
+        <Text type="secondary">{t('docker.containers', { count: sd.containers.length })}</Text>
       </Space>
     ),
     extra: (
@@ -325,7 +323,7 @@ export default function Docker() {
           navigate(`/servers/${sd.server.id}`);
         }}
       >
-        Server Detail
+        {t('docker.serverDetail')}
       </Button>
     ),
     children: (
@@ -336,7 +334,7 @@ export default function Docker() {
         loading={sd.loading}
         pagination={false}
         size="small"
-        locale={{ emptyText: <Empty description="No containers" /> }}
+        locale={{ emptyText: <Empty description={t('docker.noContainers')} /> }}
       />
     ),
   }));
@@ -355,14 +353,14 @@ export default function Docker() {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <Title level={4} style={{ margin: 0 }}>Docker</Title>
-        <Button icon={<ReloadOutlined />} onClick={loadServers}>Refresh</Button>
+        <Title level={4} style={{ margin: 0 }}>{t('docker.title')}</Title>
+        <Button icon={<ReloadOutlined />} onClick={loadServers}>{t('common.refresh')}</Button>
       </div>
 
       {initialLoading ? (
         <div style={{ textAlign: 'center', padding: 80 }}><Spin size="large" /></div>
       ) : servers.length === 0 ? (
-        <Empty description="No servers with Docker installed" />
+        <Empty description={t('docker.noServers')} />
       ) : (
         <Collapse
           activeKey={activeKeys}

@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
-  Row, Col, Button, Modal, Form, Input, InputNumber, Select, message, Typography, Space, App
+  Row, Col, Button, Modal, Form, Input, InputNumber, Select, Typography, Space, App
 } from 'antd';
 import { PlusOutlined, ReloadOutlined, FilterOutlined, SafetyOutlined } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import ServerCard from '../components/ServerCard';
 import TagSelect from '../components/TagSelect';
 import CredentialSelect from '../components/CredentialSelect';
@@ -22,7 +23,8 @@ async function lookupIP(ip: string): Promise<string> {
 }
 
 export default function Dashboard() {
-  const { notification } = App.useApp();
+  const { t } = useTranslation();
+  const { message, notification } = App.useApp();
   const [servers, setServers] = useState<Server[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -62,12 +64,12 @@ export default function Dashboard() {
           : `IP: ${ip}\nTime: ${loginTime}`;
 
         notification.info({
-          title: 'Login Successful',
+          title: t('notification.loginSuccess'),
           description: (
             <div style={{ whiteSpace: 'pre-line' }}>
-              <div><Text strong>Current Login:</Text></div>
+              <div><Text strong>{t('notification.currentLogin')}</Text></div>
               <div>{currentDesc}</div>
-              <div style={{ marginTop: 8 }}><Text strong>Previous Login:</Text></div>
+              <div style={{ marginTop: 8 }}><Text strong>{t('notification.previousLogin')}</Text></div>
               <div>{lastDesc}</div>
             </div>
           ),
@@ -77,10 +79,9 @@ export default function Dashboard() {
         });
       })
       .catch(() => {
-        // Fallback if IP lookup fails
         notification.info({
-          title: 'Login Successful',
-          description: `Previous Login - IP: ${ip}  Time: ${loginTime}`,
+          title: t('notification.loginSuccess'),
+          description: `${t('notification.previousLogin')} IP: ${ip}  Time: ${loginTime}`,
           icon: <SafetyOutlined style={{ color: '#1890ff' }} />,
           placement: 'bottomRight',
           duration: 8,
@@ -94,10 +95,10 @@ export default function Dashboard() {
       const res = await serversApi.list();
       setServers(res.data || []);
     } catch {
-      if (showLoading) message.error('Failed to load servers');
+      if (showLoading) message.error(t('server.loadFailed'));
     }
     if (showLoading) setLoading(false);
-  }, []);
+  }, [message, t]);
 
   useEffect(() => {
     loadServers();
@@ -111,13 +112,13 @@ export default function Dashboard() {
       if (editingServer) {
         await serversApi.update(editingServer.id, payload);
         await serversApi.setTags(editingServer.id, tagValues);
-        message.success('Server updated');
+        message.success(t('server.updated'));
       } else {
         const res = await serversApi.create(payload);
         if (tagValues.length > 0) {
           await serversApi.setTags(res.data.id, tagValues);
         }
-        message.success('Server added');
+        message.success(t('server.added'));
       }
       setModalOpen(false);
       form.resetFields();
@@ -126,7 +127,7 @@ export default function Dashboard() {
       setEditingServer(null);
       loadServers();
     } catch (err: any) {
-      message.error(err.response?.data?.error || 'Operation failed');
+      message.error(err.response?.data?.error || t('server.operationFailed'));
     }
   };
 
@@ -157,15 +158,15 @@ export default function Dashboard() {
 
   const handleDelete = async (server: Server) => {
     Modal.confirm({
-      title: 'Delete Server',
-      content: `Are you sure you want to delete "${server.name}"?`,
+      title: t('server.delete'),
+      content: t('server.deleteConfirm', { name: server.name }),
       onOk: async () => {
         try {
           await serversApi.delete(server.id);
-          message.success('Server deleted');
+          message.success(t('server.deleted'));
           loadServers();
         } catch {
-          message.error('Failed to delete server');
+          message.error(t('server.deleteFailed'));
         }
       },
     });
@@ -174,12 +175,12 @@ export default function Dashboard() {
   return (
     <div>
       <Space style={{ marginBottom: 24, width: '100%', justifyContent: 'space-between' }}>
-        <Title level={4} style={{ margin: 0 }}>My Servers</Title>
+        <Title level={4} style={{ margin: 0 }}>{t('server.title')}</Title>
         <Space>
           {allTags.length > 0 && (
             <Select
               mode="multiple"
-              placeholder={<Space><FilterOutlined />Filter by tag</Space>}
+              placeholder={<Space><FilterOutlined />{t('server.filterByTag')}</Space>}
               value={filterTagIds}
               onChange={setFilterTagIds}
               style={{ minWidth: 180 }}
@@ -193,7 +194,7 @@ export default function Dashboard() {
               ))}
             </Select>
           )}
-          <Button icon={<ReloadOutlined />} onClick={() => loadServers()}>Refresh</Button>
+          <Button icon={<ReloadOutlined />} onClick={() => loadServers()}>{t('common.refresh')}</Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={() => {
             setEditingServer(null);
             form.resetFields();
@@ -201,7 +202,7 @@ export default function Dashboard() {
             setSelectedCredential(undefined);
             setModalOpen(true);
           }}>
-            Add Server
+            {t('server.add')}
           </Button>
         </Space>
       </Space>
@@ -215,49 +216,49 @@ export default function Dashboard() {
         {!loading && filteredServers.length === 0 && (
           <Col span={24}>
             <div style={{ textAlign: 'center', padding: 64, color: '#999' }}>
-              No servers yet. Click "Add Server" to get started.
+              {t('server.empty')}
             </div>
           </Col>
         )}
       </Row>
 
       <Modal
-        title={editingServer ? 'Edit Server' : 'Add Server'}
+        title={editingServer ? t('server.edit') : t('server.add')}
         open={modalOpen}
         onCancel={() => { setModalOpen(false); setEditingServer(null); }}
         onOk={() => form.submit()}
         width={520}
       >
         <Form form={form} layout="vertical" onFinish={handleSubmit}>
-          <Form.Item name="name" label="Server Name" rules={[{ required: true }]}>
-            <Input placeholder="My Web Server" />
+          <Form.Item name="name" label={t('server.serverName')} rules={[{ required: true }]}>
+            <Input placeholder={t('server.serverNamePlaceholder')} />
           </Form.Item>
-          <Form.Item name="host" label="Host / IP" rules={[{ required: true }]}>
-            <Input placeholder="192.168.1.100" />
+          <Form.Item name="host" label={t('server.host')} rules={[{ required: true }]}>
+            <Input placeholder={t('server.hostPlaceholder')} />
           </Form.Item>
-          <Form.Item name="port" label="SSH Port" initialValue={22}>
+          <Form.Item name="port" label={t('server.sshPort')} initialValue={22}>
             <InputNumber min={1} max={65535} style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item label="Credential">
+          <Form.Item label={t('server.credential')}>
             <CredentialSelect value={selectedCredential} onChange={setSelectedCredential} />
           </Form.Item>
           {!selectedCredential && (
             <>
-              <Form.Item name="ssh_username" label="SSH Username" rules={[{ required: true }]}>
-                <Input placeholder="root" />
+              <Form.Item name="ssh_username" label={t('server.sshUsername')} rules={[{ required: true }]}>
+                <Input placeholder={t('server.sshUsernamePlaceholder')} />
               </Form.Item>
-              <Form.Item name="ssh_password" label="SSH Password">
-                <Input.Password placeholder="Leave blank to use key" />
+              <Form.Item name="ssh_password" label={t('server.sshPassword')}>
+                <Input.Password placeholder={t('server.sshPasswordPlaceholder')} />
               </Form.Item>
-              <Form.Item name="ssh_key" label="SSH Private Key">
-                <Input.TextArea rows={4} placeholder="Paste private key content" />
+              <Form.Item name="ssh_key" label={t('server.sshKey')}>
+                <Input.TextArea rows={4} placeholder={t('server.sshKeyPlaceholder')} />
               </Form.Item>
             </>
           )}
-          <Form.Item name="ssh_host_key" label="SSH Host Key (optional)">
-            <Input.TextArea rows={2} placeholder="Paste server public key for host verification" />
+          <Form.Item name="ssh_host_key" label={t('server.sshHostKey')}>
+            <Input.TextArea rows={2} placeholder={t('server.sshHostKeyPlaceholder')} />
           </Form.Item>
-          <Form.Item label="Tags">
+          <Form.Item label={t('server.tags')}>
             <TagSelect value={tagValues} onChange={setTagValues} />
           </Form.Item>
         </Form>

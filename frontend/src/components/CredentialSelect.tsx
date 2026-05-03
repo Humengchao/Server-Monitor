@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Select, Space, Button, Input, App } from 'antd';
 import { PlusOutlined, KeyOutlined } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import { credentialsApi, Credential } from '../api/credentials';
 
 interface Props {
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export default function CredentialSelect({ value, onChange }: Props) {
+  const { t } = useTranslation();
   const { message } = App.useApp();
   const [creds, setCreds] = useState<Credential[]>([]);
   const [loading, setLoading] = useState(false);
@@ -49,21 +51,21 @@ export default function CredentialSelect({ value, onChange }: Props) {
       setNewPassword('');
       setNewKey('');
       setShowNew(false);
-      message.success('Credential created');
+      message.success(t('credential.created'));
     } catch {
-      message.error('Failed to create credential');
+      message.error(t('credential.createFailed'));
     }
   };
 
   return (
     <Select
       allowClear
-      placeholder="Select credential (optional)"
+      placeholder={t('credential.selectPlaceholder')}
       value={value || undefined}
       onChange={(v) => onChange?.(v || undefined)}
       loading={loading}
       style={{ width: '100%' }}
-      notFoundContent={loading ? 'Loading...' : 'No credentials yet'}
+      notFoundContent={loading ? t('common.loading') : t('credential.noCredentials')}
       popupRender={(menu) => (
         <>
           {menu}
@@ -74,36 +76,36 @@ export default function CredentialSelect({ value, onChange }: Props) {
                   size="small"
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
-                  placeholder="Credential name"
+                  placeholder={t('credential.credNamePlaceholder')}
                 />
                 <Input
                   size="small"
                   value={newUsername}
                   onChange={(e) => setNewUsername(e.target.value)}
-                  placeholder="SSH username"
+                  placeholder={t('credential.sshUsernameInlinePlaceholder')}
                 />
                 <Input.Password
                   size="small"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="SSH password (optional)"
+                  placeholder={t('credential.sshPasswordInlinePlaceholder')}
                 />
                 <Input.TextArea
                   size="small"
                   rows={2}
                   value={newKey}
                   onChange={(e) => setNewKey(e.target.value)}
-                  placeholder="SSH private key (optional)"
+                  placeholder={t('credential.sshKeyInlinePlaceholder')}
                   style={{ fontSize: 12 }}
                 />
                 <Space>
-                  <Button size="small" type="primary" onClick={handleCreate}>Create</Button>
-                  <Button size="small" onClick={() => setShowNew(false)}>Cancel</Button>
+                  <Button size="small" type="primary" onClick={handleCreate}>{t('common.create')}</Button>
+                  <Button size="small" onClick={() => setShowNew(false)}>{t('common.cancel')}</Button>
                 </Space>
               </Space>
             ) : (
               <Button type="dashed" size="small" icon={<PlusOutlined />} block onClick={() => setShowNew(true)}>
-                Quick Create
+                {t('credential.quickCreate')}
               </Button>
             )}
           </div>

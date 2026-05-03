@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { Card, Table, Button, Modal, Form, Input, Popconfirm, Space, Typography, ColorPicker, App } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import { tagsApi, Tag } from '../api/servers';
 
 const { Title } = Typography;
 
 export default function Settings() {
+  const { t } = useTranslation();
   const { message } = App.useApp();
   const [tags, setTags] = useState<Tag[]>([]);
   const [loading, setLoading] = useState(false);
@@ -18,7 +20,7 @@ export default function Settings() {
       const res = await tagsApi.list();
       setTags(res.data || []);
     } catch {
-      message.error('Failed to load tags');
+      message.error(t('settings.loadTagsFailed'));
     }
     setLoading(false);
   };
@@ -30,29 +32,29 @@ export default function Settings() {
   const handleCreate = async (values: { name: string; color: string }) => {
     try {
       await tagsApi.create(values.name, values.color || '#1890ff');
-      message.success('Tag created');
+      message.success(t('settings.tagCreated'));
       setModalOpen(false);
       form.resetFields();
       loadTags();
     } catch {
-      message.error('Failed to create tag');
+      message.error(t('settings.tagCreateFailed'));
     }
   };
 
   const handleDelete = async (id: string) => {
     try {
       await tagsApi.delete(id);
-      message.success('Tag deleted');
+      message.success(t('settings.tagDeleted'));
       loadTags();
     } catch {
-      message.error('Failed to delete tag');
+      message.error(t('settings.tagDeleteFailed'));
     }
   };
 
   const columns = [
-    { title: 'Name', dataIndex: 'name', key: 'name' },
+    { title: t('common.name'), dataIndex: 'name', key: 'name' },
     {
-      title: 'Color',
+      title: t('common.color'),
       dataIndex: 'color',
       key: 'color',
       render: (color: string) => (
@@ -63,10 +65,10 @@ export default function Settings() {
       ),
     },
     {
-      title: 'Actions',
+      title: t('common.actions'),
       key: 'actions',
       render: (_: any, record: Tag) => (
-        <Popconfirm title="Delete this tag?" onConfirm={() => handleDelete(record.id)}>
+        <Popconfirm title={t('settings.deleteTagConfirm')} onConfirm={() => handleDelete(record.id)}>
           <Button type="text" danger icon={<DeleteOutlined />} />
         </Popconfirm>
       ),
@@ -76,9 +78,9 @@ export default function Settings() {
   return (
     <div>
       <Space style={{ marginBottom: 24, width: '100%', justifyContent: 'space-between' }}>
-        <Title level={4} style={{ margin: 0 }}>Tag Management</Title>
+        <Title level={4} style={{ margin: 0 }}>{t('settings.tagManagement')}</Title>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
-          Create Tag
+          {t('settings.createTag')}
         </Button>
       </Space>
 
@@ -87,16 +89,16 @@ export default function Settings() {
       </Card>
 
       <Modal
-        title="Create Tag"
+        title={t('settings.createTag')}
         open={modalOpen}
         onCancel={() => setModalOpen(false)}
         onOk={() => form.submit()}
       >
         <Form form={form} layout="vertical" onFinish={handleCreate}>
-          <Form.Item name="name" label="Tag Name" rules={[{ required: true }]}>
-            <Input placeholder="Production" />
+          <Form.Item name="name" label={t('settings.tagName')} rules={[{ required: true }]}>
+            <Input placeholder={t('settings.tagNamePlaceholder')} />
           </Form.Item>
-          <Form.Item name="color" label="Color" initialValue="#1890ff">
+          <Form.Item name="color" label={t('settings.color')} initialValue="#1890ff">
             <ColorPicker format="hex" />
           </Form.Item>
         </Form>

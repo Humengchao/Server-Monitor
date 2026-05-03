@@ -9,6 +9,7 @@ import {
   HddOutlined,
   ClockCircleOutlined,
 } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import { Server } from '../api/servers';
 import { useNavigate } from 'react-router-dom';
 
@@ -38,6 +39,7 @@ interface Props {
 }
 
 export default function ServerCard({ server }: Props) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const m = server.latest_metrics;
   const cpuPercent = m ? Math.round(m.cpu_percent) : 0;
@@ -69,7 +71,7 @@ export default function ServerCard({ server }: Props) {
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 8 }}>
-        <Space size={4}><DashboardOutlined style={{ color: '#8c8c8c' }} /><Text type="secondary" style={{ fontSize: 12 }}>{server.cpu_cores || 0} Core</Text></Space>
+        <Space size={4}><DashboardOutlined style={{ color: '#8c8c8c' }} /><Text type="secondary" style={{ fontSize: 12 }}>{server.cpu_cores || 0} {t('card.core')}</Text></Space>
         <Space size={4}><DatabaseOutlined style={{ color: '#8c8c8c' }} /><Text type="secondary" style={{ fontSize: 12 }}>{formatGB(server.memory_total)}</Text></Space>
         <Space size={4}><HddOutlined style={{ color: '#8c8c8c' }} /><Text type="secondary" style={{ fontSize: 12 }}>{formatGB(server.disk_total)}</Text></Space>
         <Space size={4}><ClockCircleOutlined style={{ color: '#8c8c8c' }} /><Text type="secondary" style={{ fontSize: 12 }}>{formatUptime(m?.uptime_seconds || 0)}</Text></Space>
@@ -86,7 +88,7 @@ export default function ServerCard({ server }: Props) {
               size={64}
               strokeColor={cpuPercent > 80 ? '#ff4d4f' : '#52c41a'}
             />
-            <div style={{ marginTop: 2 }}><Text type="secondary" style={{ fontSize: 11 }}>CPU</Text></div>
+            <div style={{ marginTop: 2 }}><Text type="secondary" style={{ fontSize: 11 }}>{t('card.cpu')}</Text></div>
           </div>
           <div style={{ textAlign: 'center', flex: 1 }}>
             <Progress
@@ -95,10 +97,10 @@ export default function ServerCard({ server }: Props) {
               size={64}
               strokeColor="#1890ff"
             />
-            <div style={{ marginTop: 2 }}><Text type="secondary" style={{ fontSize: 11 }}>Memory</Text></div>
+            <div style={{ marginTop: 2 }}><Text type="secondary" style={{ fontSize: 11 }}>{t('card.memory')}</Text></div>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, alignItems: 'center' }}>
-            <Text type="secondary" style={{ fontSize: 11, fontWeight: 500 }}>Network</Text>
+            <Text type="secondary" style={{ fontSize: 11, fontWeight: 500 }}>{t('card.network')}</Text>
             <Space size={4}>
               <ArrowDownOutlined style={{ color: '#52c41a', fontSize: 12 }} />
               <Text type="secondary" style={{ fontSize: 12 }}>{formatBytes(m.network_rx_bytes)}/s</Text>
@@ -109,7 +111,7 @@ export default function ServerCard({ server }: Props) {
             </Space>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, alignItems: 'center' }}>
-            <Text type="secondary" style={{ fontSize: 11, fontWeight: 500 }}>Disk</Text>
+            <Text type="secondary" style={{ fontSize: 11, fontWeight: 500 }}>{t('card.disk')}</Text>
             <Space size={4}>
               <ArrowDownOutlined style={{ color: '#722ed1', fontSize: 12 }} />
               <Text type="secondary" style={{ fontSize: 12 }}>{formatBytes(m.disk_rx_bytes)}/s</Text>

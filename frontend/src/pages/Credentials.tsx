@@ -3,11 +3,13 @@ import {
   Table, Button, Modal, Form, Input, Space, Typography, Popconfirm, App,
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, KeyOutlined } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import { credentialsApi, Credential } from '../api/credentials';
 
 const { Title } = Typography;
 
 export default function Credentials() {
+  const { t } = useTranslation();
   const { message } = App.useApp();
   const [creds, setCreds] = useState<Credential[]>([]);
   const [loading, setLoading] = useState(true);
@@ -21,10 +23,10 @@ export default function Credentials() {
       const res = await credentialsApi.list();
       setCreds(res.data || []);
     } catch {
-      message.error('Failed to load credentials');
+      message.error(t('credential.loadFailed'));
     }
     setLoading(false);
-  }, [message]);
+  }, [message, t]);
 
   useEffect(() => {
     load();
@@ -34,27 +36,27 @@ export default function Credentials() {
     try {
       if (editing) {
         await credentialsApi.update(editing.id, values);
-        message.success('Credential updated');
+        message.success(t('credential.updated'));
       } else {
         await credentialsApi.create(values);
-        message.success('Credential created');
+        message.success(t('credential.created'));
       }
       setModalOpen(false);
       form.resetFields();
       setEditing(null);
       load();
     } catch (err: any) {
-      message.error(err.response?.data?.error || 'Operation failed');
+      message.error(err.response?.data?.error || t('server.operationFailed'));
     }
   };
 
   const handleDelete = async (id: string) => {
     try {
       await credentialsApi.delete(id);
-      message.success('Credential deleted');
+      message.success(t('credential.deleted'));
       load();
     } catch {
-      message.error('Failed to delete credential');
+      message.error(t('credential.deleteFailed'));
     }
   };
 
@@ -69,7 +71,7 @@ export default function Credentials() {
 
   const columns = [
     {
-      title: 'Name',
+      title: t('common.name'),
       dataIndex: 'name',
       key: 'name',
       render: (name: string) => (
@@ -77,26 +79,26 @@ export default function Credentials() {
       ),
     },
     {
-      title: 'SSH Username',
+      title: t('credential.sshUsername'),
       dataIndex: 'ssh_username',
       key: 'ssh_username',
     },
     {
-      title: 'Created',
+      title: t('common.created'),
       dataIndex: 'created_at',
       key: 'created_at',
-      render: (t: string) => new Date(t).toLocaleString(),
+      render: (v: string) => new Date(v).toLocaleString(),
     },
     {
-      title: 'Actions',
+      title: t('common.actions'),
       key: 'actions',
       width: 120,
       render: (_: any, record: Credential) => (
         <Space>
           <Button type="text" icon={<EditOutlined />} onClick={() => handleEdit(record)} />
           <Popconfirm
-            title="Delete this credential?"
-            description="Servers using it will keep their current username."
+            title={t('credential.deleteConfirm')}
+            description={t('credential.deleteDesc')}
             onConfirm={() => handleDelete(record.id)}
           >
             <Button type="text" danger icon={<DeleteOutlined />} />
@@ -109,7 +111,7 @@ export default function Credentials() {
   return (
     <div>
       <Space style={{ marginBottom: 24, width: '100%', justifyContent: 'space-between' }}>
-        <Title level={4} style={{ margin: 0 }}>Credentials</Title>
+        <Title level={4} style={{ margin: 0 }}>{t('credential.title')}</Title>
         <Button
           type="primary"
           icon={<PlusOutlined />}
@@ -119,7 +121,7 @@ export default function Credentials() {
             setModalOpen(true);
           }}
         >
-          Add Credential
+          {t('credential.add')}
         </Button>
       </Space>
 
@@ -132,24 +134,24 @@ export default function Credentials() {
       />
 
       <Modal
-        title={editing ? 'Edit Credential' : 'Add Credential'}
+        title={editing ? t('credential.edit') : t('credential.add')}
         open={modalOpen}
         onCancel={() => { setModalOpen(false); setEditing(null); }}
         onOk={() => form.submit()}
         width={480}
       >
         <Form form={form} layout="vertical" onFinish={handleSubmit}>
-          <Form.Item name="name" label="Credential Name" rules={[{ required: true }]}>
-            <Input placeholder="My SSH Key" />
+          <Form.Item name="name" label={t('credential.name')} rules={[{ required: true }]}>
+            <Input placeholder={t('credential.namePlaceholder')} />
           </Form.Item>
-          <Form.Item name="ssh_username" label="SSH Username" rules={[{ required: true }]}>
-            <Input placeholder="root" />
+          <Form.Item name="ssh_username" label={t('credential.sshUsername')} rules={[{ required: true }]}>
+            <Input placeholder={t('credential.sshUsernamePlaceholder')} />
           </Form.Item>
-          <Form.Item name="ssh_password" label="SSH Password">
-            <Input.Password placeholder="Leave blank if using key" />
+          <Form.Item name="ssh_password" label={t('credential.sshPassword')}>
+            <Input.Password placeholder={t('credential.sshPasswordPlaceholder')} />
           </Form.Item>
-          <Form.Item name="ssh_key" label="SSH Private Key">
-            <Input.TextArea rows={4} placeholder="Paste private key content" />
+          <Form.Item name="ssh_key" label={t('credential.sshKey')}>
+            <Input.TextArea rows={4} placeholder={t('credential.sshKeyPlaceholder')} />
           </Form.Item>
         </Form>
       </Modal>

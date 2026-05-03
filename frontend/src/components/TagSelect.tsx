@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Select, Space, Button, Input, ColorPicker, App } from 'antd';
+import { Select, Space, Button, Input, App } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import { tagsApi, Tag } from '../api/servers';
 
 interface Props {
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export default function TagSelect({ value = [], onChange }: Props) {
+  const { t } = useTranslation();
   const { message } = App.useApp();
   const [tags, setTags] = useState<Tag[]>([]);
   const [loading, setLoading] = useState(false);
@@ -22,7 +24,7 @@ export default function TagSelect({ value = [], onChange }: Props) {
       const res = await tagsApi.list();
       setTags(res.data || []);
     } catch {
-      message.error('Failed to load tags');
+      message.error(t('settings.loadTagsFailed'));
     }
     setLoading(false);
   };
@@ -40,7 +42,7 @@ export default function TagSelect({ value = [], onChange }: Props) {
       setNewColor('#1890ff');
       setShowNew(false);
     } catch {
-      message.error('Failed to create tag');
+      message.error(t('settings.tagCreateFailed'));
     }
   };
 
@@ -48,7 +50,7 @@ export default function TagSelect({ value = [], onChange }: Props) {
     <Space orientation="vertical" style={{ width: '100%' }}>
       <Select
         mode="multiple"
-        placeholder="Select tags"
+        placeholder={t('common.tags')}
         value={value}
         onChange={onChange}
         loading={loading}
@@ -63,7 +65,7 @@ export default function TagSelect({ value = [], onChange }: Props) {
                     size="small"
                     value={newName}
                     onChange={(e) => setNewName(e.target.value)}
-                    placeholder="Tag name"
+                    placeholder={t('settings.tagNamePlaceholder')}
                     onPressEnter={handleCreate}
                   />
                   <input
@@ -72,11 +74,11 @@ export default function TagSelect({ value = [], onChange }: Props) {
                     onChange={(e) => setNewColor(e.target.value)}
                     style={{ width: 28, height: 28, border: 'none', cursor: 'pointer' }}
                   />
-                  <Button size="small" type="primary" onClick={handleCreate}>Add</Button>
+                  <Button size="small" type="primary" onClick={handleCreate}>{t('common.add')}</Button>
                 </Space>
               ) : (
                 <Button type="dashed" size="small" icon={<PlusOutlined />} onClick={() => setShowNew(true)}>
-                  Create Tag
+                  {t('settings.createTag')}
                 </Button>
               )}
             </div>

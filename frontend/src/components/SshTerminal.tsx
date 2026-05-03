@@ -3,7 +3,8 @@ import { Terminal } from 'xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Button, Space, App } from 'antd';
-import { DisconnectOutlined, ReloadOutlined } from '@ant-design/icons';
+import { ReloadOutlined } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import 'xterm/css/xterm.css';
 
 interface Props {
@@ -11,6 +12,7 @@ interface Props {
 }
 
 export default function SshTerminal({ serverId }: Props) {
+  const { t } = useTranslation();
   const { message } = App.useApp();
   const termRef = useRef<HTMLDivElement>(null);
   const [connected, setConnected] = useState(false);
@@ -46,7 +48,7 @@ export default function SshTerminal({ serverId }: Props) {
 
     ws.onopen = () => {
       setConnected(true);
-      terminal.write('Connected to server\r\n');
+      terminal.write(t('terminal.connected') + '\r\n');
     };
 
     ws.onmessage = (ev) => {
@@ -55,11 +57,11 @@ export default function SshTerminal({ serverId }: Props) {
 
     ws.onclose = () => {
       setConnected(false);
-      terminal.write('\r\nDisconnected\r\n');
+      terminal.write('\r\n' + t('terminal.disconnected') + '\r\n');
     };
 
     ws.onerror = () => {
-      message.error('WebSocket connection failed');
+      message.error(t('terminal.connFailed'));
     };
 
     terminal.onData((data) => {
@@ -68,7 +70,7 @@ export default function SshTerminal({ serverId }: Props) {
       }
     });
 
-    terminal.onResize(({ rows, cols }) => {
+    terminal.onResize(() => {
       setTerm(terminal);
     });
 
@@ -99,10 +101,10 @@ export default function SshTerminal({ serverId }: Props) {
     <div>
       <Space style={{ marginBottom: 8 }}>
         <span style={{ color: connected ? '#52c41a' : '#ff4d4f' }}>
-          ● {connected ? 'Connected' : 'Disconnected'}
+          ● {connected ? t('common.connected') : t('common.disconnected')}
         </span>
         <Button size="small" icon={<ReloadOutlined />} onClick={handleReconnect}>
-          Reconnect
+          {t('terminal.reconnect')}
         </Button>
       </Space>
       <div
