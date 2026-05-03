@@ -11,6 +11,8 @@ export interface Server {
   cpu_cores: number;
   memory_total: number;
   disk_total: number;
+  has_docker: boolean;
+  docker_version: string;
   last_seen_at: string | null;
   created_at: string;
   tags: Tag[];
@@ -34,6 +36,16 @@ export interface Tag {
   user_id: string;
   name: string;
   color: string;
+}
+
+export interface DockerContainer {
+  id: string;
+  name: string;
+  image: string;
+  status: string;
+  state: string;
+  ports: string;
+  created: string;
 }
 
 export interface MetricPoint {
@@ -81,6 +93,18 @@ export const serversApi = {
 
   getMetricsHistory: (id: string, since?: string, until?: string) =>
     client.get<MetricPoint[]>(`/servers/${id}/metrics`, { params: { since, until } }),
+
+  checkDocker: (id: string) =>
+    client.get<{ installed: boolean; version?: string }>(`/servers/${id}/docker/check`),
+
+  getContainers: (id: string) =>
+    client.get<DockerContainer[]>(`/servers/${id}/docker/containers`),
+
+  containerAction: (id: string, containerId: string, action: 'start' | 'stop' | 'restart') =>
+    client.post(`/servers/${id}/docker/containers/${containerId}/${action}`),
+
+  getContainerLogs: (id: string, containerId: string, tail?: number) =>
+    client.get<{ logs: string }>(`/servers/${id}/docker/containers/${containerId}/logs`, { params: { tail } }),
 };
 
 export const tagsApi = {

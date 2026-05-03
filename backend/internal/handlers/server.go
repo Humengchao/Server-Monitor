@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 
 	"server-monitor/internal/models"
@@ -38,6 +39,7 @@ func (h *ServerHandler) List(c *gin.Context) {
 	db := c.MustGet("db").(*models.DB)
 	servers, err := models.GetServersByUserID(db.Raw, userID)
 	if err != nil {
+		log.Printf("List servers error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load servers"})
 		return
 	}

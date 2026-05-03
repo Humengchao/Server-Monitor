@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Typography, Descriptions, Tag, Space, Button, Card, Tabs, Spin, Modal, Form, Input, InputNumber, message } from 'antd';
-import { ArrowLeftOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, EditOutlined, DeleteOutlined, DockerOutlined } from '@ant-design/icons';
 import { DatePicker } from 'antd';
 import dayjs, { Dayjs } from 'dayjs';
 import { serversApi, Server } from '../api/servers';
@@ -50,6 +50,7 @@ export default function ServerDetail() {
   const [modalOpen, setModalOpen] = useState(false);
   const [form] = Form.useForm();
   const [tagValues, setTagValues] = useState<string[]>([]);
+  const [dockerInstalled, setDockerInstalled] = useState<boolean | null>(null);
   const [activePreset, setActivePreset] = useState<PresetKey>('1h');
   const [timeRange, setTimeRange] = useState<TimeRange>(() => getPresetRange('1h'));
 
@@ -60,6 +61,9 @@ export default function ServerDetail() {
       const res = await serversApi.list();
       const found = (res.data || []).find((s: Server) => s.id === id);
       setServer(found || null);
+      if (found) {
+        setDockerInstalled(found.has_docker);
+      }
     } catch {
       message.error('Failed to load server');
     }
@@ -144,6 +148,13 @@ export default function ServerDetail() {
           ))}
         </Space>
         <Space>
+          <Button
+            icon={<DockerOutlined />}
+            disabled={dockerInstalled !== true}
+            onClick={() => navigate(`/docker?server=${id}&expand=true`)}
+          >
+            Docker
+          </Button>
           <Button icon={<EditOutlined />} onClick={handleEdit}>Edit</Button>
           <Button danger icon={<DeleteOutlined />} onClick={handleDelete}>Delete</Button>
         </Space>

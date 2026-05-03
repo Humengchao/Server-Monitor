@@ -8,7 +8,7 @@ import (
 )
 
 type LoginHistory struct {
-	ID        uuid.UUID `json:"id"`
+	ID        int64     `json:"id"`
 	UserID    uuid.UUID `json:"user_id"`
 	IP        string    `json:"ip"`
 	UserAgent string    `json:"user_agent"`

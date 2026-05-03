@@ -49,6 +49,7 @@ func Setup(db *sql.DB, cfg *config.Config) *gin.Engine {
 	tagH := handlers.NewTagHandler()
 	metricsH := handlers.NewMetricsHandler()
 	sshH := handlers.NewSSHHandler()
+	dockerH := handlers.NewDockerHandler()
 
 	rateLimit := middleware.RateLimit(5, 1*time.Minute)
 
@@ -71,6 +72,16 @@ func Setup(db *sql.DB, cfg *config.Config) *gin.Engine {
 			servers.PUT("/:id/tags", serverH.SetTags)
 			servers.GET("/:id/metrics/latest", metricsH.GetLatest)
 			servers.GET("/:id/metrics", metricsH.GetHistory)
+			servers.GET("/:id/docker/check", dockerH.CheckDocker)
+			servers.GET("/:id/docker/containers", dockerH.ListContainers)
+			servers.POST("/:id/docker/containers/:containerId/:action", dockerH.ContainerAction)
+			servers.GET("/:id/docker/containers/:containerId/logs", dockerH.ContainerLogs)
+		}
+
+		// WebSocket endpoints (token in query param)
+		ws := api.Group("/ws", middleware.WSAuthRequired(cfg))
+		{
+			ws.GET("/servers/:id/docker/containers/:containerId/exec", dockerH.ContainerExec)
 		}
 
 		tags := api.Group("/tags", middleware.AuthRequired(cfg))

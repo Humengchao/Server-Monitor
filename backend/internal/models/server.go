@@ -23,6 +23,8 @@ type Server struct {
 	CPUCores      int            `json:"cpu_cores"`
 	MemoryTotal   int64          `json:"memory_total"`
 	DiskTotal     int64          `json:"disk_total"`
+	HasDocker     bool           `json:"has_docker"`
+	DockerVersion string         `json:"docker_version"`
 	LastSeenAt    *time.Time     `json:"last_seen_at"`
 	CreatedAt     time.Time      `json:"created_at"`
 	Tags          []Tag          `json:"tags,omitempty"`
@@ -63,6 +65,7 @@ func GetServersByUserID(db *sql.DB, userID uuid.UUID) ([]Server, error) {
 		`SELECT s.id, s.user_id, s.name, s.host, s.port, s.ssh_username, s.last_seen_at, s.created_at,
 		 COALESCE(s.ssh_host_key, ''),
 		 COALESCE(s.cpu_cores, 0), COALESCE(s.memory_total_bytes, 0), COALESCE(s.disk_total_bytes, 0),
+		 COALESCE(s.has_docker, FALSE), COALESCE(s.docker_version, ''),
 		 COALESCE(sm.cpu_percent, 0), COALESCE(sm.memory_used, 0), COALESCE(sm.memory_total, 0),
 		 COALESCE(sm.network_rx_bytes, 0), COALESCE(sm.network_tx_bytes, 0),
 		 COALESCE(sm.disk_rx_bytes, 0), COALESCE(sm.disk_tx_bytes, 0),
@@ -86,6 +89,7 @@ func GetServersByUserID(db *sql.DB, userID uuid.UUID) ([]Server, error) {
 		if err := rows.Scan(&s.ID, &s.UserID, &s.Name, &s.Host, &s.Port,
 			&s.SSHUsername, &s.LastSeenAt, &s.CreatedAt, &s.SSHHostKey,
 			&s.CPUCores, &s.MemoryTotal, &s.DiskTotal,
+			&s.HasDocker, &s.DockerVersion,
 			&m.CPUPercent, &m.MemoryUsed, &m.MemoryTotal,
 			&m.NetworkRxBytes, &m.NetworkTxBytes,
 			&m.DiskRxBytes, &m.DiskTxBytes, &m.UptimeSeconds, &recordedAt); err != nil {
@@ -157,6 +161,13 @@ func UpdateServerSystemInfo(db *sql.DB, id uuid.UUID, cpuCores int, memTotal, di
 	_, err := db.Exec(
 		`UPDATE servers SET cpu_cores=$1, memory_total_bytes=$2, disk_total_bytes=$3 WHERE id=$4`,
 		cpuCores, memTotal, diskTotal, id)
+	return err
+}
+
+func UpdateDockerInfo(db *sql.DB, id uuid.UUID, hasDocker bool, version string) error {
+	_, err := db.Exec(
+		`UPDATE servers SET has_docker=$1, docker_version=$2 WHERE id=$3`,
+		hasDocker, version, id)
 	return err
 }
 

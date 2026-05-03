@@ -149,10 +149,14 @@ func (c *Collector) collectOne(s *models.Server) (*models.MetricPoint, error) {
 		models.UpdateServerSystemInfo(c.db.Raw, s.ID, cpuCores, memTotal, diskTotal)
 	}
 
+	// Check Docker availability (cheap: reuses existing SSH connection)
+	dockerVersion := collectDockerVersion(client)
+	models.UpdateDockerInfo(c.db.Raw, s.ID, dockerVersion != "", dockerVersion)
+
 	return m, nil
 }
 
-func runCmd(client *ssh.Client, cmd string) (string, error) {
+func RunCmd(client *ssh.Client, cmd string) (string, error) {
 	sess, err := client.NewSession()
 	if err != nil {
 		return "", err
@@ -166,7 +170,7 @@ func runCmd(client *ssh.Client, cmd string) (string, error) {
 }
 
 func collectCPU(client *ssh.Client) float64 {
-	out, err := runCmd(client, "cat /proc/stat")
+	out, err := RunCmd(client, "cat /proc/stat")
 	if err != nil {
 		return 0
 	}
@@ -193,7 +197,7 @@ func collectCPU(client *ssh.Client) float64 {
 }
 
 func collectMemory(client *ssh.Client) (int64, int64) {
-	out, err := runCmd(client, "cat /proc/meminfo")
+	out, err := RunCmd(client, "cat /proc/meminfo")
 	if err != nil {
 		return 0, 0
 	}
@@ -217,7 +221,7 @@ func collectMemory(client *ssh.Client) (int64, int64) {
 }
 
 func collectNetwork(client *ssh.Client) (int64, int64) {
-	out, err := runCmd(client, "cat /proc/net/dev")
+	out, err := RunCmd(client, "cat /proc/net/dev")
 	if err != nil {
 		return 0, 0
 	}
@@ -238,7 +242,7 @@ func collectNetwork(client *ssh.Client) (int64, int64) {
 }
 
 func collectUptime(client *ssh.Client) int64 {
-	out, err := runCmd(client, "cat /proc/uptime")
+	out, err := RunCmd(client, "cat /proc/uptime")
 	if err != nil {
 		return 0
 	}
@@ -254,7 +258,7 @@ func collectUptime(client *ssh.Client) int64 {
 // Fields: major minor name reads_completed reads_merged sectors_read time_reading writes_completed writes_merged sectors_written time_writing ...
 // Sector size is 512 bytes. We sum sda/sdb/vda/nvme* etc, skip partitions (numbered).
 func collectDiskIO(client *ssh.Client) (int64, int64) {
-	out, err := runCmd(client, "cat /proc/diskstats")
+	out, err := RunCmd(client, "cat /proc/diskstats")
 	if err != nil {
 		return 0, 0
 	}
@@ -292,11 +296,11 @@ func collectDiskIO(client *ssh.Client) (int64, int64) {
 // collectSystemInfo returns cpu cores, total memory bytes, total disk bytes.
 func collectSystemInfo(client *ssh.Client) (int, int64, int64) {
 	// CPU cores
-	out, _ := runCmd(client, "nproc")
+	out, _ := RunCmd(client, "nproc")
 	cores, _ := strconv.Atoi(strings.TrimSpace(out))
 
 	// Memory total from /proc/meminfo
-	out, _ = runCmd(client, "cat /proc/meminfo")
+	out, _ = RunCmd(client, "cat /proc/meminfo")
 	var memTotalKB int64
 	for _, line := range strings.Split(out, "\n") {
 		if strings.HasPrefix(line, "MemTotal:") {
@@ -309,7 +313,7 @@ func collectSystemInfo(client *ssh.Client) (int, int64, int64) {
 	}
 
 	// Disk total from df (root filesystem)
-	out, _ = runCmd(client, "df -B1 / | tail -1")
+	out, _ = RunCmd(client, "df -B1 / | tail -1")
 	var diskTotal int64
 	fields := strings.Fields(strings.TrimSpace(out))
 	if len(fields) >= 2 {
@@ -317,4 +321,27 @@ func collectSystemInfo(client *ssh.Client) (int, int64, int64) {
 	}
 
 	return cores, memTotalKB * 1024, diskTotal
+}
+
+func collectDockerVersion(client *ssh.Client) string {
+	out, err := RunCmd(client, "docker info --format '{{.ServerVersion}}'")
+	if err != nil {
+		out, err = RunCmd(client, "sudo docker info --format '{{.ServerVersion}}'")
+		if err != nil {
+			return ""
+		}
+	}
+	return strings.TrimSpace(out)
+}
+
+// RunDockerCmd runs a docker command, falling back to sudo docker if needed.
+func RunDockerCmd(client *ssh.Client, args string) (string, error) {
+	out, err := RunCmd(client, "docker "+args)
+	if err != nil {
+		out, err = RunCmd(client, "sudo docker "+args)
+		if err != nil {
+			return "", err
+		}
+	}
+	return out, nil
 }

@@ -124,7 +124,7 @@ Add the following secrets in **Settings -> Secrets and variables -> actions**:
 - [x] **CI/CD Integration** -- GitHub Actions auto lint / build / test / deploy
 - [x] **Edit Server Info** -- Support editing host / port / SSH credentials for existing servers
 - [ ] **Login History** -- Show last login IP, time, and location as a notification after login
-- [ ] **Docker Management** -- View Docker container list and status on server detail page
+- [x] **Docker Management** -- View Docker container list and status on server detail page
 - [ ] **SSH Key Management** -- Manage SSH keys independently (create, name, associate with servers)
 - [ ] **SSH Credential Management** -- Manage reusable SSH usernames and passwords
 - [ ] **Account Settings** -- Allow users to change passwords and manage account security

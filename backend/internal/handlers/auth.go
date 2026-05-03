@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net"
 	"net/http"
 	"strconv"
@@ -88,7 +89,14 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	// Get last login BEFORE inserting the new record
-	lastLogin, _ := models.GetLastLogin(db.Raw, user.ID)
+	lastLogin, err := models.GetLastLogin(db.Raw, user.ID)
+	if err != nil {
+		log.Printf("GetLastLogin error: %v", err)
+	} else if lastLogin != nil {
+		log.Printf("GetLastLogin found: ip=%s time=%s", lastLogin.IP, lastLogin.LoggedAt)
+	} else {
+		log.Printf("GetLastLogin: no previous login")
+	}
 
 	models.InsertLoginRecord(db.Raw, user.ID, ip, ua, true)
 

@@ -40,7 +40,7 @@ func Load() (*Config, error) {
 		TLSCertFile:   os.Getenv("TLS_CERT_FILE"),
 		TLSKeyFile:    os.Getenv("TLS_KEY_FILE"),
 		CORSOrigin:    getEnv("CORS_ORIGIN", "http://localhost:5173"),
-		PollInterval:  10,
+		PollInterval:  3,
 	}, nil
 }
 

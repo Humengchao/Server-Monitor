@@ -1,15 +1,27 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
-  Row, Col, Button, Modal, Form, Input, InputNumber, Select, message, notification, Typography, Space
+  Row, Col, Button, Modal, Form, Input, InputNumber, Select, message, Typography, Space, App
 } from 'antd';
 import { PlusOutlined, ReloadOutlined, FilterOutlined, SafetyOutlined } from '@ant-design/icons';
 import ServerCard from '../components/ServerCard';
 import TagSelect from '../components/TagSelect';
 import { serversApi, Server, Tag } from '../api/servers';
 
-const { Title } = Typography;
+const { Title, Text } = Typography;
+
+async function lookupIP(ip: string): Promise<string> {
+  try {
+    const res = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,regionName,city,isp`);
+    const data = await res.json();
+    if (data.status === 'success') {
+      return `${data.isp} ${data.country} ${data.city}`;
+    }
+  } catch { /* ignore */ }
+  return '';
+}
 
 export default function Dashboard() {
+  const { notification } = App.useApp();
   const [servers, setServers] = useState<Server[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -20,19 +32,58 @@ export default function Dashboard() {
 
   useEffect(() => {
     const raw = localStorage.getItem('last_login');
-    if (raw) {
-      localStorage.removeItem('last_login');
-      try {
-        const { ip, logged_at } = JSON.parse(raw);
+    if (!raw) return;
+    localStorage.removeItem('last_login');
+
+    let parsed: { ip: string; logged_at: string };
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return;
+    }
+
+    const { ip, logged_at } = parsed;
+    const loginTime = new Date(logged_at).toLocaleString();
+
+    fetch('https://api.ipify.org?format=json')
+      .then((r) => r.json())
+      .then(async (data) => {
+        const currentIP = data.ip;
+        const [currentLoc, lastLoc] = await Promise.all([
+          lookupIP(currentIP),
+          lookupIP(ip),
+        ]);
+
+        const currentDesc = currentLoc ? `IP: ${currentIP}\nLocation: ${currentLoc}` : `IP: ${currentIP}`;
+        const lastDesc = lastLoc
+          ? `IP: ${ip}\nLocation: ${lastLoc}\nTime: ${loginTime}`
+          : `IP: ${ip}\nTime: ${loginTime}`;
+
         notification.info({
-          message: 'Last Login',
-          description: `IP: ${ip}  Time: ${new Date(logged_at).toLocaleString()}`,
+          title: 'Login Successful',
+          description: (
+            <div style={{ whiteSpace: 'pre-line' }}>
+              <div><Text strong>Current Login:</Text></div>
+              <div>{currentDesc}</div>
+              <div style={{ marginTop: 8 }}><Text strong>Previous Login:</Text></div>
+              <div>{lastDesc}</div>
+            </div>
+          ),
           icon: <SafetyOutlined style={{ color: '#1890ff' }} />,
           placement: 'bottomRight',
-          duration: 5,
+          duration: 10,
         });
-      } catch { /* ignore */ }
-    }
+      })
+      .catch(() => {
+        // Fallback if IP lookup fails
+        notification.info({
+          title: 'Login Successful',
+          description: `Previous Login - IP: ${ip}  Time: ${loginTime}`,
+          icon: <SafetyOutlined style={{ color: '#1890ff' }} />,
+          placement: 'bottomRight',
+          duration: 8,
+        });
+      });
   }, []);
 
   const loadServers = useCallback(async (showLoading = true) => {
@@ -48,7 +99,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadServers();
-    const timer = setInterval(() => loadServers(false), 1000);
+    const timer = setInterval(() => loadServers(false), 3000);
     return () => clearInterval(timer);
   }, [loadServers]);
 

@@ -52,6 +52,8 @@ CREATE INDEX IF NOT EXISTS idx_servers_user ON servers(user_id);
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS cpu_cores INT DEFAULT 0;
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS memory_total_bytes BIGINT DEFAULT 0;
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS disk_total_bytes BIGINT DEFAULT 0;
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS has_docker BOOLEAN DEFAULT FALSE;
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS docker_version VARCHAR(32) DEFAULT '';
 
 -- Add disk I/O columns to server_metrics
 ALTER TABLE server_metrics ADD COLUMN IF NOT EXISTS disk_rx_bytes BIGINT DEFAULT 0;

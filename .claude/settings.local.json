@@ -14,7 +14,10 @@
       "Bash(curl *)",
       "Bash(go fmt *)",
       "Bash(git *)",
-      "Bash(python3 *)"
+      "Bash(python3 *)",
+      "Bash(node -e \"try { require\\('@ant-design/icons/DockerOutlined'\\); console.log\\('EXISTS'\\); } catch\\(e\\) { console.log\\('NOT FOUND'\\); }\")",
+      "Bash(node -e \"['CaretRightOutlined','PauseOutlined','StopOutlined','SyncOutlined','ArrowRightOutlined'].forEach\\(n => { try { require\\('@ant-design/icons/'+n\\); console.log\\(n+': EXISTS'\\); } catch\\(e\\) { console.log\\(n+': NOT FOUND'\\); } }\\)\")",
+      "Bash(go run *)"
     ]
   }
 }
