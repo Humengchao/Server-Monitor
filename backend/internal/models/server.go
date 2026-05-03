@@ -2,6 +2,7 @@ package models
 
 import (
 	"database/sql"
+	"log"
 	"time"
 
 	"server-monitor/internal/crypto"
@@ -11,24 +12,26 @@ import (
 )
 
 type Server struct {
-	ID            uuid.UUID      `json:"id"`
-	UserID        uuid.UUID      `json:"user_id"`
-	Name          string         `json:"name"`
-	Host          string         `json:"host"`
-	Port          int            `json:"port"`
-	SSHUsername   string         `json:"ssh_username"`
-	SSHPassword   string         `json:"-"`
-	SSHKey        string         `json:"-"`
-	SSHHostKey    string         `json:"ssh_host_key,omitempty"`
-	CPUCores      int            `json:"cpu_cores"`
-	MemoryTotal   int64          `json:"memory_total"`
-	DiskTotal     int64          `json:"disk_total"`
-	HasDocker     bool           `json:"has_docker"`
-	DockerVersion string         `json:"docker_version"`
-	LastSeenAt    *time.Time     `json:"last_seen_at"`
-	CreatedAt     time.Time      `json:"created_at"`
-	Tags          []Tag          `json:"tags,omitempty"`
-	LatestMetrics *LatestMetrics `json:"latest_metrics,omitempty"`
+	ID             uuid.UUID      `json:"id"`
+	UserID         uuid.UUID      `json:"user_id"`
+	Name           string         `json:"name"`
+	Host           string         `json:"host"`
+	Port           int            `json:"port"`
+	SSHUsername    string         `json:"ssh_username"`
+	SSHPassword    string         `json:"-"`
+	SSHKey         string         `json:"-"`
+	SSHHostKey     string         `json:"ssh_host_key,omitempty"`
+	CredentialID   *uuid.UUID     `json:"credential_id,omitempty"`
+	CredentialName string         `json:"credential_name,omitempty"`
+	CPUCores       int            `json:"cpu_cores"`
+	MemoryTotal    int64          `json:"memory_total"`
+	DiskTotal      int64          `json:"disk_total"`
+	HasDocker      bool           `json:"has_docker"`
+	DockerVersion  string         `json:"docker_version"`
+	LastSeenAt     *time.Time     `json:"last_seen_at"`
+	CreatedAt      time.Time      `json:"created_at"`
+	Tags           []Tag          `json:"tags,omitempty"`
+	LatestMetrics  *LatestMetrics `json:"latest_metrics,omitempty"`
 }
 
 type LatestMetrics struct {
@@ -54,9 +57,9 @@ func CreateServer(db *DB, s *Server) error {
 		return err
 	}
 	return db.Raw.QueryRow(
-		`INSERT INTO servers (id, user_id, name, host, port, ssh_username, ssh_password, ssh_key, ssh_host_key)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING created_at`,
-		s.ID, s.UserID, s.Name, s.Host, s.Port, s.SSHUsername, encPassword, encKey, s.SSHHostKey,
+		`INSERT INTO servers (id, user_id, name, host, port, ssh_username, ssh_password, ssh_key, ssh_host_key, credential_id)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING created_at`,
+		s.ID, s.UserID, s.Name, s.Host, s.Port, s.SSHUsername, encPassword, encKey, s.SSHHostKey, s.CredentialID,
 	).Scan(&s.CreatedAt)
 }
 
@@ -64,6 +67,8 @@ func GetServersByUserID(db *sql.DB, userID uuid.UUID) ([]Server, error) {
 	rows, err := db.Query(
 		`SELECT s.id, s.user_id, s.name, s.host, s.port, s.ssh_username, s.last_seen_at, s.created_at,
 		 COALESCE(s.ssh_host_key, ''),
+		 COALESCE(s.credential_id::text, ''),
+		 COALESCE(c.name, ''),
 		 COALESCE(s.cpu_cores, 0), COALESCE(s.memory_total_bytes, 0), COALESCE(s.disk_total_bytes, 0),
 		 COALESCE(s.has_docker, FALSE), COALESCE(s.docker_version, ''),
 		 COALESCE(sm.cpu_percent, 0), COALESCE(sm.memory_used, 0), COALESCE(sm.memory_total, 0),
@@ -71,6 +76,7 @@ func GetServersByUserID(db *sql.DB, userID uuid.UUID) ([]Server, error) {
 		 COALESCE(sm.disk_rx_bytes, 0), COALESCE(sm.disk_tx_bytes, 0),
 		 COALESCE(sm.uptime_seconds, 0), sm.recorded_at
 		 FROM servers s
+		 LEFT JOIN credentials c ON c.id = s.credential_id
 		 LEFT JOIN LATERAL (
 			 SELECT * FROM server_metrics WHERE server_id = s.id ORDER BY recorded_at DESC LIMIT 1
 		 ) sm ON true
@@ -86,14 +92,22 @@ func GetServersByUserID(db *sql.DB, userID uuid.UUID) ([]Server, error) {
 		var s Server
 		var m LatestMetrics
 		var recordedAt sql.NullTime
+		var credIDStr string
 		if err := rows.Scan(&s.ID, &s.UserID, &s.Name, &s.Host, &s.Port,
 			&s.SSHUsername, &s.LastSeenAt, &s.CreatedAt, &s.SSHHostKey,
+			&credIDStr, &s.CredentialName,
 			&s.CPUCores, &s.MemoryTotal, &s.DiskTotal,
 			&s.HasDocker, &s.DockerVersion,
 			&m.CPUPercent, &m.MemoryUsed, &m.MemoryTotal,
 			&m.NetworkRxBytes, &m.NetworkTxBytes,
 			&m.DiskRxBytes, &m.DiskTxBytes, &m.UptimeSeconds, &recordedAt); err != nil {
 			return nil, err
+		}
+		if credIDStr != "" {
+			id, err := uuid.Parse(credIDStr)
+			if err == nil {
+				s.CredentialID = &id
+			}
 		}
 		if recordedAt.Valid {
 			m.RecordedAt = recordedAt.Time
@@ -107,13 +121,21 @@ func GetServersByUserID(db *sql.DB, userID uuid.UUID) ([]Server, error) {
 func GetServerByIDAndUser(db *DB, id, userID uuid.UUID) (*Server, error) {
 	s := &Server{}
 	var encPassword, encKey string
+	var credID sql.NullString
 	err := db.Raw.QueryRow(
-		`SELECT id, user_id, name, host, port, ssh_username, ssh_password, ssh_key, COALESCE(ssh_host_key, ''), last_seen_at, created_at
+		`SELECT id, user_id, name, host, port, ssh_username, ssh_password, ssh_key, COALESCE(ssh_host_key, ''),
+		 credential_id, last_seen_at, created_at
 		 FROM servers WHERE id=$1 AND user_id=$2`, id, userID,
 	).Scan(&s.ID, &s.UserID, &s.Name, &s.Host, &s.Port,
-		&s.SSHUsername, &encPassword, &encKey, &s.SSHHostKey, &s.LastSeenAt, &s.CreatedAt)
+		&s.SSHUsername, &encPassword, &encKey, &s.SSHHostKey, &credID, &s.LastSeenAt, &s.CreatedAt)
 	if err != nil {
 		return nil, err
+	}
+	if credID.Valid {
+		cid, err := uuid.Parse(credID.String)
+		if err == nil {
+			s.CredentialID = &cid
+		}
 	}
 	s.SSHPassword, err = crypto.Decrypt(encPassword, db.EncryptionKey)
 	if err != nil {
@@ -123,14 +145,18 @@ func GetServerByIDAndUser(db *DB, id, userID uuid.UUID) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Override with credential if linked
+	if err := s.ResolveCredentials(db); err != nil {
+		log.Printf("resolve credentials for server %s: %v", s.Name, err)
+	}
 	return s, nil
 }
 
 func UpdateServer(db *DB, s *Server) error {
 	_, err := db.Raw.Exec(
-		`UPDATE servers SET name=$1, host=$2, port=$3, ssh_username=$4, ssh_host_key=$5
-		 WHERE id=$6 AND user_id=$7`,
-		s.Name, s.Host, s.Port, s.SSHUsername, s.SSHHostKey, s.ID, s.UserID)
+		`UPDATE servers SET name=$1, host=$2, port=$3, ssh_username=$4, ssh_host_key=$5, credential_id=$6
+		 WHERE id=$7 AND user_id=$8`,
+		s.Name, s.Host, s.Port, s.SSHUsername, s.SSHHostKey, s.CredentialID, s.ID, s.UserID)
 	if err != nil {
 		return err
 	}
@@ -169,6 +195,22 @@ func UpdateDockerInfo(db *sql.DB, id uuid.UUID, hasDocker bool, version string) 
 		`UPDATE servers SET has_docker=$1, docker_version=$2 WHERE id=$3`,
 		hasDocker, version, id)
 	return err
+}
+
+// ResolveCredentials overwrites SSHUsername/SSHPassword/SSHKey from the linked credential
+// when CredentialID is set. Call after fetching a server that needs decrypted SSH creds.
+func (s *Server) ResolveCredentials(db *DB) error {
+	if s.CredentialID == nil {
+		return nil
+	}
+	cred, err := GetCredentialByIDInternal(db, *s.CredentialID)
+	if err != nil {
+		return err
+	}
+	s.SSHUsername = cred.SSHUsername
+	s.SSHPassword = cred.SSHPassword
+	s.SSHKey = cred.SSHKey
+	return nil
 }
 
 func DeleteServer(db *sql.DB, id, userID uuid.UUID) error {
@@ -233,7 +275,7 @@ func GetServerByID(db *sql.DB, id uuid.UUID) (*Server, error) {
 
 // GetAllServers returns all servers with decrypted credentials (for collector).
 func GetAllServers(db *DB) ([]Server, error) {
-	rows, err := db.Raw.Query(`SELECT id, user_id, name, host, port, ssh_username, ssh_password, ssh_key, COALESCE(ssh_host_key, '') FROM servers`)
+	rows, err := db.Raw.Query(`SELECT id, user_id, name, host, port, ssh_username, ssh_password, ssh_key, COALESCE(ssh_host_key, ''), credential_id FROM servers`)
 	if err != nil {
 		return nil, err
 	}
@@ -242,12 +284,23 @@ func GetAllServers(db *DB) ([]Server, error) {
 	for rows.Next() {
 		var s Server
 		var encPassword, encKey string
+		var credID sql.NullString
 		if err := rows.Scan(&s.ID, &s.UserID, &s.Name, &s.Host, &s.Port,
-			&s.SSHUsername, &encPassword, &encKey, &s.SSHHostKey); err != nil {
+			&s.SSHUsername, &encPassword, &encKey, &s.SSHHostKey, &credID); err != nil {
 			return nil, err
+		}
+		if credID.Valid {
+			id, err := uuid.Parse(credID.String)
+			if err == nil {
+				s.CredentialID = &id
+			}
 		}
 		s.SSHPassword, _ = crypto.Decrypt(encPassword, db.EncryptionKey)
 		s.SSHKey, _ = crypto.Decrypt(encKey, db.EncryptionKey)
+		// Override with credential if linked
+		if err := s.ResolveCredentials(db); err != nil {
+			log.Printf("collector: resolve credentials for %s: %v", s.Name, err)
+		}
 		servers = append(servers, s)
 	}
 	return servers, nil

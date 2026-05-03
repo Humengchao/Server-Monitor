@@ -50,6 +50,7 @@ func Setup(db *sql.DB, cfg *config.Config) *gin.Engine {
 	metricsH := handlers.NewMetricsHandler()
 	sshH := handlers.NewSSHHandler()
 	dockerH := handlers.NewDockerHandler()
+	credH := handlers.NewCredentialHandler()
 
 	rateLimit := middleware.RateLimit(5, 1*time.Minute)
 
@@ -89,6 +90,14 @@ func Setup(db *sql.DB, cfg *config.Config) *gin.Engine {
 			tags.GET("", tagH.List)
 			tags.POST("", tagH.Create)
 			tags.DELETE("/:id", tagH.Delete)
+		}
+
+		credentials := api.Group("/credentials", middleware.AuthRequired(cfg))
+		{
+			credentials.GET("", credH.List)
+			credentials.POST("", credH.Create)
+			credentials.PUT("/:id", credH.Update)
+			credentials.DELETE("/:id", credH.Delete)
 		}
 
 		api.GET("/ssh/:id", middleware.WSAuthRequired(cfg), sshH.Handle)

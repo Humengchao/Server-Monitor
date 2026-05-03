@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { Collapse, Table, Tag, Button, Space, Typography, Spin, message, Empty, Drawer } from 'antd';
+import { Collapse, Table, Tag, Button, Space, Typography, Spin, Empty, Drawer, App } from 'antd';
 import { ReloadOutlined, CaretRightOutlined, PauseOutlined, SyncOutlined, ArrowRightOutlined, FileTextOutlined, CodeOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { serversApi, Server, DockerContainer } from '../api/servers';
@@ -186,6 +186,7 @@ function ExecDrawer({ serverId, containerId, containerName, open, onClose }: {
 }
 
 export default function Docker() {
+  const { message } = App.useApp();
   const [servers, setServers] = useState<ServerDocker[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
   const [activeKeys, setActiveKeys] = useState<string[]>([]);

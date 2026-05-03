@@ -9,6 +9,7 @@ import ServerDetail from './pages/ServerDetail';
 import Settings from './pages/Settings';
 import LoginHistory from './pages/LoginHistory';
 import Docker from './pages/Docker';
+import Credentials from './pages/Credentials';
 import { useAuthStore } from './store/authStore';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -38,6 +39,7 @@ export default function App() {
               <Route path="settings" element={<Settings />} />
               <Route path="login-history" element={<LoginHistory />} />
               <Route path="docker" element={<Docker />} />
+              <Route path="credentials" element={<Credentials />} />
             </Route>
             <Route path="*" element={<Navigate to="/dashboard" />} />
           </Routes>

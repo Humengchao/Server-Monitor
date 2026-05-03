@@ -8,6 +8,8 @@ export interface Server {
   port: number;
   ssh_username: string;
   ssh_host_key?: string;
+  credential_id?: string;
+  credential_name?: string;
   cpu_cores: number;
   memory_total: number;
   disk_total: number;
@@ -67,20 +69,22 @@ export const serversApi = {
     name: string;
     host: string;
     port?: number;
-    ssh_username: string;
+    ssh_username?: string;
     ssh_password?: string;
     ssh_key?: string;
     ssh_host_key?: string;
+    credential_id?: string;
   }) => client.post<Server>('/servers', data),
 
   update: (id: string, data: {
     name: string;
     host: string;
     port?: number;
-    ssh_username: string;
+    ssh_username?: string;
     ssh_password?: string;
     ssh_key?: string;
     ssh_host_key?: string;
+    credential_id?: string;
   }) => client.put<Server>(`/servers/${id}`, data),
 
   delete: (id: string) => client.delete(`/servers/${id}`),

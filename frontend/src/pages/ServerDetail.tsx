@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Typography, Descriptions, Tag, Space, Button, Card, Tabs, Spin, Modal, Form, Input, InputNumber, message } from 'antd';
-import { ArrowLeftOutlined, EditOutlined, DeleteOutlined, DockerOutlined } from '@ant-design/icons';
+import { Typography, Descriptions, Tag, Space, Button, Card, Tabs, Spin, Modal, Form, Input, InputNumber, App } from 'antd';
+import { ArrowLeftOutlined, EditOutlined, DeleteOutlined, DockerOutlined, KeyOutlined } from '@ant-design/icons';
 import { DatePicker } from 'antd';
 import dayjs, { Dayjs } from 'dayjs';
 import { serversApi, Server } from '../api/servers';
@@ -9,6 +9,7 @@ import { useMetrics, TimeRange } from '../hooks/useMetrics';
 import MetricsChart from '../components/MetricsChart';
 import SshTerminal from '../components/SshTerminal';
 import TagSelect from '../components/TagSelect';
+import CredentialSelect from '../components/CredentialSelect';
 
 const { Title } = Typography;
 const { RangePicker } = DatePicker;
@@ -43,6 +44,7 @@ const presets: { key: PresetKey; label: string }[] = [
 ];
 
 export default function ServerDetail() {
+  const { message } = App.useApp();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [server, setServer] = useState<Server | null>(null);
@@ -50,6 +52,7 @@ export default function ServerDetail() {
   const [modalOpen, setModalOpen] = useState(false);
   const [form] = Form.useForm();
   const [tagValues, setTagValues] = useState<string[]>([]);
+  const [selectedCredential, setSelectedCredential] = useState<string | undefined>(undefined);
   const [dockerInstalled, setDockerInstalled] = useState<boolean | null>(null);
   const [activePreset, setActivePreset] = useState<PresetKey>('1h');
   const [timeRange, setTimeRange] = useState<TimeRange>(() => getPresetRange('1h'));
@@ -91,6 +94,7 @@ export default function ServerDetail() {
 
   const handleEdit = () => {
     if (!server) return;
+    setSelectedCredential(server.credential_id || undefined);
     form.setFieldsValue({
       name: server.name,
       host: server.host,
@@ -105,7 +109,8 @@ export default function ServerDetail() {
   const handleSubmit = async (values: any) => {
     if (!server) return;
     try {
-      await serversApi.update(server.id, values);
+      const payload = { ...values, credential_id: selectedCredential || null };
+      await serversApi.update(server.id, payload);
       await serversApi.setTags(server.id, tagValues);
       message.success('Server updated');
       setModalOpen(false);
@@ -164,6 +169,11 @@ export default function ServerDetail() {
         <Descriptions.Item label="Host">{server.host}</Descriptions.Item>
         <Descriptions.Item label="SSH Port">{server.port}</Descriptions.Item>
         <Descriptions.Item label="SSH User">{server.ssh_username}</Descriptions.Item>
+        {server.credential_name && (
+          <Descriptions.Item label="Credential">
+            <Space><KeyOutlined />{server.credential_name}</Space>
+          </Descriptions.Item>
+        )}
         <Descriptions.Item label="Added">{new Date(server.created_at).toLocaleString()}</Descriptions.Item>
       </Descriptions>
 
@@ -227,15 +237,22 @@ export default function ServerDetail() {
           <Form.Item name="port" label="SSH Port" initialValue={22}>
             <InputNumber min={1} max={65535} style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item name="ssh_username" label="SSH Username" rules={[{ required: true }]}>
-            <Input placeholder="root" />
+          <Form.Item label="Credential">
+            <CredentialSelect value={selectedCredential} onChange={setSelectedCredential} />
           </Form.Item>
-          <Form.Item name="ssh_password" label="SSH Password">
-            <Input.Password placeholder="Leave blank to keep unchanged" />
-          </Form.Item>
-          <Form.Item name="ssh_key" label="SSH Private Key">
-            <Input.TextArea rows={4} placeholder="Leave blank to keep unchanged" />
-          </Form.Item>
+          {!selectedCredential && (
+            <>
+              <Form.Item name="ssh_username" label="SSH Username" rules={[{ required: true }]}>
+                <Input placeholder="root" />
+              </Form.Item>
+              <Form.Item name="ssh_password" label="SSH Password">
+                <Input.Password placeholder="Leave blank to keep unchanged" />
+              </Form.Item>
+              <Form.Item name="ssh_key" label="SSH Private Key">
+                <Input.TextArea rows={4} placeholder="Leave blank to keep unchanged" />
+              </Form.Item>
+            </>
+          )}
           <Form.Item name="ssh_host_key" label="SSH Host Key (optional)">
             <Input.TextArea rows={2} placeholder="Paste server public key for host verification" />
           </Form.Item>

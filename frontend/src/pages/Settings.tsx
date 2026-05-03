@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Table, Button, Modal, Form, Input, Popconfirm, message, Space, Typography, ColorPicker } from 'antd';
+import { Card, Table, Button, Modal, Form, Input, Popconfirm, Space, Typography, ColorPicker, App } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { tagsApi, Tag } from '../api/servers';
 
 const { Title } = Typography;
 
 export default function Settings() {
+  const { message } = App.useApp();
   const [tags, setTags] = useState<Tag[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);

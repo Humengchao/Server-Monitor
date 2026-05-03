@@ -6,6 +6,7 @@ import {
   LogoutOutlined,
   CloudServerOutlined,
   DockerOutlined,
+  KeyOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
@@ -21,6 +22,7 @@ export default function AppLayout() {
   const menuItems = [
     { key: '/dashboard', icon: <DashboardOutlined />, label: 'Servers' },
     { key: '/docker', icon: <DockerOutlined />, label: 'Docker' },
+    { key: '/credentials', icon: <KeyOutlined />, label: 'Credentials' },
     { key: '/settings', icon: <SettingOutlined />, label: 'Settings' },
   ];
 

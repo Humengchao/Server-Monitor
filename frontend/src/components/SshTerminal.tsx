@@ -2,7 +2,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import { Terminal } from 'xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
-import { Button, Space, message } from 'antd';
+import { Button, Space, App } from 'antd';
 import { DisconnectOutlined, ReloadOutlined } from '@ant-design/icons';
 import 'xterm/css/xterm.css';
 
@@ -11,6 +11,7 @@ interface Props {
 }
 
 export default function SshTerminal({ serverId }: Props) {
+  const { message } = App.useApp();
   const termRef = useRef<HTMLDivElement>(null);
   const [connected, setConnected] = useState(false);
   const [term, setTerm] = useState<Terminal | null>(null);

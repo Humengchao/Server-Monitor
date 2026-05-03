@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Select, Space, Button, Input, ColorPicker, message } from 'antd';
+import { Select, Space, Button, Input, ColorPicker, App } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { tagsApi, Tag } from '../api/servers';
 
@@ -9,6 +9,7 @@ interface Props {
 }
 
 export default function TagSelect({ value = [], onChange }: Props) {
+  const { message } = App.useApp();
   const [tags, setTags] = useState<Tag[]>([]);
   const [loading, setLoading] = useState(false);
   const [newName, setNewName] = useState('');
@@ -44,7 +45,7 @@ export default function TagSelect({ value = [], onChange }: Props) {
   };
 
   return (
-    <Space direction="vertical" style={{ width: '100%' }}>
+    <Space orientation="vertical" style={{ width: '100%' }}>
       <Select
         mode="multiple"
         placeholder="Select tags"
@@ -52,7 +53,7 @@ export default function TagSelect({ value = [], onChange }: Props) {
         onChange={onChange}
         loading={loading}
         style={{ width: '100%' }}
-        dropdownRender={(menu) => (
+        popupRender={(menu) => (
           <>
             {menu}
             <div style={{ padding: 8, borderTop: '1px solid #f0f0f0' }}>

@@ -70,3 +70,19 @@ CREATE TABLE IF NOT EXISTS login_history (
 );
 
 CREATE INDEX IF NOT EXISTS idx_login_history_user_time ON login_history(user_id, logged_at DESC);
+
+-- SSH credentials (encrypted)
+CREATE TABLE IF NOT EXISTS credentials (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name VARCHAR(128) NOT NULL,
+    ssh_username VARCHAR(128) NOT NULL DEFAULT 'root',
+    ssh_password TEXT DEFAULT '',
+    ssh_key TEXT DEFAULT '',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_credentials_user ON credentials(user_id);
+
+-- Link servers to credentials
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS credential_id UUID REFERENCES credentials(id) ON DELETE SET NULL;

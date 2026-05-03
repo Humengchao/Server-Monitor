@@ -5,6 +5,7 @@ import {
 import { PlusOutlined, ReloadOutlined, FilterOutlined, SafetyOutlined } from '@ant-design/icons';
 import ServerCard from '../components/ServerCard';
 import TagSelect from '../components/TagSelect';
+import CredentialSelect from '../components/CredentialSelect';
 import { serversApi, Server, Tag } from '../api/servers';
 
 const { Title, Text } = Typography;
@@ -29,6 +30,7 @@ export default function Dashboard() {
   const [form] = Form.useForm();
   const [tagValues, setTagValues] = useState<string[]>([]);
   const [filterTagIds, setFilterTagIds] = useState<string[]>([]);
+  const [selectedCredential, setSelectedCredential] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     const raw = localStorage.getItem('last_login');
@@ -105,12 +107,13 @@ export default function Dashboard() {
 
   const handleSubmit = async (values: any) => {
     try {
+      const payload = { ...values, credential_id: selectedCredential || null };
       if (editingServer) {
-        await serversApi.update(editingServer.id, values);
+        await serversApi.update(editingServer.id, payload);
         await serversApi.setTags(editingServer.id, tagValues);
         message.success('Server updated');
       } else {
-        const res = await serversApi.create(values);
+        const res = await serversApi.create(payload);
         if (tagValues.length > 0) {
           await serversApi.setTags(res.data.id, tagValues);
         }
@@ -119,6 +122,7 @@ export default function Dashboard() {
       setModalOpen(false);
       form.resetFields();
       setTagValues([]);
+      setSelectedCredential(undefined);
       setEditingServer(null);
       loadServers();
     } catch (err: any) {
@@ -139,6 +143,7 @@ export default function Dashboard() {
 
   const handleEdit = (server: Server) => {
     setEditingServer(server);
+    setSelectedCredential(server.credential_id || undefined);
     form.setFieldsValue({
       name: server.name,
       host: server.host,
@@ -193,6 +198,7 @@ export default function Dashboard() {
             setEditingServer(null);
             form.resetFields();
             setTagValues([]);
+            setSelectedCredential(undefined);
             setModalOpen(true);
           }}>
             Add Server
@@ -232,15 +238,22 @@ export default function Dashboard() {
           <Form.Item name="port" label="SSH Port" initialValue={22}>
             <InputNumber min={1} max={65535} style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item name="ssh_username" label="SSH Username" rules={[{ required: true }]}>
-            <Input placeholder="root" />
+          <Form.Item label="Credential">
+            <CredentialSelect value={selectedCredential} onChange={setSelectedCredential} />
           </Form.Item>
-          <Form.Item name="ssh_password" label="SSH Password">
-            <Input.Password placeholder="Leave blank to use key" />
-          </Form.Item>
-          <Form.Item name="ssh_key" label="SSH Private Key">
-            <Input.TextArea rows={4} placeholder="Paste private key content" />
-          </Form.Item>
+          {!selectedCredential && (
+            <>
+              <Form.Item name="ssh_username" label="SSH Username" rules={[{ required: true }]}>
+                <Input placeholder="root" />
+              </Form.Item>
+              <Form.Item name="ssh_password" label="SSH Password">
+                <Input.Password placeholder="Leave blank to use key" />
+              </Form.Item>
+              <Form.Item name="ssh_key" label="SSH Private Key">
+                <Input.TextArea rows={4} placeholder="Paste private key content" />
+              </Form.Item>
+            </>
+          )}
           <Form.Item name="ssh_host_key" label="SSH Host Key (optional)">
             <Input.TextArea rows={2} placeholder="Paste server public key for host verification" />
           </Form.Item>

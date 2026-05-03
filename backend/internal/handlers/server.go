@@ -15,23 +15,25 @@ type ServerHandler struct{}
 func NewServerHandler() *ServerHandler { return &ServerHandler{} }
 
 type CreateServerRequest struct {
-	Name        string `json:"name" binding:"required"`
-	Host        string `json:"host" binding:"required"`
-	Port        int    `json:"port"`
-	SSHUsername string `json:"ssh_username" binding:"required"`
-	SSHPassword string `json:"ssh_password"`
-	SSHKey      string `json:"ssh_key"`
-	SSHHostKey  string `json:"ssh_host_key"`
+	Name         string     `json:"name" binding:"required"`
+	Host         string     `json:"host" binding:"required"`
+	Port         int        `json:"port"`
+	SSHUsername  string     `json:"ssh_username"`
+	SSHPassword  string     `json:"ssh_password"`
+	SSHKey       string     `json:"ssh_key"`
+	SSHHostKey   string     `json:"ssh_host_key"`
+	CredentialID *uuid.UUID `json:"credential_id"`
 }
 
 type UpdateServerRequest struct {
-	Name        string `json:"name" binding:"required"`
-	Host        string `json:"host" binding:"required"`
-	Port        int    `json:"port"`
-	SSHUsername string `json:"ssh_username" binding:"required"`
-	SSHPassword string `json:"ssh_password"`
-	SSHKey      string `json:"ssh_key"`
-	SSHHostKey  string `json:"ssh_host_key"`
+	Name         string     `json:"name" binding:"required"`
+	Host         string     `json:"host" binding:"required"`
+	Port         int        `json:"port"`
+	SSHUsername  string     `json:"ssh_username"`
+	SSHPassword  string     `json:"ssh_password"`
+	SSHKey       string     `json:"ssh_key"`
+	SSHHostKey   string     `json:"ssh_host_key"`
+	CredentialID *uuid.UUID `json:"credential_id"`
 }
 
 func (h *ServerHandler) List(c *gin.Context) {
@@ -66,16 +68,24 @@ func (h *ServerHandler) Create(c *gin.Context) {
 	if req.Port == 0 {
 		req.Port = 22
 	}
+	// When using a credential, default username to "root" if not provided
+	if req.CredentialID != nil && req.SSHUsername == "" {
+		req.SSHUsername = "root"
+	}
+	if req.SSHUsername == "" {
+		req.SSHUsername = "root"
+	}
 	db := c.MustGet("db").(*models.DB)
 	s := &models.Server{
-		UserID:      userID,
-		Name:        req.Name,
-		Host:        req.Host,
-		Port:        req.Port,
-		SSHUsername: req.SSHUsername,
-		SSHPassword: req.SSHPassword,
-		SSHKey:      req.SSHKey,
-		SSHHostKey:  req.SSHHostKey,
+		UserID:       userID,
+		Name:         req.Name,
+		Host:         req.Host,
+		Port:         req.Port,
+		SSHUsername:  req.SSHUsername,
+		SSHPassword:  req.SSHPassword,
+		SSHKey:       req.SSHKey,
+		SSHHostKey:   req.SSHHostKey,
+		CredentialID: req.CredentialID,
 	}
 	if err := models.CreateServer(db, s); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create server"})
@@ -99,17 +109,21 @@ func (h *ServerHandler) Update(c *gin.Context) {
 	if req.Port == 0 {
 		req.Port = 22
 	}
+	if req.SSHUsername == "" {
+		req.SSHUsername = "root"
+	}
 	db := c.MustGet("db").(*models.DB)
 	s := &models.Server{
-		ID:          id,
-		UserID:      userID,
-		Name:        req.Name,
-		Host:        req.Host,
-		Port:        req.Port,
-		SSHUsername: req.SSHUsername,
-		SSHPassword: req.SSHPassword,
-		SSHKey:      req.SSHKey,
-		SSHHostKey:  req.SSHHostKey,
+		ID:           id,
+		UserID:       userID,
+		Name:         req.Name,
+		Host:         req.Host,
+		Port:         req.Port,
+		SSHUsername:  req.SSHUsername,
+		SSHPassword:  req.SSHPassword,
+		SSHKey:       req.SSHKey,
+		SSHHostKey:   req.SSHHostKey,
+		CredentialID: req.CredentialID,
 	}
 	if err := models.UpdateServer(db, s); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update server"})
