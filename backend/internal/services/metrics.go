@@ -170,28 +170,43 @@ func RunCmd(client *ssh.Client, cmd string) (string, error) {
 }
 
 func collectCPU(client *ssh.Client) float64 {
-	out, err := RunCmd(client, "cat /proc/stat")
+	// Take two samples 500ms apart to get instantaneous CPU usage
+	out1, err := RunCmd(client, "cat /proc/stat")
 	if err != nil {
 		return 0
 	}
-	lines := strings.Split(out, "\n")
-	for _, line := range lines {
-		if strings.HasPrefix(line, "cpu ") {
-			fields := strings.Fields(line)
-			if len(fields) < 8 {
-				return 0
-			}
-			// Parse: user nice system idle iowait irq softirq steal
-			var vals [8]int64
-			for i := 0; i < 8 && i < len(fields)-1; i++ {
-				vals[i], _ = strconv.ParseInt(fields[i+1], 10, 64)
-			}
-			idle := vals[3] + vals[4]
-			total := vals[0] + vals[1] + vals[2] + vals[3] + vals[4] + vals[5] + vals[6] + vals[7]
-			if total > 0 {
-				return (1.0 - float64(idle)/float64(total)) * 100
+	time.Sleep(500 * time.Millisecond)
+	out2, err := RunCmd(client, "cat /proc/stat")
+	if err != nil {
+		return 0
+	}
+
+	parseCPULine := func(out string) (idle, total int64) {
+		for _, line := range strings.Split(out, "\n") {
+			if strings.HasPrefix(line, "cpu ") {
+				fields := strings.Fields(line)
+				if len(fields) < 8 {
+					return
+				}
+				var vals [8]int64
+				for i := 0; i < 8 && i < len(fields)-1; i++ {
+					vals[i], _ = strconv.ParseInt(fields[i+1], 10, 64)
+				}
+				idle = vals[3] + vals[4]
+				total = vals[0] + vals[1] + vals[2] + vals[3] + vals[4] + vals[5] + vals[6] + vals[7]
+				return
 			}
 		}
+		return
+	}
+
+	idle1, total1 := parseCPULine(out1)
+	idle2, total2 := parseCPULine(out2)
+
+	dIdle := idle2 - idle1
+	dTotal := total2 - total1
+	if dTotal > 0 {
+		return (1.0 - float64(dIdle)/float64(dTotal)) * 100
 	}
 	return 0
 }
@@ -201,7 +216,7 @@ func collectMemory(client *ssh.Client) (int64, int64) {
 	if err != nil {
 		return 0, 0
 	}
-	var memTotal, memAvailable int64
+	var memTotal, memFree, buffers, cached int64
 	lines := strings.Split(out, "\n")
 	for _, line := range lines {
 		fields := strings.Fields(line)
@@ -212,12 +227,20 @@ func collectMemory(client *ssh.Client) (int64, int64) {
 		switch fields[0] {
 		case "MemTotal:":
 			memTotal = val
-		case "MemAvailable:":
-			memAvailable = val
+		case "MemFree:":
+			memFree = val
+		case "Buffers:":
+			buffers = val
+		case "Cached:":
+			cached = val
 		}
 	}
 	// /proc/meminfo is in kB, convert to bytes
-	return (memTotal - memAvailable) * 1024, memTotal * 1024
+	used := memTotal - memFree - buffers - cached
+	if used < 0 {
+		used = 0
+	}
+	return used * 1024, memTotal * 1024
 }
 
 func collectNetwork(client *ssh.Client) (int64, int64) {
