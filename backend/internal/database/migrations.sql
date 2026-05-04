@@ -86,3 +86,7 @@ CREATE INDEX IF NOT EXISTS idx_credentials_user ON credentials(user_id);
 
 -- Link servers to credentials
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS credential_id UUID REFERENCES credentials(id) ON DELETE SET NULL;
+
+-- Server expiration date and notes
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT '';

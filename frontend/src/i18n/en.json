@@ -92,6 +92,12 @@
   "server.addedLabel": "Added",
   "server.docker": "Docker",
   "server.serverDetail": "Server Detail",
+  "server.expiresAt": "Expiration Date",
+  "server.expiresAtPlaceholder": "Select expiration date (optional)",
+  "server.notes": "Notes",
+  "server.notesPlaceholder": "Enter server notes...",
+  "server.notesSaved": "Notes saved",
+  "server.notesSaveFailed": "Failed to save notes",
 
   "metrics.title": "Metrics",
   "metrics.cpu": "CPU",

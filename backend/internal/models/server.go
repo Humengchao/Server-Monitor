@@ -28,6 +28,8 @@ type Server struct {
 	DiskTotal      int64          `json:"disk_total"`
 	HasDocker      bool           `json:"has_docker"`
 	DockerVersion  string         `json:"docker_version"`
+	ExpiresAt      *time.Time     `json:"expires_at"`
+	Notes          string         `json:"notes"`
 	LastSeenAt     *time.Time     `json:"last_seen_at"`
 	CreatedAt      time.Time      `json:"created_at"`
 	Tags           []Tag          `json:"tags,omitempty"`
@@ -57,9 +59,9 @@ func CreateServer(db *DB, s *Server) error {
 		return err
 	}
 	return db.Raw.QueryRow(
-		`INSERT INTO servers (id, user_id, name, host, port, ssh_username, ssh_password, ssh_key, ssh_host_key, credential_id)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING created_at`,
-		s.ID, s.UserID, s.Name, s.Host, s.Port, s.SSHUsername, encPassword, encKey, s.SSHHostKey, s.CredentialID,
+		`INSERT INTO servers (id, user_id, name, host, port, ssh_username, ssh_password, ssh_key, ssh_host_key, credential_id, expires_at, notes)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING created_at`,
+		s.ID, s.UserID, s.Name, s.Host, s.Port, s.SSHUsername, encPassword, encKey, s.SSHHostKey, s.CredentialID, s.ExpiresAt, s.Notes,
 	).Scan(&s.CreatedAt)
 }
 
@@ -71,6 +73,7 @@ func GetServersByUserID(db *sql.DB, userID uuid.UUID) ([]Server, error) {
 		 COALESCE(c.name, ''),
 		 COALESCE(s.cpu_cores, 0), COALESCE(s.memory_total_bytes, 0), COALESCE(s.disk_total_bytes, 0),
 		 COALESCE(s.has_docker, FALSE), COALESCE(s.docker_version, ''),
+		 s.expires_at, COALESCE(s.notes, ''),
 		 COALESCE(sm.cpu_percent, 0), COALESCE(sm.memory_used, 0), COALESCE(sm.memory_total, 0),
 		 COALESCE(sm.network_rx_bytes, 0), COALESCE(sm.network_tx_bytes, 0),
 		 COALESCE(sm.disk_rx_bytes, 0), COALESCE(sm.disk_tx_bytes, 0),
@@ -93,15 +96,20 @@ func GetServersByUserID(db *sql.DB, userID uuid.UUID) ([]Server, error) {
 		var m LatestMetrics
 		var recordedAt sql.NullTime
 		var credIDStr string
+		var expiresAt sql.NullTime
 		if err := rows.Scan(&s.ID, &s.UserID, &s.Name, &s.Host, &s.Port,
 			&s.SSHUsername, &s.LastSeenAt, &s.CreatedAt, &s.SSHHostKey,
 			&credIDStr, &s.CredentialName,
 			&s.CPUCores, &s.MemoryTotal, &s.DiskTotal,
 			&s.HasDocker, &s.DockerVersion,
+			&expiresAt, &s.Notes,
 			&m.CPUPercent, &m.MemoryUsed, &m.MemoryTotal,
 			&m.NetworkRxBytes, &m.NetworkTxBytes,
 			&m.DiskRxBytes, &m.DiskTxBytes, &m.UptimeSeconds, &recordedAt); err != nil {
 			return nil, err
+		}
+		if expiresAt.Valid {
+			s.ExpiresAt = &expiresAt.Time
 		}
 		if credIDStr != "" {
 			id, err := uuid.Parse(credIDStr)
@@ -122,12 +130,13 @@ func GetServerByIDAndUser(db *DB, id, userID uuid.UUID) (*Server, error) {
 	s := &Server{}
 	var encPassword, encKey string
 	var credID sql.NullString
+	var expiresAt sql.NullTime
 	err := db.Raw.QueryRow(
 		`SELECT id, user_id, name, host, port, ssh_username, ssh_password, ssh_key, COALESCE(ssh_host_key, ''),
-		 credential_id, last_seen_at, created_at
+		 credential_id, last_seen_at, created_at, expires_at, COALESCE(notes, '')
 		 FROM servers WHERE id=$1 AND user_id=$2`, id, userID,
 	).Scan(&s.ID, &s.UserID, &s.Name, &s.Host, &s.Port,
-		&s.SSHUsername, &encPassword, &encKey, &s.SSHHostKey, &credID, &s.LastSeenAt, &s.CreatedAt)
+		&s.SSHUsername, &encPassword, &encKey, &s.SSHHostKey, &credID, &s.LastSeenAt, &s.CreatedAt, &expiresAt, &s.Notes)
 	if err != nil {
 		return nil, err
 	}
@@ -136,6 +145,9 @@ func GetServerByIDAndUser(db *DB, id, userID uuid.UUID) (*Server, error) {
 		if err == nil {
 			s.CredentialID = &cid
 		}
+	}
+	if expiresAt.Valid {
+		s.ExpiresAt = &expiresAt.Time
 	}
 	s.SSHPassword, err = crypto.Decrypt(encPassword, db.EncryptionKey)
 	if err != nil {
@@ -154,9 +166,9 @@ func GetServerByIDAndUser(db *DB, id, userID uuid.UUID) (*Server, error) {
 
 func UpdateServer(db *DB, s *Server) error {
 	_, err := db.Raw.Exec(
-		`UPDATE servers SET name=$1, host=$2, port=$3, ssh_username=$4, ssh_host_key=$5, credential_id=$6
-		 WHERE id=$7 AND user_id=$8`,
-		s.Name, s.Host, s.Port, s.SSHUsername, s.SSHHostKey, s.CredentialID, s.ID, s.UserID)
+		`UPDATE servers SET name=$1, host=$2, port=$3, ssh_username=$4, ssh_host_key=$5, credential_id=$6, expires_at=$7, notes=$8
+		 WHERE id=$9 AND user_id=$10`,
+		s.Name, s.Host, s.Port, s.SSHUsername, s.SSHHostKey, s.CredentialID, s.ExpiresAt, s.Notes, s.ID, s.UserID)
 	if err != nil {
 		return err
 	}

@@ -3,6 +3,7 @@ package handlers
 import (
 	"log"
 	"net/http"
+	"time"
 
 	"server-monitor/internal/models"
 
@@ -23,6 +24,8 @@ type CreateServerRequest struct {
 	SSHKey       string     `json:"ssh_key"`
 	SSHHostKey   string     `json:"ssh_host_key"`
 	CredentialID *uuid.UUID `json:"credential_id"`
+	ExpiresAt    *time.Time `json:"expires_at"`
+	Notes        string     `json:"notes"`
 }
 
 type UpdateServerRequest struct {
@@ -34,6 +37,8 @@ type UpdateServerRequest struct {
 	SSHKey       string     `json:"ssh_key"`
 	SSHHostKey   string     `json:"ssh_host_key"`
 	CredentialID *uuid.UUID `json:"credential_id"`
+	ExpiresAt    *time.Time `json:"expires_at"`
+	Notes        string     `json:"notes"`
 }
 
 func (h *ServerHandler) List(c *gin.Context) {
@@ -86,6 +91,8 @@ func (h *ServerHandler) Create(c *gin.Context) {
 		SSHKey:       req.SSHKey,
 		SSHHostKey:   req.SSHHostKey,
 		CredentialID: req.CredentialID,
+		ExpiresAt:    req.ExpiresAt,
+		Notes:        req.Notes,
 	}
 	if err := models.CreateServer(db, s); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create server"})
@@ -124,6 +131,8 @@ func (h *ServerHandler) Update(c *gin.Context) {
 		SSHKey:       req.SSHKey,
 		SSHHostKey:   req.SSHHostKey,
 		CredentialID: req.CredentialID,
+		ExpiresAt:    req.ExpiresAt,
+		Notes:        req.Notes,
 	}
 	if err := models.UpdateServer(db, s); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update server"})

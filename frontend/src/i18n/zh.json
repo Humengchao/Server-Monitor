@@ -92,6 +92,12 @@
   "server.addedLabel": "添加时间",
   "server.docker": "Docker",
   "server.serverDetail": "服务器详情",
+  "server.expiresAt": "到期时间",
+  "server.expiresAtPlaceholder": "选择到期时间（可选）",
+  "server.notes": "备注",
+  "server.notesPlaceholder": "输入服务器备注...",
+  "server.notesSaved": "备注已保存",
+  "server.notesSaveFailed": "保存备注失败",
 
   "metrics.title": "监控指标",
   "metrics.cpu": "CPU",

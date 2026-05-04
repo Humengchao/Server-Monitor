@@ -2,6 +2,8 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   Row, Col, Button, Modal, Form, Input, InputNumber, Select, Typography, Space, App
 } from 'antd';
+import { DatePicker } from 'antd';
+import dayjs from 'dayjs';
 import { PlusOutlined, ReloadOutlined, FilterOutlined, SafetyOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import ServerCard from '../components/ServerCard';
@@ -108,7 +110,11 @@ export default function Dashboard() {
 
   const handleSubmit = async (values: any) => {
     try {
-      const payload = { ...values, credential_id: selectedCredential || null };
+      const payload = {
+        ...values,
+        credential_id: selectedCredential || null,
+        expires_at: values.expires_at ? values.expires_at.toISOString() : null,
+      };
       if (editingServer) {
         await serversApi.update(editingServer.id, payload);
         await serversApi.setTags(editingServer.id, tagValues);
@@ -151,6 +157,7 @@ export default function Dashboard() {
       port: server.port,
       ssh_username: server.ssh_username,
       ssh_host_key: server.ssh_host_key || '',
+      expires_at: server.expires_at ? dayjs(server.expires_at) : null,
     });
     setTagValues(server.tags?.map((t) => t.id) || []);
     setModalOpen(true);
@@ -257,6 +264,9 @@ export default function Dashboard() {
           )}
           <Form.Item name="ssh_host_key" label={t('server.sshHostKey')}>
             <Input.TextArea rows={2} placeholder={t('server.sshHostKeyPlaceholder')} />
+          </Form.Item>
+          <Form.Item name="expires_at" label={t('server.expiresAt')}>
+            <DatePicker showTime style={{ width: '100%' }} placeholder={t('server.expiresAtPlaceholder')} />
           </Form.Item>
           <Form.Item label={t('server.tags')}>
             <TagSelect value={tagValues} onChange={setTagValues} />

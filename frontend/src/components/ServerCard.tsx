@@ -8,6 +8,7 @@ import {
   DatabaseOutlined,
   HddOutlined,
   ClockCircleOutlined,
+  CalendarOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { Server } from '../api/servers';
@@ -34,18 +35,57 @@ function formatUptime(seconds: number): string {
   return `${d}d`;
 }
 
+function diffYMD(from: Date, to: Date): { years: number; months: number; days: number } {
+  let years = to.getFullYear() - from.getFullYear();
+  let months = to.getMonth() - from.getMonth();
+  let days = to.getDate() - from.getDate();
+  if (days < 0) {
+    months--;
+    const prevMonth = new Date(to.getFullYear(), to.getMonth(), 0);
+    days += prevMonth.getDate();
+  }
+  if (months < 0) {
+    years--;
+    months += 12;
+  }
+  return { years, months, days };
+}
+
+function getExpirationInfo(expiresAt?: string | null, lang?: string): { text: string; color: string } | null {
+  if (!expiresAt) return null;
+  const now = new Date();
+  const exp = new Date(expiresAt);
+  const isExpired = exp.getTime() < now.getTime();
+  const from = isExpired ? exp : now;
+  const to = isExpired ? now : exp;
+  const { years, months, days } = diffYMD(from, to);
+
+  const parts: string[] = [];
+  if (years > 0) parts.push(lang === 'zh' ? `${years}年` : `${years}y`);
+  if (months > 0) parts.push(lang === 'zh' ? `${months}月` : `${months}m`);
+  if (days > 0 || parts.length === 0) parts.push(lang === 'zh' ? `${days}天` : `${days}d`);
+  const diffStr = parts.join('');
+
+  if (isExpired) return { text: lang === 'zh' ? `已过期${diffStr}` : `Expired ${diffStr}`, color: '#ff4d4f' };
+  if (years > 0) return { text: lang === 'zh' ? `${diffStr}后到期` : `${diffStr} left`, color: '#52c41a' };
+  if (months > 0) return { text: lang === 'zh' ? `${diffStr}后到期` : `${diffStr} left`, color: months <= 1 ? '#ff4d4f' : '#faad14' };
+  return { text: lang === 'zh' ? `${diffStr}后到期` : `${diffStr} left`, color: '#ff4d4f' };
+}
+
 interface Props {
   server: Server;
 }
 
 export default function ServerCard({ server }: Props) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const m = server.latest_metrics;
   const cpuPercent = m ? Math.round(m.cpu_percent) : 0;
   const memPercent = m && m.memory_total ? Math.round((m.memory_used / m.memory_total) * 100) : 0;
 
   const isOnline = m?.recorded_at && (Date.now() - new Date(m.recorded_at).getTime()) < 120000;
+  const lang = i18n.language?.startsWith('zh') ? 'zh' : 'en';
+  const expInfo = getExpirationInfo(server.expires_at, lang);
 
   return (
     <Card
@@ -70,11 +110,14 @@ export default function ServerCard({ server }: Props) {
         ))}
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 8, flexWrap: 'wrap', gap: 4 }}>
         <Space size={4}><DashboardOutlined style={{ color: '#8c8c8c' }} /><Text type="secondary" style={{ fontSize: 12 }}>{server.cpu_cores || 0} {t('card.core')}</Text></Space>
         <Space size={4}><DatabaseOutlined style={{ color: '#8c8c8c' }} /><Text type="secondary" style={{ fontSize: 12 }}>{formatGB(server.memory_total)}</Text></Space>
         <Space size={4}><HddOutlined style={{ color: '#8c8c8c' }} /><Text type="secondary" style={{ fontSize: 12 }}>{formatGB(server.disk_total)}</Text></Space>
         <Space size={4}><ClockCircleOutlined style={{ color: '#8c8c8c' }} /><Text type="secondary" style={{ fontSize: 12 }}>{formatUptime(m?.uptime_seconds || 0)}</Text></Space>
+        {expInfo && (
+          <Space size={4}><CalendarOutlined style={{ color: expInfo.color }} /><Text style={{ fontSize: 12, color: expInfo.color }}>{expInfo.text}</Text></Space>
+        )}
       </div>
 
       <Divider style={{ margin: '8px 0' }} />

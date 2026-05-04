@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Typography, Descriptions, Tag, Space, Button, Card, Tabs, Spin, Modal, Form, Input, InputNumber, App } from 'antd';
-import { ArrowLeftOutlined, EditOutlined, DeleteOutlined, DockerOutlined, KeyOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, EditOutlined, DeleteOutlined, DockerOutlined, KeyOutlined, SaveOutlined } from '@ant-design/icons';
 import { DatePicker } from 'antd';
 import dayjs, { Dayjs } from 'dayjs';
 import { useTranslation } from 'react-i18next';
@@ -37,7 +37,7 @@ function getPresetRange(key: PresetKey): TimeRange {
 }
 
 export default function ServerDetail() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { message } = App.useApp();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -48,6 +48,8 @@ export default function ServerDetail() {
   const [tagValues, setTagValues] = useState<string[]>([]);
   const [selectedCredential, setSelectedCredential] = useState<string | undefined>(undefined);
   const [dockerInstalled, setDockerInstalled] = useState<boolean | null>(null);
+  const [notes, setNotes] = useState('');
+  const [notesChanged, setNotesChanged] = useState(false);
   const [activePreset, setActivePreset] = useState<PresetKey>('1h');
   const [timeRange, setTimeRange] = useState<TimeRange>(() => getPresetRange('1h'));
 
@@ -68,6 +70,8 @@ export default function ServerDetail() {
       setServer(found || null);
       if (found) {
         setDockerInstalled(found.has_docker);
+        setNotes(found.notes || '');
+        setNotesChanged(false);
       }
     } catch {
       message.error(t('server.loadFailed'));
@@ -103,6 +107,7 @@ export default function ServerDetail() {
       port: server.port,
       ssh_username: server.ssh_username,
       ssh_host_key: server.ssh_host_key || '',
+      expires_at: server.expires_at ? dayjs(server.expires_at) : null,
     });
     setTagValues(server.tags?.map((t) => t.id) || []);
     setModalOpen(true);
@@ -111,7 +116,11 @@ export default function ServerDetail() {
   const handleSubmit = async (values: any) => {
     if (!server) return;
     try {
-      const payload = { ...values, credential_id: selectedCredential || null };
+      const payload = {
+        ...values,
+        credential_id: selectedCredential || null,
+        expires_at: values.expires_at ? values.expires_at.toISOString() : null,
+      };
       await serversApi.update(server.id, payload);
       await serversApi.setTags(server.id, tagValues);
       message.success(t('server.updated'));
@@ -139,6 +148,22 @@ export default function ServerDetail() {
         }
       },
     });
+  };
+
+  const handleSaveNotes = async () => {
+    if (!server) return;
+    try {
+      await serversApi.update(server.id, {
+        name: server.name,
+        host: server.host,
+        port: server.port,
+        notes,
+      });
+      message.success(t('server.notesSaved'));
+      setNotesChanged(false);
+    } catch {
+      message.error(t('server.notesSaveFailed'));
+    }
   };
 
   if (loading) return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}><Spin size="large" /></div>;
@@ -177,6 +202,30 @@ export default function ServerDetail() {
           </Descriptions.Item>
         )}
         <Descriptions.Item label={t('server.addedLabel')}>{new Date(server.created_at).toLocaleString()}</Descriptions.Item>
+        {server.expires_at && (
+          <Descriptions.Item label={t('server.expiresAt')}>
+            {(() => {
+              const now = new Date();
+              const exp = new Date(server.expires_at!);
+              const isExpired = exp.getTime() < now.getTime();
+              const from = isExpired ? exp : now;
+              const to = isExpired ? now : exp;
+              let years = to.getFullYear() - from.getFullYear();
+              let months = to.getMonth() - from.getMonth();
+              let days = to.getDate() - from.getDate();
+              if (days < 0) { months--; days += new Date(to.getFullYear(), to.getMonth(), 0).getDate(); }
+              if (months < 0) { years--; months += 12; }
+              const parts: string[] = [];
+              const lang = i18n.language?.startsWith('zh') ? 'zh' : 'en';
+              if (years > 0) parts.push(lang === 'zh' ? `${years}年` : `${years}y`);
+              if (months > 0) parts.push(lang === 'zh' ? `${months}月` : `${months}m`);
+              if (days > 0 || parts.length === 0) parts.push(lang === 'zh' ? `${days}天` : `${days}d`);
+              const diffStr = parts.join('');
+              if (isExpired) return `${exp.toLocaleString()} (${lang === 'zh' ? `已过期${diffStr}` : `Expired ${diffStr}`})`;
+              return `${exp.toLocaleString()} (${lang === 'zh' ? `${diffStr}后到期` : `${diffStr} left`})`;
+            })()}
+          </Descriptions.Item>
+        )}
       </Descriptions>
 
       <Tabs defaultActiveKey="metrics" items={[
@@ -220,6 +269,30 @@ export default function ServerDetail() {
             </Card>
           ),
         },
+        {
+          key: 'notes',
+          label: t('server.notes'),
+          children: (
+            <Card>
+              <Input.TextArea
+                rows={12}
+                value={notes}
+                onChange={(e) => { setNotes(e.target.value); setNotesChanged(true); }}
+                placeholder={t('server.notesPlaceholder')}
+              />
+              <div style={{ marginTop: 16, textAlign: 'right' }}>
+                <Button
+                  type="primary"
+                  icon={<SaveOutlined />}
+                  disabled={!notesChanged}
+                  onClick={handleSaveNotes}
+                >
+                  {t('common.save')}
+                </Button>
+              </div>
+            </Card>
+          ),
+        },
       ]} />
 
       <Modal
@@ -257,6 +330,9 @@ export default function ServerDetail() {
           )}
           <Form.Item name="ssh_host_key" label={t('server.sshHostKey')}>
             <Input.TextArea rows={2} placeholder={t('server.sshHostKeyPlaceholder')} />
+          </Form.Item>
+          <Form.Item name="expires_at" label={t('server.expiresAt')}>
+            <DatePicker showTime style={{ width: '100%' }} placeholder={t('server.expiresAtPlaceholder')} />
           </Form.Item>
           <Form.Item label={t('server.tags')}>
             <TagSelect value={tagValues} onChange={setTagValues} />

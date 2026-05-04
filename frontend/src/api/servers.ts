@@ -15,6 +15,8 @@ export interface Server {
   disk_total: number;
   has_docker: boolean;
   docker_version: string;
+  expires_at?: string | null;
+  notes?: string;
   last_seen_at: string | null;
   created_at: string;
   tags: Tag[];
@@ -74,6 +76,8 @@ export const serversApi = {
     ssh_key?: string;
     ssh_host_key?: string;
     credential_id?: string;
+    expires_at?: string | null;
+    notes?: string;
   }) => client.post<Server>('/servers', data),
 
   update: (id: string, data: {
@@ -85,6 +89,8 @@ export const serversApi = {
     ssh_key?: string;
     ssh_host_key?: string;
     credential_id?: string;
+    expires_at?: string | null;
+    notes?: string;
   }) => client.put<Server>(`/servers/${id}`, data),
 
   delete: (id: string) => client.delete(`/servers/${id}`),
