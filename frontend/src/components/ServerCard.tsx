@@ -29,10 +29,10 @@ function formatGB(bytes: number): string {
   return (bytes / 1024 / 1024 / 1024).toFixed(1) + ' GB';
 }
 
-function formatUptime(seconds: number): string {
-  if (!seconds) return '0d';
-  const d = (seconds / 86400).toFixed(1);
-  return `${d}d`;
+function formatUptime(seconds: number, t: (key: string, options?: any) => string): string {
+  if (!seconds) return t('metrics.uptimeFormat', { days: 0 });
+  const d = Math.floor(seconds / 86400);
+  return t('metrics.uptimeFormat', { days: d });
 }
 
 function diffYMD(from: Date, to: Date): { years: number; months: number; days: number } {
@@ -114,7 +114,7 @@ export default function ServerCard({ server }: Props) {
         <Space size={4}><DashboardOutlined style={{ color: '#8c8c8c' }} /><Text type="secondary" style={{ fontSize: 12 }}>{server.cpu_cores || 0} {t('card.core')}</Text></Space>
         <Space size={4}><DatabaseOutlined style={{ color: '#8c8c8c' }} /><Text type="secondary" style={{ fontSize: 12 }}>{formatGB(server.memory_total)}</Text></Space>
         <Space size={4}><HddOutlined style={{ color: '#8c8c8c' }} /><Text type="secondary" style={{ fontSize: 12 }}>{formatGB(server.disk_total)}</Text></Space>
-        <Space size={4}><ClockCircleOutlined style={{ color: '#8c8c8c' }} /><Text type="secondary" style={{ fontSize: 12 }}>{formatUptime(m?.uptime_seconds || 0)}</Text></Space>
+        <Space size={4}><ClockCircleOutlined style={{ color: '#8c8c8c' }} /><Text type="secondary" style={{ fontSize: 12 }}>{formatUptime(m?.uptime_seconds || 0, t)}</Text></Space>
         {expInfo && (
           <Space size={4}><CalendarOutlined style={{ color: expInfo.color }} /><Text style={{ fontSize: 12, color: expInfo.color }}>{expInfo.text}</Text></Space>
         )}

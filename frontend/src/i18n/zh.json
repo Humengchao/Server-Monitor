@@ -105,6 +105,7 @@
   "metrics.memoryUsed": "已用内存",
   "metrics.memoryTotal": "总内存",
   "metrics.uptime": "运行时间",
+  "metrics.uptimeFormat": "在线:{{days}}天",
   "metrics.network": "网络",
   "metrics.disk": "磁盘",
   "metrics.noData": "暂无监控数据",

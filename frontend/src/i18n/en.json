@@ -105,6 +105,7 @@
   "metrics.memoryUsed": "Memory Used",
   "metrics.memoryTotal": "Memory Total",
   "metrics.uptime": "Uptime",
+  "metrics.uptimeFormat": "Online: {{days}}d",
   "metrics.network": "Network",
   "metrics.disk": "Disk",
   "metrics.noData": "No metric data yet",

@@ -132,3 +132,4 @@ Add the following secrets in **Settings -> Secrets and variables -> actions**:
 - [ ] **Process List** -- Show current processes on detail page, sortable by CPU / Memory / Name / PID
 - [x] **Disk Usage** -- Show current disk usage on detail page
 - [ ] **Alert Notifications** -- Push notifications via email or Bark when a server goes offline or CPU exceeds 80%
+- [ ] **Probe API** -- Provide probe API or web page similar to https://dt.quwa.cc/ for account-level monitoring
