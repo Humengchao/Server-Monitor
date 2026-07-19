@@ -102,8 +102,11 @@ npm install && npm run dev
 | `JWT_SECRET` | JWT 签名密钥（随机字符串） | `openssl rand -hex 32` |
 | `ENCRYPTION_KEY` | SSH 凭据加密密钥（32 字节） | `openssl rand -hex 16` |
 | `DOMAIN` | 网站域名 | `svr.hmchxd.com` |
+| `GHCR_PAT` | GitHub 个人访问令牌（read:packages 权限） | 见下方说明 |
 
 > `GITHUB_TOKEN` 由 GitHub 自动提供，无需手动配置。
+>
+> **GHCR_PAT 说明**：部署服务器需要从 GitHub Container Registry 拉取私有镜像，请到 [GitHub Settings → Tokens](https://github.com/settings/tokens) 创建一个 Personal Access Token (classic)，勾选 `read:packages` 权限，将生成的 token 填入此 Secret。
 
 ---
 

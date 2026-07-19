@@ -102,8 +102,11 @@ Add the following secrets in **Settings -> Secrets and variables -> actions**:
 | `JWT_SECRET` | JWT signing secret (random string) | `openssl rand -hex 32` |
 | `ENCRYPTION_KEY` | SSH credential encryption key (32 bytes) | `openssl rand -hex 16` |
 | `DOMAIN` | Website domain name | `svr.hmchxd.com` |
+| `GHCR_PAT` | GitHub personal access token (read:packages scope) | See note below |
 
 > `GITHUB_TOKEN` is automatically provided by GitHub -- no manual configuration needed.
+>
+> **GHCR_PAT note**: The deploy server needs to pull private images from GitHub Container Registry. Create a Personal Access Token (classic) at [GitHub Settings → Tokens](https://github.com/settings/tokens) with `read:packages` scope, and add the generated token to this secret.
 
 ---
 
