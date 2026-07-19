@@ -64,10 +64,24 @@ func InsertMetric(db *sql.DB, serverID uuid.UUID, m *MetricPoint) error {
 	return err
 }
 
+// MaxMetricsPoints limits data points returned to keep charts responsive.
+const MaxMetricsPoints = 500
+
 func GetMetrics(db *sql.DB, serverID uuid.UUID, since, until time.Time) ([]MetricPoint, error) {
+	// Calculate bucket size so that total points ≤ MaxMetricsPoints.
+	bucketSecs := int(until.Sub(since).Seconds()) / MaxMetricsPoints
+	if bucketSecs < 1 {
+		bucketSecs = 1
+	}
+
 	rows, err := db.Query(
-		`SELECT cpu_percent, memory_used, memory_total, network_rx_bytes, network_tx_bytes, disk_rx_bytes, disk_tx_bytes, uptime_seconds, recorded_at
-		 FROM server_metrics WHERE server_id=$1 AND recorded_at >= $2 AND recorded_at <= $3 ORDER BY recorded_at ASC`, serverID, since, until)
+		`SELECT AVG(cpu_percent)::DECIMAL(5,2), AVG(memory_used)::BIGINT, AVG(memory_total)::BIGINT,
+		        AVG(network_rx_bytes)::BIGINT, AVG(network_tx_bytes)::BIGINT,
+		        AVG(disk_rx_bytes)::BIGINT, AVG(disk_tx_bytes)::BIGINT,
+		        AVG(uptime_seconds)::BIGINT,
+		        TO_TIMESTAMP(FLOOR(EXTRACT(EPOCH FROM recorded_at) / $4) * $4) AS bucket_time
+		 FROM server_metrics WHERE server_id=$1 AND recorded_at >= $2 AND recorded_at <= $3
+		 GROUP BY bucket_time ORDER BY bucket_time ASC`, serverID, since, until, bucketSecs)
 	if err != nil {
 		return nil, err
 	}
@@ -80,6 +94,9 @@ func GetMetrics(db *sql.DB, serverID uuid.UUID, since, until time.Time) ([]Metri
 			return nil, err
 		}
 		points = append(points, m)
+	}
+	if points == nil {
+		points = []MetricPoint{}
 	}
 	return points, nil
 }

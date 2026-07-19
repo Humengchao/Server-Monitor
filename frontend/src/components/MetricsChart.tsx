@@ -7,12 +7,19 @@ interface Props {
   history: MetricPoint[];
 }
 
+// Downsample data to keep chart rendering performant.
+function downsample(data: any[], maxPoints: number): any[] {
+  if (data.length <= maxPoints) return data;
+  const step = data.length / maxPoints;
+  return Array.from({ length: maxPoints }, (_, i) => data[Math.floor(i * step)]);
+}
+
 function MetricsChart({ history }: Props) {
   const { t } = useTranslation();
 
   const data = useMemo(() => {
     if (!history || history.length === 0) return [];
-    return history.map((p) => ({
+    const raw = history.map((p) => ({
       time: new Date(p.recorded_at).toLocaleString(),
       CPU: Math.round(p.cpu_percent),
       Memory: Math.round((p.memory_used / p.memory_total) * 100) || 0,
@@ -21,6 +28,7 @@ function MetricsChart({ history }: Props) {
       [t('metrics.diskRead')]: +(p.disk_rx_bytes / 1024 / 1024).toFixed(2),
       [t('metrics.diskWrite')]: +(p.disk_tx_bytes / 1024 / 1024).toFixed(2),
     }));
+    return downsample(raw, 300);
   }, [history, t]);
 
   if (data.length === 0) {
