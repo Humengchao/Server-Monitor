@@ -39,10 +39,13 @@ function LogsModal({ serverId, containerId, containerName, onClose }: {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const ac = new AbortController();
+    setLoading(true);
     serversApi.getContainerLogs(serverId, containerId, 500)
       .then((r) => setLogs(r.data.logs || t('docker.empty')))
       .catch(() => setLogs(t('docker.loadLogsFailed')))
       .finally(() => setLoading(false));
+    return () => ac.abort();
   }, [serverId, containerId, t]);
 
   return (
@@ -105,9 +108,11 @@ function ExecDrawer({ serverId, containerId, containerName, open, onClose }: {
     terminal.loadAddon(fitAddon);
     terminal.open(termRef.current);
 
-    const fitTimer = setTimeout(() => {
+    // Use ResizeObserver for robust terminal sizing (replaces fragile 300ms timeout)
+    const ro = new ResizeObserver(() => {
       try { fitAddon.fit(); } catch {}
-    }, 300);
+    });
+    ro.observe(termRef.current!);
 
     const token = localStorage.getItem('token');
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -148,7 +153,7 @@ function ExecDrawer({ serverId, containerId, containerName, open, onClose }: {
     window.addEventListener('resize', handleResize);
 
     return () => {
-      clearTimeout(fitTimer);
+      ro.disconnect();
       window.removeEventListener('resize', handleResize);
       ws.close();
       terminal.dispose();

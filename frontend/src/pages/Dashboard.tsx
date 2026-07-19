@@ -15,12 +15,18 @@ const { Title, Text } = Typography;
 
 async function lookupIP(ip: string): Promise<string> {
   try {
-    const res = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,regionName,city,isp`);
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 3000);
+    const res = await fetch(
+      `http://ip-api.com/json/${ip}?fields=status,country,regionName,city,isp`,
+      { signal: ac.signal },
+    );
+    clearTimeout(timer);
     const data = await res.json();
     if (data.status === 'success') {
       return `${data.isp} ${data.country} ${data.city}`;
     }
-  } catch { /* ignore */ }
+  } catch { /* timeout or network error */ }
   return '';
 }
 
@@ -51,44 +57,51 @@ export default function Dashboard() {
     const { ip, logged_at } = parsed;
     const loginTime = new Date(logged_at).toLocaleString();
 
-    fetch('https://api.ipify.org?format=json')
+    // Helper to show/update the notification
+    const showNotification = (currentDesc: string, lastDesc: string) => {
+      notification.info({
+        title: t('notification.loginSuccess'),
+        description: (
+          <div style={{ whiteSpace: 'pre-line' }}>
+            {currentDesc ? (
+              <>
+                <div><Text strong>{t('notification.currentLogin')}</Text></div>
+                <div>{currentDesc}</div>
+                <div style={{ marginTop: 8 }}><Text strong>{t('notification.previousLogin')}</Text></div>
+              </>
+            ) : (
+              <div><Text strong>{t('notification.previousLogin')}</Text></div>
+            )}
+            <div>{lastDesc}</div>
+          </div>
+        ),
+        icon: <SafetyOutlined style={{ color: '#1890ff' }} />,
+        placement: 'bottomRight',
+        duration: 10,
+      });
+    };
+
+    // Show basic notification immediately, then enrich with geolocation
+    showNotification('', `IP: ${ip}  Time: ${loginTime}`);
+
+    const ac = new AbortController();
+    const ipTimer = setTimeout(() => ac.abort(), 4000);
+    fetch('https://api.ipify.org?format=json', { signal: ac.signal })
       .then((r) => r.json())
       .then(async (data) => {
+        clearTimeout(ipTimer);
         const currentIP = data.ip;
         const [currentLoc, lastLoc] = await Promise.all([
           lookupIP(currentIP),
           lookupIP(ip),
         ]);
-
         const currentDesc = currentLoc ? `IP: ${currentIP}\nLocation: ${currentLoc}` : `IP: ${currentIP}`;
         const lastDesc = lastLoc
           ? `IP: ${ip}\nLocation: ${lastLoc}\nTime: ${loginTime}`
           : `IP: ${ip}\nTime: ${loginTime}`;
-
-        notification.info({
-          title: t('notification.loginSuccess'),
-          description: (
-            <div style={{ whiteSpace: 'pre-line' }}>
-              <div><Text strong>{t('notification.currentLogin')}</Text></div>
-              <div>{currentDesc}</div>
-              <div style={{ marginTop: 8 }}><Text strong>{t('notification.previousLogin')}</Text></div>
-              <div>{lastDesc}</div>
-            </div>
-          ),
-          icon: <SafetyOutlined style={{ color: '#1890ff' }} />,
-          placement: 'bottomRight',
-          duration: 10,
-        });
+        showNotification(currentDesc, lastDesc);
       })
-      .catch(() => {
-        notification.info({
-          title: t('notification.loginSuccess'),
-          description: `${t('notification.previousLogin')} IP: ${ip}  Time: ${loginTime}`,
-          icon: <SafetyOutlined style={{ color: '#1890ff' }} />,
-          placement: 'bottomRight',
-          duration: 8,
-        });
-      });
+      .catch(() => { clearTimeout(ipTimer); /* silently degrade */ });
   }, []);
 
   const loadServers = useCallback(async (showLoading = true) => {

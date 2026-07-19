@@ -34,6 +34,11 @@ func main() {
 	}
 	defer db.Close()
 
+	// Configure connection pool (default is only 2 max open conns)
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(10)
+	db.SetConnMaxLifetime(5 * time.Minute)
+
 	// Run database migrations before starting any service
 	if err := database.RunMigrations(db); err != nil {
 		log.Fatalf("Database migration failed: %v", err)

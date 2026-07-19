@@ -54,6 +54,11 @@ func Setup(db *sql.DB, cfg *config.Config) *gin.Engine {
 
 	rateLimit := middleware.RateLimit(5, 1*time.Minute)
 
+	// Health check endpoint
+	r.GET("/api/health", func(c *gin.Context) {
+		c.JSON(200, gin.H{"status": "ok"})
+	})
+
 	api := r.Group("/api")
 	{
 		auth := api.Group("/auth")

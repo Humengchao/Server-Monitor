@@ -13,4 +13,16 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom', 'react-router-dom'],
+          antd: ['antd', '@ant-design/icons'],
+          charts: ['recharts'],
+          xterm: ['xterm', '@xterm/addon-fit', '@xterm/addon-web-links'],
+        },
+      },
+    },
+  },
 })

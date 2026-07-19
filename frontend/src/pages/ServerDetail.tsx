@@ -63,7 +63,7 @@ export default function ServerDetail() {
     { key: '30d', label: t('preset.30d') },
   ];
 
-  const loadServer = async () => {
+  const loadServer = useCallback(async () => {
     try {
       const res = await serversApi.list();
       const found = (res.data || []).find((s: Server) => s.id === id);
@@ -77,7 +77,7 @@ export default function ServerDetail() {
       message.error(t('server.loadFailed'));
     }
     setLoading(false);
-  };
+  }, [id, message, t]);
 
   useEffect(() => {
     loadServer();
