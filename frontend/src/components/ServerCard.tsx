@@ -29,10 +29,18 @@ function formatGB(bytes: number): string {
   return (bytes / 1024 / 1024 / 1024).toFixed(1) + ' GB';
 }
 
-function formatUptime(seconds: number, t: (key: string, options?: any) => string): string {
-  if (!seconds) return t('metrics.uptimeFormat', { days: 0 });
-  const d = Math.floor(seconds / 86400);
-  return t('metrics.uptimeFormat', { days: d });
+function formatUptime(seconds: number): string {
+  if (!seconds) return '0d';
+  const totalDays = Math.floor(seconds / 86400);
+  const years = Math.floor(totalDays / 365);
+  const remDays = totalDays % 365;
+  const months = Math.floor(remDays / 30);
+  const days = remDays % 30;
+  const parts: string[] = [];
+  if (years > 0) parts.push(years + 'y');
+  if (months > 0) parts.push(months + 'm');
+  if (days > 0 || parts.length === 0) parts.push(days + 'd');
+  return parts.join(' ');
 }
 
 function diffYMD(from: Date, to: Date): { years: number; months: number; days: number } {
@@ -114,7 +122,7 @@ export default function ServerCard({ server }: Props) {
         <Space size={4}><DashboardOutlined style={{ color: '#8c8c8c' }} /><Text type="secondary" style={{ fontSize: 12 }}>{server.cpu_cores || 0} {t('card.core')}</Text></Space>
         <Space size={4}><DatabaseOutlined style={{ color: '#8c8c8c' }} /><Text type="secondary" style={{ fontSize: 12 }}>{formatGB(server.memory_total)}</Text></Space>
         <Space size={4}><HddOutlined style={{ color: '#8c8c8c' }} /><Text type="secondary" style={{ fontSize: 12 }}>{formatGB(server.disk_total)}</Text></Space>
-        <Space size={4}><ClockCircleOutlined style={{ color: '#8c8c8c' }} /><Text type="secondary" style={{ fontSize: 12 }}>{formatUptime(m?.uptime_seconds || 0, t)}</Text></Space>
+        <Space size={4}><ClockCircleOutlined style={{ color: '#8c8c8c' }} /><Text type="secondary" style={{ fontSize: 12 }}>{formatUptime(m?.uptime_seconds || 0)}</Text></Space>
         {expInfo && (
           <Space size={4}><CalendarOutlined style={{ color: expInfo.color }} /><Text style={{ fontSize: 12, color: expInfo.color }}>{expInfo.text}</Text></Space>
         )}
@@ -130,6 +138,7 @@ export default function ServerCard({ server }: Props) {
               percent={cpuPercent}
               size={64}
               strokeColor={cpuPercent > 80 ? '#ff4d4f' : '#52c41a'}
+              format={(p) => p + '%'}
             />
             <div style={{ marginTop: 2 }}><Text type="secondary" style={{ fontSize: 11 }}>{t('card.cpu')}</Text></div>
           </div>
@@ -139,6 +148,7 @@ export default function ServerCard({ server }: Props) {
               percent={memPercent}
               size={64}
               strokeColor="#1890ff"
+              format={(p) => p + '%'}
             />
             <div style={{ marginTop: 2 }}><Text type="secondary" style={{ fontSize: 11 }}>{t('card.memory')}</Text></div>
           </div>

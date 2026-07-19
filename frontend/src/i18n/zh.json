@@ -5,7 +5,6 @@
   "nav.credentials": "凭据管理",
   "nav.settings": "设置",
   "nav.logout": "退出登录",
-
   "common.name": "名称",
   "common.actions": "操作",
   "common.refresh": "刷新",
@@ -26,7 +25,6 @@
   "common.failed": "失败",
   "common.connected": "已连接",
   "common.disconnected": "已断开",
-
   "login.title": "服务器监控",
   "login.username": "用户名",
   "login.password": "密码",
@@ -38,7 +36,6 @@
   "login.noAccount": "还没有账号？",
   "login.register": "注册",
   "login.failed": "登录失败",
-
   "register.title": "注册",
   "register.username": "用户名",
   "register.password": "密码",
@@ -53,7 +50,6 @@
   "register.login": "登录",
   "register.success": "注册成功，请登录",
   "register.failed": "注册失败",
-
   "server.title": "我的服务器",
   "server.add": "添加服务器",
   "server.edit": "编辑服务器",
@@ -98,14 +94,13 @@
   "server.notesPlaceholder": "输入服务器备注...",
   "server.notesSaved": "备注已保存",
   "server.notesSaveFailed": "保存备注失败",
-
   "metrics.title": "监控指标",
   "metrics.cpu": "CPU",
   "metrics.memory": "内存",
   "metrics.memoryUsed": "已用内存",
   "metrics.memoryTotal": "总内存",
   "metrics.uptime": "运行时间",
-  "metrics.uptimeFormat": "在线:{{days}}天",
+  "uptimeFormat_removed": "在线:{{days}}天",
   "metrics.network": "网络",
   "metrics.disk": "磁盘",
   "metrics.noData": "暂无监控数据",
@@ -116,19 +111,16 @@
   "metrics.networkTx": "网络上行 (MB/s)",
   "metrics.diskRead": "磁盘读取 (MB/s)",
   "metrics.diskWrite": "磁盘写入 (MB/s)",
-
   "preset.1h": "最近1小时",
   "preset.today": "今天",
   "preset.yesterday": "昨天",
   "preset.7d": "最近7天",
   "preset.30d": "最近30天",
-
   "terminal.title": "SSH 终端",
   "terminal.connected": "已连接到服务器",
   "terminal.disconnected": "已断开连接",
   "terminal.connFailed": "WebSocket 连接失败",
   "terminal.reconnect": "重新连接",
-
   "credential.title": "凭据管理",
   "credential.add": "添加凭据",
   "credential.edit": "编辑凭据",
@@ -155,7 +147,6 @@
   "credential.sshUsernameInlinePlaceholder": "SSH 用户名",
   "credential.sshPasswordInlinePlaceholder": "SSH 密码（可选）",
   "credential.sshKeyInlinePlaceholder": "SSH 私钥（可选）",
-
   "docker.title": "Docker",
   "docker.version": "Docker {{version}}",
   "docker.containers": "{{count}} 个容器",
@@ -179,7 +170,6 @@
   "docker.serverDetail": "服务器详情",
   "docker.execDisconnected": "已断开连接",
   "docker.execConnError": "连接错误",
-
   "settings.tagManagement": "标签管理",
   "settings.createTag": "创建标签",
   "settings.tagCreated": "标签已创建",
@@ -191,17 +181,14 @@
   "settings.tagName": "标签名称",
   "settings.tagNamePlaceholder": "生产环境",
   "settings.color": "颜色",
-
   "loginHistory.title": "登录历史",
   "loginHistory.time": "时间",
   "loginHistory.ip": "IP",
   "loginHistory.userAgent": "用户代理",
   "loginHistory.total": "共 {{count}} 条记录",
-
   "notification.loginSuccess": "登录成功",
   "notification.currentLogin": "当前登录：",
   "notification.previousLogin": "上次登录：",
-
   "card.core": "核",
   "card.cpu": "CPU",
   "card.memory": "内存",

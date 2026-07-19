@@ -239,7 +239,20 @@ export default function ServerDetail() {
                   <Descriptions.Item label={t('metrics.cpu')}>{(metrics.cpu_percent || 0).toFixed(1)}%</Descriptions.Item>
                   <Descriptions.Item label={t('metrics.memoryUsed')}>{((metrics.memory_used || 0) / 1024 / 1024).toFixed(0)} MB</Descriptions.Item>
                   <Descriptions.Item label={t('metrics.memoryTotal')}>{((metrics.memory_total || 0) / 1024 / 1024).toFixed(0)} MB</Descriptions.Item>
-                  <Descriptions.Item label={t('metrics.uptime')}>{Math.floor((metrics.uptime_seconds || 0) / 3600)}h</Descriptions.Item>
+                  <Descriptions.Item label={t('metrics.uptime')}>{(() => {
+  const s = metrics?.uptime_seconds || 0;
+  if (!s) return '0d';
+  const td = Math.floor(s / 86400);
+  const y = Math.floor(td / 365);
+  const r = td % 365;
+  const mo = Math.floor(r / 30);
+  const d = r % 30;
+  const p: string[] = [];
+  if (y > 0) p.push(y + 'y');
+  if (mo > 0) p.push(mo + 'm');
+  if (d > 0 || p.length === 0) p.push(d + 'd');
+  return p.join(' ');
+})()}</Descriptions.Item>
                 </Descriptions>
               )}
 
