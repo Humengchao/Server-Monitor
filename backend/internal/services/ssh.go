@@ -78,10 +78,15 @@ func (ts *TerminalSession) Write(data []byte) (int, error) {
 }
 
 func (ts *TerminalSession) Read(p []byte) (int, error) {
-	_, msg, err := ts.conn.ReadMessage()
+	mt, msg, err := ts.conn.ReadMessage()
 	if err != nil {
 		close(ts.done)
 		return 0, err
+	}
+	// Close on close message from client
+	if mt == websocket.CloseMessage {
+		close(ts.done)
+		return 0, io.EOF
 	}
 	return copy(p, msg), nil
 }
@@ -103,19 +108,6 @@ func (ts *TerminalSession) Start() {
 
 func (ts *TerminalSession) Stdin() io.Writer      { return ts.stdin }
 func (ts *TerminalSession) Done() <-chan struct{} { return ts.done }
-func (ts *TerminalSession) Run() {
-	for {
-		data := make([]byte, 4096)
-		n, err := ts.stdout.Read(data)
-		if err != nil {
-			close(ts.done)
-			return
-		}
-		if n > 0 {
-			ts.Write(data[:n])
-		}
-	}
-}
 
 func (ts *TerminalSession) Resize(rows, cols int) {
 	if ts.session != nil {

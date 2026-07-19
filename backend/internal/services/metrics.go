@@ -29,15 +29,26 @@ type Collector struct {
 	interval time.Duration
 	mu       sync.Mutex
 	prev     map[uuid.UUID]*prevStats
+	stopCh   chan struct{}
 }
 
 func NewCollector(db *models.DB, interval time.Duration) *Collector {
-	return &Collector{db: db, interval: interval, prev: make(map[uuid.UUID]*prevStats)}
+	return &Collector{
+		db:       db,
+		interval: interval,
+		prev:     make(map[uuid.UUID]*prevStats),
+		stopCh:   make(chan struct{}),
+	}
 }
 
 func (c *Collector) Start() {
 	go func() {
 		for {
+			select {
+			case <-c.stopCh:
+				return
+			default:
+			}
 			c.pollAll()
 			time.Sleep(c.interval)
 		}
@@ -45,10 +56,19 @@ func (c *Collector) Start() {
 	// Cleanup metrics older than 30 days every hour
 	go func() {
 		for {
-			time.Sleep(1 * time.Hour)
-			c.cleanupOldMetrics()
+			select {
+			case <-c.stopCh:
+				return
+			case <-time.After(1 * time.Hour):
+				c.cleanupOldMetrics()
+			}
 		}
 	}()
+}
+
+// Stop signals the collector to stop polling.
+func (c *Collector) Stop() {
+	close(c.stopCh)
 }
 
 func (c *Collector) cleanupOldMetrics() {

@@ -2,8 +2,11 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,6 +18,11 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// validDockerID matches Docker container IDs (hex, 12-64 chars)
+var validDockerID = regexp.MustCompile(`^[a-fA-F0-9]{1,64}$`)
+
+type DockerHandler struct{}
+
 // checkDockerCached uses the cached has_docker field from the servers table.
 // Returns (installed, version) without SSH.
 func (h *DockerHandler) checkDockerCached(db *models.DB, serverID uuid.UUID) (bool, string) {
@@ -24,8 +32,6 @@ func (h *DockerHandler) checkDockerCached(db *models.DB, serverID uuid.UUID) (bo
 	}
 	return s.HasDocker, s.DockerVersion
 }
-
-type DockerHandler struct{}
 
 func NewDockerHandler() *DockerHandler { return &DockerHandler{} }
 
@@ -114,6 +120,10 @@ func (h *DockerHandler) ContainerAction(c *gin.Context) {
 	containerID := c.Param("containerId")
 	action := c.Param("action")
 
+	if !validDockerID.MatchString(containerID) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid container id"})
+		return
+	}
 	if action != "start" && action != "stop" && action != "restart" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid action"})
 		return
@@ -150,7 +160,15 @@ func (h *DockerHandler) ContainerLogs(c *gin.Context) {
 		return
 	}
 	containerID := c.Param("containerId")
+	if !validDockerID.MatchString(containerID) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid container id"})
+		return
+	}
 	tail := c.DefaultQuery("tail", "200")
+	tailNum, err := strconv.Atoi(tail)
+	if err != nil || tailNum < 1 || tailNum > 10000 {
+		tailNum = 200
+	}
 
 	db := c.MustGet("db").(*models.DB)
 	server, err := models.GetServerByIDAndUser(db, id, userID)
@@ -166,7 +184,8 @@ func (h *DockerHandler) ContainerLogs(c *gin.Context) {
 	}
 	defer client.Close()
 
-	output, err := services.RunDockerCmd(client, "logs --tail "+tail+" "+containerID)
+	cmd := fmt.Sprintf("logs --tail %d %s", tailNum, containerID)
+	output, err := services.RunDockerCmd(client, cmd)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get logs"})
 		return
@@ -184,6 +203,10 @@ func (h *DockerHandler) ContainerExec(c *gin.Context) {
 	}
 	containerID := c.Param("containerId")
 
+	if !validDockerID.MatchString(containerID) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid container id"})
+		return
+	}
 	db := c.MustGet("db").(*models.DB)
 	server, err := models.GetServerByIDAndUser(db, id, userID)
 	if err != nil {
@@ -223,7 +246,7 @@ func (h *DockerHandler) ContainerExec(c *gin.Context) {
 		ts.Stdin().Write([]byte(cmd))
 	}()
 
-	// stdin: websocket → SSH
+	// stdin: websocket → SSH (NewTerminalSession already handles stdout/stderr → websocket via io.Copy)
 	go func() {
 		buf := make([]byte, 4096)
 		for {
@@ -237,7 +260,6 @@ func (h *DockerHandler) ContainerExec(c *gin.Context) {
 		}
 	}()
 
-	// stdout: SSH → websocket
-	ts.Run()
+	// Wait for session to complete
 	<-ts.Done()
 }

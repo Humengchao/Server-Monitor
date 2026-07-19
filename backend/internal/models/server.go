@@ -307,8 +307,15 @@ func GetAllServers(db *DB) ([]Server, error) {
 				s.CredentialID = &id
 			}
 		}
-		s.SSHPassword, _ = crypto.Decrypt(encPassword, db.EncryptionKey)
-		s.SSHKey, _ = crypto.Decrypt(encKey, db.EncryptionKey)
+		var decErr error
+		s.SSHPassword, decErr = crypto.Decrypt(encPassword, db.EncryptionKey)
+		if decErr != nil {
+			log.Printf("collector: decrypt password for %s failed: %v", s.Name, decErr)
+		}
+		s.SSHKey, decErr = crypto.Decrypt(encKey, db.EncryptionKey)
+		if decErr != nil {
+			log.Printf("collector: decrypt key for %s failed: %v", s.Name, decErr)
+		}
 		// Override with credential if linked
 		if err := s.ResolveCredentials(db); err != nil {
 			log.Printf("collector: resolve credentials for %s: %v", s.Name, err)

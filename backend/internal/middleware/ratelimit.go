@@ -9,8 +9,9 @@ import (
 )
 
 type bucket struct {
-	tokens   int
-	lastFill time.Time
+	tokens     int
+	lastFill   time.Time
+	lastAccess time.Time
 }
 
 // RateLimit returns a token-bucket rate limiter middleware.
@@ -19,12 +20,27 @@ func RateLimit(requests int, per time.Duration) gin.HandlerFunc {
 	var mu sync.Mutex
 	buckets := make(map[string]*bucket)
 
+	// Periodic cleanup of stale buckets (every 5 minutes, remove entries idle > 10 minutes)
+	go func() {
+		for {
+			time.Sleep(5 * time.Minute)
+			mu.Lock()
+			cutoff := time.Now().Add(-10 * time.Minute)
+			for ip, b := range buckets {
+				if b.lastAccess.Before(cutoff) {
+					delete(buckets, ip)
+				}
+			}
+			mu.Unlock()
+		}
+	}()
+
 	return func(c *gin.Context) {
 		ip := c.ClientIP()
 		mu.Lock()
 		b, ok := buckets[ip]
 		if !ok {
-			b = &bucket{tokens: requests, lastFill: time.Now()}
+			b = &bucket{tokens: requests, lastFill: time.Now(), lastAccess: time.Now()}
 			buckets[ip] = b
 		}
 		// refill
@@ -38,6 +54,7 @@ func RateLimit(requests int, per time.Duration) gin.HandlerFunc {
 			}
 			b.lastFill = now
 		}
+		b.lastAccess = time.Now()
 		if b.tokens > 0 {
 			b.tokens--
 			mu.Unlock()
