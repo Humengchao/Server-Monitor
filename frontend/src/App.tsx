@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { ConfigProvider, App as AntApp } from 'antd';
+import { ConfigProvider, App as AntApp, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import enUS from 'antd/locale/en_US';
 import i18n from './i18n';
@@ -24,14 +24,23 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   const [lang, setLang] = useState(i18n.language);
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('theme') === 'dark');
 
   useEffect(() => {
     i18n.on('languageChanged', setLang);
     return () => { i18n.off('languageChanged', setLang); };
   }, []);
 
+  const toggleTheme = () => {
+    setDarkMode((prev) => {
+      const next = !prev;
+      localStorage.setItem('theme', next ? 'dark' : 'light');
+      return next;
+    });
+  };
+
   return (
-    <ConfigProvider locale={antdLocales[lang] || enUS} theme={{ token: { colorPrimary: '#1890ff' } }}>
+    <ConfigProvider locale={antdLocales[lang] || enUS} theme={{ algorithm: darkMode ? theme.darkAlgorithm : theme.defaultAlgorithm, token: { colorPrimary: '#1890ff' } }}>
       <AntApp>
         <BrowserRouter>
           <Routes>
@@ -41,7 +50,7 @@ export default function App() {
               path="/"
               element={
                 <PrivateRoute>
-                  <AppLayout />
+                  <AppLayout darkMode={darkMode} onToggleTheme={toggleTheme} />
                 </PrivateRoute>
               }
             >

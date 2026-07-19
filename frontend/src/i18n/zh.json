@@ -1,5 +1,7 @@
 {
   "app.title": "服务器监控",
+  "theme.light": "浅色",
+  "theme.dark": "深色",
   "nav.servers": "服务器",
   "nav.docker": "Docker",
   "nav.credentials": "凭据管理",

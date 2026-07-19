@@ -2,6 +2,8 @@ import React from 'react';
 import { Layout as AntLayout, Menu, Button, theme } from 'antd';
 import {
   DashboardOutlined,
+  SunOutlined,
+  MoonOutlined,
   SettingOutlined,
   LogoutOutlined,
   CloudServerOutlined,
@@ -15,7 +17,12 @@ import { useAuthStore } from '../store/authStore';
 
 const { Header, Sider, Content } = AntLayout;
 
-export default function AppLayout() {
+interface Props {
+  darkMode: boolean;
+  onToggleTheme: () => void;
+}
+
+export default function AppLayout({ darkMode, onToggleTheme }: Props) {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuthStore();
@@ -59,6 +66,9 @@ export default function AppLayout() {
         <Header style={{ padding: '0 24px', background: colorBgContainer, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 16 }}>
           <Button type="text" icon={<TranslationOutlined />} onClick={toggleLang}>
             {i18n.language === 'en' ? '中文' : 'EN'}
+          </Button>
+          <Button type="text" icon={darkMode ? <SunOutlined /> : <MoonOutlined />} onClick={onToggleTheme}>
+            {darkMode ? t('theme.light') : t('theme.dark')}
           </Button>
           <span>{user?.username}</span>
           <Button type="text" icon={<LogoutOutlined />} onClick={handleLogout}>{t('nav.logout')}</Button>

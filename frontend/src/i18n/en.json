@@ -1,5 +1,7 @@
 {
   "app.title": "Server Monitor",
+  "theme.light": "Light",
+  "theme.dark": "Dark",
   "nav.servers": "Servers",
   "nav.docker": "Docker",
   "nav.credentials": "Credentials",
