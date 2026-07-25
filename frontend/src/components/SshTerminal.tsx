@@ -41,6 +41,12 @@ export default function SshTerminal({ serverId }: Props) {
     terminal.open(termRef.current!);
     fitAddon.fit();
 
+    // ResizeObserver keeps terminal filling the container on any layout change
+    const ro = new ResizeObserver(() => {
+      try { fitAddon.fit(); } catch {}
+    });
+    ro.observe(termRef.current!);
+
     const token = localStorage.getItem('token');
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = new WebSocket(`${wsProtocol}//${window.location.host}/api/ssh/${serverId}?token=${token}`);
@@ -80,6 +86,7 @@ export default function SshTerminal({ serverId }: Props) {
     window.addEventListener('resize', handleResize);
 
     return () => {
+      ro.disconnect();
       window.removeEventListener('resize', handleResize);
       ws.close();
       terminal.dispose();
@@ -98,7 +105,7 @@ export default function SshTerminal({ serverId }: Props) {
   };
 
   return (
-    <div>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <Space style={{ marginBottom: 8 }}>
         <span style={{ color: connected ? '#52c41a' : '#ff4d4f' }}>
           ● {connected ? t('common.connected') : t('common.disconnected')}
@@ -109,7 +116,7 @@ export default function SshTerminal({ serverId }: Props) {
       </Space>
       <div
         ref={termRef}
-        style={{ width: '100%', height: 400, borderRadius: 8, overflow: 'hidden' }}
+        style={{ flex: 1, minHeight: 0, borderRadius: 8, overflow: 'hidden' }}
       />
     </div>
   );

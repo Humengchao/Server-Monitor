@@ -97,16 +97,28 @@ func (c *Collector) pollAll() {
 		log.Printf("collector: failed to list servers: %v", err)
 		return
 	}
-	for _, s := range servers {
-		m, err := c.collectOne(&s)
-		if err != nil {
-			log.Printf("collector: poll %s failed: %v", s.Name, err)
-			continue
-		}
-		if err := models.InsertMetric(c.db.Raw, s.ID, m); err != nil {
-			log.Printf("collector: insert metric for %s failed: %v", s.Name, err)
-		}
+
+	// Parallel polling: one dead server shouldn't delay metrics for live ones.
+	// SSH timeout is 10s, so even with many servers max cycle is ~10s per batch.
+	sem := make(chan struct{}, 10) // max 10 concurrent SSH connections
+	var wg sync.WaitGroup
+	for i := range servers {
+		wg.Add(1)
+		go func(s *models.Server) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			m, err := c.collectOne(s)
+			if err != nil {
+				log.Printf("collector: poll %s failed: %v", s.Name, err)
+				return
+			}
+			if err := models.InsertMetric(c.db.Raw, s.ID, m); err != nil {
+				log.Printf("collector: insert metric for %s failed: %v", s.Name, err)
+			}
+		}(&servers[i])
 	}
+	wg.Wait()
 }
 
 func (c *Collector) collectOne(s *models.Server) (*models.MetricPoint, error) {

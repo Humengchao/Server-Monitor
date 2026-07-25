@@ -277,7 +277,7 @@ export default function ServerDetail() {
           key: 'terminal',
           label: t('terminal.title'),
           children: (
-            <Card>
+            <Card styles={{ body: { display: 'flex', flexDirection: 'column', height: 'calc(100vh - 320px)', overflow: 'hidden' } }}>
               <SshTerminal serverId={id!} />
             </Card>
           ),
