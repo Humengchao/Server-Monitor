@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Typography, Descriptions, Tag, Space, Button, Card, Tabs, Spin, Modal, Form, Input, InputNumber, App } from 'antd';
 import { ArrowLeftOutlined, EditOutlined, DeleteOutlined, DockerOutlined, KeyOutlined, SaveOutlined } from '@ant-design/icons';
@@ -34,6 +34,32 @@ function getPresetRange(key: PresetKey): TimeRange {
     case '30d':
       return { since: now.subtract(30, 'day').startOf('day').toISOString(), until: now.toISOString() };
   }
+}
+
+// TerminalCard measures the exact available viewport space for the embedded terminal.
+function TerminalCard({ serverId }: { serverId: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState(400);
+
+  useLayoutEffect(() => {
+    const measure = () => {
+      if (ref.current) {
+        const top = ref.current.getBoundingClientRect().top;
+        setHeight(window.innerHeight - top - 8);
+      }
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (ref.current) ro.observe(ref.current);
+    window.addEventListener('resize', measure);
+    return () => { ro.disconnect(); window.removeEventListener('resize', measure); };
+  }, []);
+
+  return (
+    <Card styles={{ body: { display: 'flex', flexDirection: 'column', height, overflow: 'hidden', padding: 16 } }}>
+      <SshTerminal serverId={serverId} />
+    </Card>
+  );
 }
 
 export default function ServerDetail() {
@@ -277,9 +303,7 @@ export default function ServerDetail() {
           key: 'terminal',
           label: t('terminal.title'),
           children: (
-            <Card styles={{ body: { display: 'flex', flexDirection: 'column', height: 'calc(100vh - 320px)', overflow: 'hidden' } }}>
-              <SshTerminal serverId={id!} />
-            </Card>
+            <TerminalCard serverId={id!} />
           ),
         },
         {
