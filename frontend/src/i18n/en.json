@@ -195,5 +195,6 @@
   "card.cpu": "CPU",
   "card.memory": "Memory",
   "card.network": "Network",
-  "card.disk": "Disk"
+  "card.disk": "Disk",
+  "server.type": "Server Type"
 }

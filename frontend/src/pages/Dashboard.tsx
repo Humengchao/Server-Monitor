@@ -4,7 +4,7 @@ import {
 } from 'antd';
 import { DatePicker } from 'antd';
 import dayjs from 'dayjs';
-import { PlusOutlined, ReloadOutlined, FilterOutlined, SafetyOutlined } from '@ant-design/icons';
+import { PlusOutlined, ReloadOutlined, FilterOutlined, SafetyOutlined, WindowsOutlined, AppleOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import ServerCard from '../components/ServerCard';
 import TagSelect from '../components/TagSelect';
@@ -126,6 +126,7 @@ export default function Dashboard() {
       const payload = {
         ...values,
         credential_id: selectedCredential || null,
+        server_type: values.server_type || 'linux',
         expires_at: values.expires_at ? values.expires_at.toISOString() : null,
       };
       if (editingServer) {
@@ -171,6 +172,7 @@ export default function Dashboard() {
       ssh_username: server.ssh_username,
       ssh_host_key: server.ssh_host_key || '',
       expires_at: server.expires_at ? dayjs(server.expires_at) : null,
+      server_type: server.server_type || 'linux',
     });
     setTagValues(server.tags?.map((t) => t.id) || []);
     setModalOpen(true);
@@ -259,8 +261,14 @@ export default function Dashboard() {
           <Form.Item name="port" label={t('server.sshPort')} initialValue={22}>
             <InputNumber min={1} max={65535} style={{ width: '100%' }} />
           </Form.Item>
+          <Form.Item name="server_type" label={t('server.type')} initialValue="linux">
+            <Select>
+              <Select.Option value="linux"><AppleOutlined /> Linux</Select.Option>
+              <Select.Option value="windows"><WindowsOutlined /> Windows</Select.Option>
+            </Select>
+          </Form.Item>
           <Form.Item label={t('server.credential')}>
-            <CredentialSelect value={selectedCredential} onChange={setSelectedCredential} />
+            <CredentialSelect value={selectedCredential} onChange={setSelectedCredential} serverType={form.getFieldValue('server_type') || 'linux'} />
           </Form.Item>
           {!selectedCredential && (
             <>

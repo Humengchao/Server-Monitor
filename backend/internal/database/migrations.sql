@@ -90,3 +90,10 @@ ALTER TABLE servers ADD COLUMN IF NOT EXISTS credential_id UUID REFERENCES crede
 -- Server expiration date and notes
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT '';
+
+
+-- Server type (linux / windows)
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS server_type VARCHAR(16) DEFAULT 'linux';
+
+-- Credential type (linux / windows)
+ALTER TABLE credentials ADD COLUMN IF NOT EXISTS credential_type VARCHAR(16) DEFAULT 'linux';

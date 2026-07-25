@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Typography, Descriptions, Tag, Space, Button, Card, Tabs, Spin, Modal, Form, Input, InputNumber, App } from 'antd';
-import { ArrowLeftOutlined, EditOutlined, DeleteOutlined, DockerOutlined, KeyOutlined, SaveOutlined } from '@ant-design/icons';
+import { Typography, Descriptions, Tag, Space, Button, Card, Tabs, Spin, Modal, Form, Input, InputNumber, Select, App } from 'antd';
+import { ArrowLeftOutlined, EditOutlined, DeleteOutlined, DockerOutlined, KeyOutlined, SaveOutlined, WindowsOutlined, AppleOutlined } from '@ant-design/icons';
 import { DatePicker } from 'antd';
 import dayjs, { Dayjs } from 'dayjs';
 import { useTranslation } from 'react-i18next';
@@ -146,6 +146,7 @@ export default function ServerDetail() {
       ssh_username: server.ssh_username,
       ssh_host_key: server.ssh_host_key || '',
       expires_at: server.expires_at ? dayjs(server.expires_at) : null,
+      server_type: server.server_type || 'linux',
     });
     setTagValues(server.tags?.map((t) => t.id) || []);
     setModalOpen(true);
@@ -157,6 +158,7 @@ export default function ServerDetail() {
       const payload = {
         ...values,
         credential_id: selectedCredential || null,
+        server_type: values.server_type || 'linux',
         expires_at: values.expires_at ? values.expires_at.toISOString() : null,
       };
       await serversApi.update(server.id, payload);
@@ -233,6 +235,7 @@ export default function ServerDetail() {
       <Descriptions bordered size="small" column={2} style={{ marginBottom: 24 }}>
         <Descriptions.Item label={t('server.hostLabel')}>{server.host}</Descriptions.Item>
         <Descriptions.Item label={t('server.sshPortLabel')}>{server.port}</Descriptions.Item>
+        <Descriptions.Item label={t('server.type')}>{server.server_type === 'windows' ? <><WindowsOutlined /> Windows</> : <><AppleOutlined /> Linux</>}</Descriptions.Item>
         <Descriptions.Item label={t('server.sshUserLabel')}>{server.ssh_username}</Descriptions.Item>
         {server.credential_name && (
           <Descriptions.Item label={t('server.credentialLabel')}>
@@ -361,8 +364,14 @@ export default function ServerDetail() {
           <Form.Item name="port" label={t('server.sshPort')} initialValue={22}>
             <InputNumber min={1} max={65535} style={{ width: '100%' }} />
           </Form.Item>
+          <Form.Item name="server_type" label={t('server.type')} initialValue="linux">
+            <Select>
+              <Select.Option value="linux"><AppleOutlined /> Linux</Select.Option>
+              <Select.Option value="windows"><WindowsOutlined /> Windows</Select.Option>
+            </Select>
+          </Form.Item>
           <Form.Item label={t('server.credential')}>
-            <CredentialSelect value={selectedCredential} onChange={setSelectedCredential} />
+            <CredentialSelect value={selectedCredential} onChange={setSelectedCredential} serverType={form.getFieldValue('server_type') || 'linux'} />
           </Form.Item>
           {!selectedCredential && (
             <>

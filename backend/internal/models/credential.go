@@ -15,6 +15,7 @@ type Credential struct {
 	SSHUsername string    `json:"ssh_username"`
 	SSHPassword string    `json:"-"`
 	SSHKey      string    `json:"-"`
+	CredType    string    `json:"credential_type"`
 	CreatedAt   string    `json:"created_at"`
 }
 
@@ -29,15 +30,15 @@ func CreateCredential(db *DB, c *Credential) error {
 		return err
 	}
 	return db.Raw.QueryRow(
-		`INSERT INTO credentials (id, user_id, name, ssh_username, ssh_password, ssh_key)
-		 VALUES ($1,$2,$3,$4,$5,$6) RETURNING created_at`,
-		c.ID, c.UserID, c.Name, c.SSHUsername, encPassword, encKey,
+		`INSERT INTO credentials (id, user_id, name, ssh_username, ssh_password, ssh_key, credential_type)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING created_at`,
+		c.ID, c.UserID, c.Name, c.SSHUsername, encPassword, encKey, c.CredType,
 	).Scan(&c.CreatedAt)
 }
 
 func GetCredentialsByUserID(db *sql.DB, userID uuid.UUID) ([]Credential, error) {
 	rows, err := db.Query(
-		`SELECT id, user_id, name, ssh_username, created_at
+		`SELECT id, user_id, name, ssh_username, COALESCE(credential_type, 'linux'), created_at
 		 FROM credentials WHERE user_id=$1 ORDER BY created_at DESC`, userID)
 	if err != nil {
 		return nil, err
@@ -46,7 +47,7 @@ func GetCredentialsByUserID(db *sql.DB, userID uuid.UUID) ([]Credential, error) 
 	var creds []Credential
 	for rows.Next() {
 		var c Credential
-		if err := rows.Scan(&c.ID, &c.UserID, &c.Name, &c.SSHUsername, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.UserID, &c.Name, &c.SSHUsername, &c.CredType, &c.CreatedAt); err != nil {
 			return nil, err
 		}
 		creds = append(creds, c)
@@ -58,9 +59,9 @@ func GetCredentialByID(db *DB, id, userID uuid.UUID) (*Credential, error) {
 	c := &Credential{}
 	var encPassword, encKey string
 	err := db.Raw.QueryRow(
-		`SELECT id, user_id, name, ssh_username, ssh_password, ssh_key, created_at
+		`SELECT id, user_id, name, ssh_username, ssh_password, ssh_key, COALESCE(credential_type, 'linux'), created_at
 		 FROM credentials WHERE id=$1 AND user_id=$2`, id, userID,
-	).Scan(&c.ID, &c.UserID, &c.Name, &c.SSHUsername, &encPassword, &encKey, &c.CreatedAt)
+	).Scan(&c.ID, &c.UserID, &c.Name, &c.SSHUsername, &encPassword, &encKey, &c.CredType, &c.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -74,9 +75,9 @@ func GetCredentialByIDInternal(db *DB, id uuid.UUID) (*Credential, error) {
 	c := &Credential{}
 	var encPassword, encKey string
 	err := db.Raw.QueryRow(
-		`SELECT id, user_id, name, ssh_username, ssh_password, ssh_key, created_at
+		`SELECT id, user_id, name, ssh_username, ssh_password, ssh_key, COALESCE(credential_type, 'linux'), created_at
 		 FROM credentials WHERE id=$1`, id,
-	).Scan(&c.ID, &c.UserID, &c.Name, &c.SSHUsername, &encPassword, &encKey, &c.CreatedAt)
+	).Scan(&c.ID, &c.UserID, &c.Name, &c.SSHUsername, &encPassword, &encKey, &c.CredType, &c.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -87,8 +88,8 @@ func GetCredentialByIDInternal(db *DB, id uuid.UUID) (*Credential, error) {
 
 func UpdateCredential(db *DB, c *Credential) error {
 	_, err := db.Raw.Exec(
-		`UPDATE credentials SET name=$1, ssh_username=$2 WHERE id=$3 AND user_id=$4`,
-		c.Name, c.SSHUsername, c.ID, c.UserID)
+		`UPDATE credentials SET name=$1, ssh_username=$2, credential_type=$3 WHERE id=$4 AND user_id=$5`,
+		c.Name, c.SSHUsername, c.CredType, c.ID, c.UserID)
 	if err != nil {
 		return err
 	}

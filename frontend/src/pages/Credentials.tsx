@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  Table, Button, Modal, Form, Input, Space, Typography, Popconfirm, App,
+  Table, Button, Modal, Form, Input, Select, Space, Typography, Popconfirm, App, Tag,
 } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, KeyOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, KeyOutlined, WindowsOutlined, AppleOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { credentialsApi, Credential } from '../api/credentials';
 
@@ -65,6 +65,7 @@ export default function Credentials() {
     form.setFieldsValue({
       name: cred.name,
       ssh_username: cred.ssh_username,
+      credential_type: cred.credential_type || 'linux',
     });
     setModalOpen(true);
   };
@@ -77,6 +78,13 @@ export default function Credentials() {
       render: (name: string) => (
         <Space><KeyOutlined />{name}</Space>
       ),
+    },
+    {
+      title: t('common.type'),
+      dataIndex: 'credential_type',
+      key: 'credential_type',
+      width: 90,
+      render: (v: string) => v === 'windows' ? <Tag icon={<WindowsOutlined />}>Windows</Tag> : <Tag icon={<AppleOutlined />}>Linux</Tag>,
     },
     {
       title: t('credential.sshUsername'),
@@ -149,6 +157,12 @@ export default function Credentials() {
           </Form.Item>
           <Form.Item name="ssh_password" label={t('credential.sshPassword')}>
             <Input.Password placeholder={t('credential.sshPasswordPlaceholder')} />
+          </Form.Item>
+          <Form.Item name="credential_type" label={t('common.type')} initialValue="linux">
+            <Select>
+              <Select.Option value="linux"><AppleOutlined /> Linux</Select.Option>
+              <Select.Option value="windows"><WindowsOutlined /> Windows</Select.Option>
+            </Select>
           </Form.Item>
           <Form.Item name="ssh_key" label={t('credential.sshKey')}>
             <Input.TextArea rows={4} placeholder={t('credential.sshKeyPlaceholder')} />

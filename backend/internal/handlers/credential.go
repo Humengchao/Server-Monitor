@@ -14,17 +14,19 @@ type CredentialHandler struct{}
 func NewCredentialHandler() *CredentialHandler { return &CredentialHandler{} }
 
 type CreateCredentialRequest struct {
-	Name        string `json:"name" binding:"required"`
-	SSHUsername string `json:"ssh_username" binding:"required"`
-	SSHPassword string `json:"ssh_password"`
-	SSHKey      string `json:"ssh_key"`
+	Name           string `json:"name" binding:"required"`
+	SSHUsername    string `json:"ssh_username" binding:"required"`
+	SSHPassword    string `json:"ssh_password"`
+	SSHKey         string `json:"ssh_key"`
+	CredentialType string `json:"credential_type"`
 }
 
 type UpdateCredentialRequest struct {
-	Name        string `json:"name" binding:"required"`
-	SSHUsername string `json:"ssh_username" binding:"required"`
-	SSHPassword string `json:"ssh_password"`
-	SSHKey      string `json:"ssh_key"`
+	Name           string `json:"name" binding:"required"`
+	SSHUsername    string `json:"ssh_username" binding:"required"`
+	SSHPassword    string `json:"ssh_password"`
+	SSHKey         string `json:"ssh_key"`
+	CredentialType string `json:"credential_type"`
 }
 
 func (h *CredentialHandler) List(c *gin.Context) {
@@ -49,12 +51,16 @@ func (h *CredentialHandler) Create(c *gin.Context) {
 		return
 	}
 	db := c.MustGet("db").(*models.DB)
+	if req.CredentialType == "" {
+		req.CredentialType = "linux"
+	}
 	cred := &models.Credential{
 		UserID:      userID,
 		Name:        req.Name,
 		SSHUsername: req.SSHUsername,
 		SSHPassword: req.SSHPassword,
 		SSHKey:      req.SSHKey,
+		CredType:    req.CredentialType,
 	}
 	if err := models.CreateCredential(db, cred); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create credential"})
@@ -83,6 +89,7 @@ func (h *CredentialHandler) Update(c *gin.Context) {
 		SSHUsername: req.SSHUsername,
 		SSHPassword: req.SSHPassword,
 		SSHKey:      req.SSHKey,
+		CredType:    req.CredentialType,
 	}
 	if err := models.UpdateCredential(db, cred); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update credential"})

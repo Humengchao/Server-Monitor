@@ -10,6 +10,7 @@ export interface Server {
   ssh_host_key?: string;
   credential_id?: string;
   credential_name?: string;
+  server_type: string;
   cpu_cores: number;
   memory_total: number;
   disk_total: number;
@@ -78,6 +79,7 @@ export const serversApi = {
     credential_id?: string;
     expires_at?: string | null;
     notes?: string;
+    server_type?: string;
   }) => client.post<Server>('/servers', data),
 
   update: (id: string, data: {
@@ -91,6 +93,7 @@ export const serversApi = {
     credential_id?: string;
     expires_at?: string | null;
     notes?: string;
+    server_type?: string;
   }) => client.put<Server>(`/servers/${id}`, data),
 
   delete: (id: string) => client.delete(`/servers/${id}`),

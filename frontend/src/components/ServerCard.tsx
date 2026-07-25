@@ -1,6 +1,8 @@
 import React from 'react';
 import { Card, Tag, Progress, Typography, Space, Divider } from 'antd';
 import {
+  WindowsOutlined,
+  AppleOutlined,
   CloudServerOutlined,
   ArrowUpOutlined,
   ArrowDownOutlined,
@@ -103,7 +105,7 @@ export default function ServerCard({ server }: Props) {
       title={
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Space>
-            <CloudServerOutlined />
+            {server.server_type === 'windows' ? <WindowsOutlined /> : <CloudServerOutlined />}
             <span>{server.name}</span>
           </Space>
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: isOnline ? '#52c41a' : '#ff4d4f', display: 'inline-block' }} />

@@ -195,5 +195,6 @@
   "card.cpu": "CPU",
   "card.memory": "内存",
   "card.network": "网络",
-  "card.disk": "磁盘"
+  "card.disk": "磁盘",
+  "server.type": "服务器类型"
 }

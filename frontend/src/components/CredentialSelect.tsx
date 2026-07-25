@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Select, Space, Button, Input, App } from 'antd';
+import { Select, Space, Button, Input, App, Tag } from 'antd';
 import { PlusOutlined, KeyOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { credentialsApi, Credential } from '../api/credentials';
@@ -7,9 +7,10 @@ import { credentialsApi, Credential } from '../api/credentials';
 interface Props {
   value?: string;
   onChange?: (id: string | undefined) => void;
+  serverType?: string;
 }
 
-export default function CredentialSelect({ value, onChange }: Props) {
+export default function CredentialSelect({ value, onChange, serverType }: Props) {
   const { t } = useTranslation();
   const { message } = App.useApp();
   const [creds, setCreds] = useState<Credential[]>([]);
@@ -43,6 +44,7 @@ export default function CredentialSelect({ value, onChange }: Props) {
         ssh_username: newUsername || 'root',
         ssh_password: newPassword,
         ssh_key: newKey,
+        credential_type: serverType || 'linux',
       });
       setCreds([res.data, ...creds]);
       onChange?.(res.data.id);
@@ -112,12 +114,13 @@ export default function CredentialSelect({ value, onChange }: Props) {
         </>
       )}
     >
-      {creds.map((c) => (
+      {creds.filter((c) => !serverType || c.credential_type === serverType).map((c) => (
         <Select.Option key={c.id} value={c.id}>
           <Space>
             <KeyOutlined />
             <span>{c.name}</span>
             <span style={{ color: '#999', fontSize: 12 }}>({c.ssh_username})</span>
+            <Tag style={{ fontSize: 10, lineHeight: '16px' }}>{c.credential_type === 'windows' ? 'Win' : 'Linux'}</Tag>
           </Space>
         </Select.Option>
       ))}

@@ -5,6 +5,7 @@ export interface Credential {
   user_id: string;
   name: string;
   ssh_username: string;
+  credential_type: string;
   created_at: string;
 }
 
@@ -16,6 +17,7 @@ export const credentialsApi = {
     ssh_username: string;
     ssh_password?: string;
     ssh_key?: string;
+    credential_type?: string;
   }) => client.post<Credential>('/credentials', data),
 
   update: (id: string, data: {
@@ -23,6 +25,7 @@ export const credentialsApi = {
     ssh_username: string;
     ssh_password?: string;
     ssh_key?: string;
+    credential_type?: string;
   }) => client.put(`/credentials/${id}`, data),
 
   delete: (id: string) => client.delete(`/credentials/${id}`),

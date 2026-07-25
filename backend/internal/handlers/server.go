@@ -24,6 +24,7 @@ type CreateServerRequest struct {
 	SSHKey       string     `json:"ssh_key"`
 	SSHHostKey   string     `json:"ssh_host_key"`
 	CredentialID *uuid.UUID `json:"credential_id"`
+	ServerType   string     `json:"server_type"`
 	ExpiresAt    *time.Time `json:"expires_at"`
 	Notes        string     `json:"notes"`
 }
@@ -37,6 +38,7 @@ type UpdateServerRequest struct {
 	SSHKey       string     `json:"ssh_key"`
 	SSHHostKey   string     `json:"ssh_host_key"`
 	CredentialID *uuid.UUID `json:"credential_id"`
+	ServerType   string     `json:"server_type"`
 	ExpiresAt    *time.Time `json:"expires_at"`
 	Notes        string     `json:"notes"`
 }
@@ -80,6 +82,9 @@ func (h *ServerHandler) Create(c *gin.Context) {
 	if req.SSHUsername == "" {
 		req.SSHUsername = "root"
 	}
+	if req.ServerType == "" {
+		req.ServerType = "linux"
+	}
 	db := c.MustGet("db").(*models.DB)
 	s := &models.Server{
 		UserID:       userID,
@@ -91,6 +96,7 @@ func (h *ServerHandler) Create(c *gin.Context) {
 		SSHKey:       req.SSHKey,
 		SSHHostKey:   req.SSHHostKey,
 		CredentialID: req.CredentialID,
+		ServerType:   req.ServerType,
 		ExpiresAt:    req.ExpiresAt,
 		Notes:        req.Notes,
 	}
@@ -119,6 +125,9 @@ func (h *ServerHandler) Update(c *gin.Context) {
 	if req.SSHUsername == "" {
 		req.SSHUsername = "root"
 	}
+	if req.ServerType == "" {
+		req.ServerType = "linux"
+	}
 	db := c.MustGet("db").(*models.DB)
 	s := &models.Server{
 		ID:           id,
@@ -131,6 +140,7 @@ func (h *ServerHandler) Update(c *gin.Context) {
 		SSHKey:       req.SSHKey,
 		SSHHostKey:   req.SSHHostKey,
 		CredentialID: req.CredentialID,
+		ServerType:   req.ServerType,
 		ExpiresAt:    req.ExpiresAt,
 		Notes:        req.Notes,
 	}
