@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Typography, Descriptions, Tag, Space, Button, Card, Tabs, Spin, Modal, Form, Input, InputNumber, App } from 'antd';
 import { ArrowLeftOutlined, EditOutlined, DeleteOutlined, DockerOutlined, KeyOutlined, SaveOutlined } from '@ant-design/icons';
@@ -36,29 +36,41 @@ function getPresetRange(key: PresetKey): TimeRange {
   }
 }
 
-// TerminalCard measures the exact available viewport space for the embedded terminal.
+// TerminalCard measures tab pane to viewport bottom, with delay for DOM to settle.
 function TerminalCard({ serverId }: { serverId: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const [height, setHeight] = useState(400);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     const measure = () => {
-      if (ref.current) {
-        const top = ref.current.getBoundingClientRect().top;
-        setHeight(window.innerHeight - top - 8);
+      if (!ref.current) return;
+      const pane = ref.current.closest('.ant-tabs-tabpane') as HTMLElement;
+      if (pane) {
+        const top = pane.getBoundingClientRect().top;
+        if (top > 0) setHeight(window.innerHeight - top - 60);
       }
     };
-    measure();
-    const ro = new ResizeObserver(measure);
-    if (ref.current) ro.observe(ref.current);
+    // Delay to allow tab pane animation and layout to complete
+    const timer = setTimeout(measure, 150);
+
+    // ResizeObserver on the tab pane (more precise than window.resize)
+    const pane = ref.current?.closest('.ant-tabs-tabpane') as HTMLElement;
+    const ro = pane ? new ResizeObserver(measure) : null;
+    if (ro) ro.observe(pane);
+    // Also keep window resize as fallback
     window.addEventListener('resize', measure);
-    return () => { ro.disconnect(); window.removeEventListener('resize', measure); };
+
+    return () => {
+      clearTimeout(timer);
+      ro?.disconnect();
+      window.removeEventListener('resize', measure);
+    };
   }, []);
 
   return (
-    <Card styles={{ body: { display: 'flex', flexDirection: 'column', height, overflow: 'hidden', padding: 16 } }}>
+    <div ref={ref} style={{ height: height || 400, display: 'flex', flexDirection: 'column' }}>
       <SshTerminal serverId={serverId} />
-    </Card>
+    </div>
   );
 }
 
@@ -196,7 +208,7 @@ export default function ServerDetail() {
   if (!server) return <div>{t('server.notFound')}</div>;
 
   return (
-    <div>
+    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 136px)', overflow: 'hidden' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <Space>
           <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/dashboard')}>{t('common.back')}</Button>
@@ -303,7 +315,7 @@ export default function ServerDetail() {
           key: 'terminal',
           label: t('terminal.title'),
           children: (
-            <TerminalCard serverId={id!} />
+<TerminalCard serverId={id!} />
           ),
         },
         {
