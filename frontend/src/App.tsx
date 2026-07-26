@@ -17,6 +17,10 @@ import { useAuthStore } from './store/authStore';
 
 const antdLocales: Record<string, typeof enUS> = { en: enUS, zh: zhCN };
 
+// Lets deep components (e.g. the SSH terminal) react to theme changes live,
+// without re-reading localStorage or reconnecting.
+export const DarkModeContext = React.createContext(false);
+
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token);
   return token ? <>{children}</> : <Navigate to="/login" />;
@@ -41,6 +45,7 @@ export default function App() {
 
   return (
     <ConfigProvider locale={antdLocales[lang] || enUS} theme={{ algorithm: darkMode ? theme.darkAlgorithm : theme.defaultAlgorithm, token: { colorPrimary: '#1890ff' } }}>
+      <DarkModeContext.Provider value={darkMode}>
       <AntApp>
         <BrowserRouter>
           <Routes>
@@ -66,6 +71,7 @@ export default function App() {
           </Routes>
         </BrowserRouter>
       </AntApp>
+      </DarkModeContext.Provider>
     </ConfigProvider>
   );
 }

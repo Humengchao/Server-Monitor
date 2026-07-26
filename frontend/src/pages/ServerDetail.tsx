@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Typography, Descriptions, Tag, Space, Button, Card, Tabs, Spin, Modal, Form, Input, InputNumber, Select, App } from 'antd';
 import { ArrowLeftOutlined, EditOutlined, DeleteOutlined, DockerOutlined, KeyOutlined, SaveOutlined, WindowsOutlined, AppleOutlined } from '@ant-design/icons';
@@ -34,44 +34,6 @@ function getPresetRange(key: PresetKey): TimeRange {
     case '30d':
       return { since: now.subtract(30, 'day').startOf('day').toISOString(), until: now.toISOString() };
   }
-}
-
-// TerminalCard measures tab pane to viewport bottom, with delay for DOM to settle.
-function TerminalCard({ serverId }: { serverId: string }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [height, setHeight] = useState(400);
-
-  useEffect(() => {
-    const measure = () => {
-      if (!ref.current) return;
-      const pane = ref.current.closest('.ant-tabs-tabpane') as HTMLElement;
-      if (pane) {
-        const top = pane.getBoundingClientRect().top;
-        if (top > 0) setHeight(window.innerHeight - top - 60);
-      }
-    };
-    // Delay to allow tab pane animation and layout to complete
-    const timer = setTimeout(measure, 150);
-
-    // ResizeObserver on the tab pane (more precise than window.resize)
-    const pane = ref.current?.closest('.ant-tabs-tabpane') as HTMLElement;
-    const ro = pane ? new ResizeObserver(measure) : null;
-    if (ro) ro.observe(pane);
-    // Also keep window resize as fallback
-    window.addEventListener('resize', measure);
-
-    return () => {
-      clearTimeout(timer);
-      ro?.disconnect();
-      window.removeEventListener('resize', measure);
-    };
-  }, []);
-
-  return (
-    <div ref={ref} style={{ height: height || 400, display: 'flex', flexDirection: 'column' }}>
-      <SshTerminal serverId={serverId} />
-    </div>
-  );
 }
 
 export default function ServerDetail() {
@@ -271,7 +233,7 @@ export default function ServerDetail() {
         )}
       </Descriptions>
 
-      <Tabs defaultActiveKey="metrics" items={[
+      <Tabs className="server-detail-tabs" style={{ flex: 1, minHeight: 0 }} defaultActiveKey="metrics" items={[
         {
           key: 'metrics',
           label: t('metrics.title'),
@@ -320,7 +282,9 @@ export default function ServerDetail() {
           key: 'terminal',
           label: t('terminal.title'),
           children: (
-<TerminalCard serverId={id!} />
+            <div style={{ height: '100%' }}>
+              <SshTerminal serverId={id!} />
+            </div>
           ),
         },
         {

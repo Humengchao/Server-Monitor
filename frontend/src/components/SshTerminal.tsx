@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useContext } from 'react';
 import { Terminal } from 'xterm';
 import type { ITheme } from 'xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -6,6 +6,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Button, Space, App } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import { DarkModeContext } from '../App';
 import 'xterm/css/xterm.css';
 
 interface Props {
@@ -17,11 +18,12 @@ const darkTheme: ITheme = {
   foreground: '#cdd6f4',
 };
 
+// Dimmed gray instead of pure white so the terminal stands out from the page.
 const lightTheme: ITheme = {
-  background: '#ffffff',
-  foreground: '#333333',
-  cursor: '#333333',
-  cursorAccent: '#ffffff',
+  background: '#dde3ea',
+  foreground: '#1f2329',
+  cursor: '#1f2329',
+  cursorAccent: '#dde3ea',
   selectionBackground: '#b3d4fc',
 };
 
@@ -36,22 +38,31 @@ function sendResize(ws: WebSocket, terminal: Terminal) {
 export default function SshTerminal({ serverId }: Props) {
   const { t } = useTranslation();
   const { message } = App.useApp();
+  const darkMode = useContext(DarkModeContext);
   const termRef = useRef<HTMLDivElement>(null);
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
+  const terminalRef = useRef<Terminal | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
+
+  // Retheme the live terminal instantly when the app theme toggles
+  useEffect(() => {
+    if (terminalRef.current) {
+      terminalRef.current.options.theme = darkMode ? darkTheme : lightTheme;
+    }
+  }, [darkMode]);
 
   const connect = () => {
     // Tear down any previous terminal/socket before creating a new one
     cleanupRef.current?.();
 
-    const darkMode = localStorage.getItem('theme') === 'dark';
     const terminal = new Terminal({
       cursorBlink: true,
       fontSize: 14,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       theme: darkMode ? darkTheme : lightTheme,
     });
+    terminalRef.current = terminal;
 
     const fitAddon = new FitAddon();
     const webLinksAddon = new WebLinksAddon();
@@ -112,6 +123,7 @@ export default function SshTerminal({ serverId }: Props) {
       ws.onerror = null;
       ws.close();
       terminal.dispose();
+      if (terminalRef.current === terminal) terminalRef.current = null;
     };
     cleanupRef.current = cleanup;
     return cleanup;

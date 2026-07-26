@@ -18,9 +18,20 @@ body {
   width: 8px;
 }
 .xterm-viewport::-webkit-scrollbar-track {
-  background: #1e1e2e;
+  background: transparent;
 }
 .xterm-viewport::-webkit-scrollbar-thumb {
-  background: #45475a;
+  background: rgba(128, 134, 158, 0.5);
   border-radius: 4px;
+}
+
+/* ServerDetail tabs fill the page below the header; each pane scrolls on its own
+   so tall content (e.g. the disk IO chart) is reachable, while the terminal pane
+   stretches to the full remaining height. */
+.server-detail-tabs .ant-tabs-content {
+  height: 100%;
+}
+.server-detail-tabs .ant-tabs-tabpane {
+  height: 100%;
+  overflow-y: auto;
 }
