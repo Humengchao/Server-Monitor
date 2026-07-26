@@ -2,6 +2,7 @@ package services
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"log"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf16"
 
 	"server-monitor/internal/models"
 
@@ -137,6 +139,10 @@ func (c *Collector) collectOne(s *models.Server) (*models.MetricPoint, error) {
 		return nil, fmt.Errorf("ssh dial: %w", err)
 	}
 	defer client.Close()
+
+	if s.ServerType == "windows" {
+		return c.collectWindows(client, s)
+	}
 
 	m := &models.MetricPoint{RecordedAt: time.Now()}
 
@@ -368,6 +374,111 @@ func collectSystemInfo(client *ssh.Client) (int, int64, int64) {
 	}
 
 	return cores, memTotalKB * 1024, diskTotal
+}
+
+// windowsMetricsScript gathers all metrics in a single PowerShell invocation as
+// key=value lines. Uses CIM classes (locale-independent, unlike Get-Counter).
+// Perf raw counters (BytesReceivedPersec etc.) are cumulative despite the name,
+// matching the /proc counter semantics used for rate calculation.
+const windowsMetricsScript = `$ErrorActionPreference='SilentlyContinue'
+$os = Get-CimInstance Win32_OperatingSystem
+$cpu = (Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average
+$cores = (Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors
+$nics = Get-CimInstance Win32_PerfRawData_Tcpip_NetworkInterface
+$netrx = ($nics | Measure-Object -Property BytesReceivedPersec -Sum).Sum
+$nettx = ($nics | Measure-Object -Property BytesSentPersec -Sum).Sum
+$disk = Get-CimInstance Win32_PerfRawData_PerfDisk_PhysicalDisk -Filter "Name='_Total'"
+$uptime = [int64]((Get-Date) - $os.LastBootUpTime).TotalSeconds
+$disktotal = (Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | Measure-Object -Property Size -Sum).Sum
+Write-Output ("cpu=" + [int64][math]::Round([double]$cpu))
+Write-Output ("memtotal=" + $os.TotalVisibleMemorySize)
+Write-Output ("memfree=" + $os.FreePhysicalMemory)
+Write-Output ("netrx=" + [int64]$netrx)
+Write-Output ("nettx=" + [int64]$nettx)
+Write-Output ("diskread=" + [int64]$disk.DiskReadBytesPersec)
+Write-Output ("diskwrite=" + [int64]$disk.DiskWriteBytesPersec)
+Write-Output ("uptime=" + $uptime)
+Write-Output ("cores=" + $cores)
+Write-Output ("disktotal=" + [int64]$disktotal)`
+
+// encodePowerShell encodes a script as UTF-16LE base64 for -EncodedCommand,
+// which sidesteps quoting differences between cmd.exe and powershell default shells.
+func encodePowerShell(script string) string {
+	codes := utf16.Encode([]rune(script))
+	buf := make([]byte, len(codes)*2)
+	for i, r := range codes {
+		buf[i*2] = byte(r)
+		buf[i*2+1] = byte(r >> 8)
+	}
+	return base64.StdEncoding.EncodeToString(buf)
+}
+
+func (c *Collector) collectWindows(client *ssh.Client, s *models.Server) (*models.MetricPoint, error) {
+	cmd := "powershell -NoProfile -NonInteractive -EncodedCommand " + encodePowerShell(windowsMetricsScript)
+	out, err := RunCmd(client, cmd)
+	if err != nil && strings.TrimSpace(out) == "" {
+		return nil, fmt.Errorf("windows metrics: %w", err)
+	}
+
+	vals := make(map[string]int64)
+	for _, line := range strings.Split(out, "\n") {
+		k, v, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if !ok {
+			continue
+		}
+		n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		if err == nil {
+			vals[k] = n
+		}
+	}
+	if len(vals) == 0 {
+		return nil, fmt.Errorf("windows metrics: no data in output %q", strings.TrimSpace(out))
+	}
+
+	m := &models.MetricPoint{RecordedAt: time.Now()}
+	m.CPUPercent = float64(vals["cpu"])
+	// TotalVisibleMemorySize / FreePhysicalMemory are in kB
+	m.MemoryTotal = vals["memtotal"] * 1024
+	m.MemoryUsed = (vals["memtotal"] - vals["memfree"]) * 1024
+	if m.MemoryUsed < 0 {
+		m.MemoryUsed = 0
+	}
+	m.UptimeSeconds = vals["uptime"]
+
+	netRxRaw, netTxRaw := vals["netrx"], vals["nettx"]
+	diskRxRaw, diskTxRaw := vals["diskread"], vals["diskwrite"]
+	now := m.RecordedAt
+	c.mu.Lock()
+	if prev, ok := c.prev[s.ID]; ok && prev.netRx <= netRxRaw && prev.netTx <= netTxRaw {
+		elapsed := now.Sub(prev.time).Seconds()
+		if elapsed > 0 {
+			m.NetworkRxBytes = int64(float64(netRxRaw-prev.netRx) / elapsed)
+			m.NetworkTxBytes = int64(float64(netTxRaw-prev.netTx) / elapsed)
+			m.DiskRxBytes = int64(float64(diskRxRaw-prev.diskRx) / elapsed)
+			m.DiskTxBytes = int64(float64(diskTxRaw-prev.diskTx) / elapsed)
+		}
+	}
+	c.prev[s.ID] = &prevStats{netRx: netRxRaw, netTx: netTxRaw, diskRx: diskRxRaw, diskTx: diskTxRaw, time: now}
+	c.mu.Unlock()
+
+	if cores := int(vals["cores"]); cores > 0 {
+		models.UpdateServerSystemInfo(c.db.Raw, s.ID, cores, m.MemoryTotal, vals["disktotal"])
+	}
+
+	dockerVersion := collectWindowsDockerVersion(client)
+	models.UpdateDockerInfo(c.db.Raw, s.ID, dockerVersion != "", dockerVersion)
+
+	return m, nil
+}
+
+// collectWindowsDockerVersion uses double quotes: single quotes are not stripped
+// by cmd.exe, which is the default shell for Windows OpenSSH.
+func collectWindowsDockerVersion(client *ssh.Client) string {
+	out, err := RunCmd(client, `docker info --format "{{.ServerVersion}}"`)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
 }
 
 func collectDockerVersion(client *ssh.Client) string {

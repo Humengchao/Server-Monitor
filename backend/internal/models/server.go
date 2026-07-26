@@ -313,7 +313,7 @@ func GetServerByID(db *sql.DB, id uuid.UUID) (*Server, error) {
 
 // GetAllServers returns all servers with decrypted credentials (for collector).
 func GetAllServers(db *DB) ([]Server, error) {
-	rows, err := db.Raw.Query(`SELECT id, user_id, name, host, port, ssh_username, ssh_password, ssh_key, COALESCE(ssh_host_key, ''), credential_id FROM servers`)
+	rows, err := db.Raw.Query(`SELECT id, user_id, name, host, port, ssh_username, ssh_password, ssh_key, COALESCE(ssh_host_key, ''), credential_id, COALESCE(server_type, 'linux') FROM servers`)
 	if err != nil {
 		return nil, err
 	}
@@ -324,7 +324,7 @@ func GetAllServers(db *DB) ([]Server, error) {
 		var encPassword, encKey string
 		var credID sql.NullString
 		if err := rows.Scan(&s.ID, &s.UserID, &s.Name, &s.Host, &s.Port,
-			&s.SSHUsername, &encPassword, &encKey, &s.SSHHostKey, &credID); err != nil {
+			&s.SSHUsername, &encPassword, &encKey, &s.SSHHostKey, &credID, &s.ServerType); err != nil {
 			return nil, err
 		}
 		if credID.Valid {
