@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { Terminal } from 'xterm';
+import type { ITheme } from 'xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Button, Space, App } from 'antd';
@@ -11,32 +12,51 @@ interface Props {
   serverId: string;
 }
 
+const darkTheme: ITheme = {
+  background: '#1e1e2e',
+  foreground: '#cdd6f4',
+};
+
+const lightTheme: ITheme = {
+  background: '#ffffff',
+  foreground: '#333333',
+  cursor: '#333333',
+  cursorAccent: '#ffffff',
+  selectionBackground: '#b3d4fc',
+};
+
+// Control messages are sent prefixed with \x01 so the backend can tell them
+// apart from raw keystrokes (see services/ssh.go PumpStdin).
+function sendResize(ws: WebSocket, terminal: Terminal) {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send('\x01' + JSON.stringify({ type: 'resize', cols: terminal.cols, rows: terminal.rows }));
+  }
+}
+
 export default function SshTerminal({ serverId }: Props) {
   const { t } = useTranslation();
   const { message } = App.useApp();
   const termRef = useRef<HTMLDivElement>(null);
   const [connected, setConnected] = useState(false);
-  const [term, setTerm] = useState<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
+  const cleanupRef = useRef<(() => void) | null>(null);
 
   const connect = () => {
-    if (wsRef.current) {
-      wsRef.current.close();
-    }
+    // Tear down any previous terminal/socket before creating a new one
+    cleanupRef.current?.();
 
+    const darkMode = localStorage.getItem('theme') === 'dark';
     const terminal = new Terminal({
       cursorBlink: true,
       fontSize: 14,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      theme: { background: '#1e1e2e', foreground: '#cdd6f4' },
+      theme: darkMode ? darkTheme : lightTheme,
     });
 
     const fitAddon = new FitAddon();
     const webLinksAddon = new WebLinksAddon();
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(webLinksAddon);
-    fitAddonRef.current = fitAddon;
 
     terminal.open(termRef.current!);
     fitAddon.fit();
@@ -54,6 +74,7 @@ export default function SshTerminal({ serverId }: Props) {
 
     ws.onopen = () => {
       setConnected(true);
+      sendResize(ws, terminal); // sync PTY size with the fitted terminal
       terminal.write(t('terminal.connected') + '\r\n');
     };
 
@@ -76,31 +97,35 @@ export default function SshTerminal({ serverId }: Props) {
       }
     });
 
-    terminal.onResize(() => {
-      setTerm(terminal);
-    });
-
-    setTerm(terminal);
+    // Whenever the fit addon changes the terminal dimensions, tell the backend
+    terminal.onResize(() => sendResize(ws, terminal));
 
     const handleResize = () => fitAddon.fit();
     window.addEventListener('resize', handleResize);
 
-    return () => {
+    const cleanup = () => {
       ro.disconnect();
       window.removeEventListener('resize', handleResize);
+      ws.onopen = null;
+      ws.onmessage = null;
+      ws.onclose = null;
+      ws.onerror = null;
       ws.close();
       terminal.dispose();
     };
+    cleanupRef.current = cleanup;
+    return cleanup;
   };
 
   useEffect(() => {
-    const cleanup = connect();
-    return () => cleanup?.();
+    connect();
+    return () => {
+      cleanupRef.current?.();
+      cleanupRef.current = null;
+    };
   }, [serverId]);
 
   const handleReconnect = () => {
-    if (wsRef.current) wsRef.current.close();
-    if (term) term.dispose();
     connect();
   };
 

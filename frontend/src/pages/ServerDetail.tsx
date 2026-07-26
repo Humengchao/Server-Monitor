@@ -103,16 +103,18 @@ export default function ServerDetail() {
 
   const loadServer = useCallback(async () => {
     try {
-      const res = await serversApi.list();
-      const found = (res.data || []).find((s: Server) => s.id === id);
-      setServer(found || null);
-      if (found) {
-        setDockerInstalled(found.has_docker);
-        setNotes(found.notes || '');
-        setNotesChanged(false);
+      const res = await serversApi.get(id!);
+      const found = res.data;
+      setServer(found);
+      setDockerInstalled(found.has_docker);
+      setNotes(found.notes || '');
+      setNotesChanged(false);
+    } catch (err: any) {
+      if (err?.response?.status === 404) {
+        setServer(null);
+      } else {
+        message.error(t('server.loadFailed'));
       }
-    } catch {
-      message.error(t('server.loadFailed'));
     }
     setLoading(false);
   }, [id, message, t]);

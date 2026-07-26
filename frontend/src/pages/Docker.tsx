@@ -121,8 +121,15 @@ function ExecDrawer({ serverId, containerId, containerName, open, onClose }: {
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
+    const sendResize = () => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send('\x01' + JSON.stringify({ type: 'resize', cols: terminal.cols, rows: terminal.rows }));
+      }
+    };
+
     ws.onopen = () => {
       setConnected(true);
+      sendResize(); // sync PTY size with the fitted terminal
       terminal.focus();
     };
 
@@ -148,6 +155,9 @@ function ExecDrawer({ serverId, containerId, containerName, open, onClose }: {
         ws.send(data);
       }
     });
+
+    // Whenever the fit addon changes the terminal dimensions, tell the backend
+    terminal.onResize(() => sendResize());
 
     const handleResize = () => { try { fitAddon.fit(); } catch {} };
     window.addEventListener('resize', handleResize);

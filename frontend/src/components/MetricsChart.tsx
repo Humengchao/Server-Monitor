@@ -50,8 +50,8 @@ function MetricsChart({ history }: Props) {
             <XAxis dataKey="time" fontSize={12} />
             <YAxis unit="%" />
             <Tooltip wrapperStyle={{ position: 'absolute', pointerEvents: 'none' }} />
-            <Area type="basis" dataKey="CPU" stroke="#ff4d4f" fill="#ff4d4f" fillOpacity={0.1} isAnimationActive={false} />
-            <Area type="basis" dataKey="Memory" stroke="#1890ff" fill="#1890ff" fillOpacity={0.1} isAnimationActive={false} />
+            <Area type="monotone" dataKey="CPU" stroke="#ff4d4f" fill="#ff4d4f" fillOpacity={0.1} isAnimationActive={false} />
+            <Area type="monotone" dataKey="Memory" stroke="#1890ff" fill="#1890ff" fillOpacity={0.1} isAnimationActive={false} />
           </AreaChart>
         </ResponsiveContainer>
       </div>
@@ -64,8 +64,8 @@ function MetricsChart({ history }: Props) {
             <XAxis dataKey="time" fontSize={12} />
             <YAxis unit=" MB/s" />
             <Tooltip wrapperStyle={{ position: 'absolute', pointerEvents: 'none' }} />
-            <Area type="basis" dataKey={rxKey} stroke="#52c41a" fill="#52c41a" fillOpacity={0.1} isAnimationActive={false} />
-            <Area type="basis" dataKey={txKey} stroke="#722ed1" fill="#722ed1" fillOpacity={0.1} isAnimationActive={false} />
+            <Area type="monotone" dataKey={rxKey} stroke="#52c41a" fill="#52c41a" fillOpacity={0.1} isAnimationActive={false} />
+            <Area type="monotone" dataKey={txKey} stroke="#722ed1" fill="#722ed1" fillOpacity={0.1} isAnimationActive={false} />
           </AreaChart>
         </ResponsiveContainer>
       </div>
@@ -78,8 +78,8 @@ function MetricsChart({ history }: Props) {
             <XAxis dataKey="time" fontSize={12} />
             <YAxis unit=" MB/s" />
             <Tooltip wrapperStyle={{ position: 'absolute', pointerEvents: 'none' }} />
-            <Area type="basis" dataKey={readKey} stroke="#fa8c16" fill="#fa8c16" fillOpacity={0.1} isAnimationActive={false} />
-            <Area type="basis" dataKey={writeKey} stroke="#eb2f96" fill="#eb2f96" fillOpacity={0.1} isAnimationActive={false} />
+            <Area type="monotone" dataKey={readKey} stroke="#fa8c16" fill="#fa8c16" fillOpacity={0.1} isAnimationActive={false} />
+            <Area type="monotone" dataKey={writeKey} stroke="#eb2f96" fill="#eb2f96" fillOpacity={0.1} isAnimationActive={false} />
           </AreaChart>
         </ResponsiveContainer>
       </div>

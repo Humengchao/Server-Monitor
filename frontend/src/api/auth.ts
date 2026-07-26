@@ -7,7 +7,7 @@ export interface LoginResponse {
 }
 
 export interface LoginHistoryItem {
-  id: string;
+  id: number;
   user_id: string;
   ip: string;
   user_agent: string;

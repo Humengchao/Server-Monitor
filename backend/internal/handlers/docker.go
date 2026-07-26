@@ -229,7 +229,6 @@ func (h *DockerHandler) ContainerExec(c *gin.Context) {
 	defer client.Close()
 
 	// Use shell session (same as SSH terminal), then send docker exec command
-	log.Printf("docker exec: starting shell session for container %s", containerID)
 	ts, err := services.NewTerminalSession(conn, client)
 	if err != nil {
 		log.Printf("docker exec: PTY failed: %v", err)
@@ -238,28 +237,22 @@ func (h *DockerHandler) ContainerExec(c *gin.Context) {
 	}
 	defer ts.Close()
 
-	// Wait for shell to initialize, then send docker exec command (try sudo first)
+	// Wait for shell to initialize, then start docker exec.
+	// Only use sudo when docker isn't usable without it, and prefer bash
+	// inside the container, falling back to sh.
 	go func() {
 		time.Sleep(500 * time.Millisecond)
-		cmd := "sudo docker exec -it " + containerID + " /bin/sh\r"
-		log.Printf("docker exec: sending command: %s", cmd)
+		shell := "sh -c 'command -v bash >/dev/null && exec bash || exec sh'"
+		cmd := fmt.Sprintf(
+			"if docker ps >/dev/null 2>&1; then docker exec -it %s %s; else sudo docker exec -it %s %s; fi\r",
+			containerID, shell, containerID, shell)
 		ts.Stdin().Write([]byte(cmd))
 	}()
 
-	// stdin: websocket → SSH (NewTerminalSession already handles stdout/stderr → websocket via io.Copy)
-	go func() {
-		buf := make([]byte, 4096)
-		for {
-			n, err := ts.Read(buf)
-			if err != nil {
-				return
-			}
-			if n > 0 {
-				ts.Stdin().Write(buf[:n])
-			}
-		}
-	}()
+	// stdin: websocket → SSH, including resize control messages
+	// (NewTerminalSession already handles stdout/stderr → websocket)
+	go ts.PumpStdin()
 
-	// Wait for session to complete
+	// Wait for session to complete (client disconnect or shell exit)
 	<-ts.Done()
 }

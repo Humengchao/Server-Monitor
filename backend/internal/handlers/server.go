@@ -65,6 +65,27 @@ func (h *ServerHandler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, servers)
 }
 
+// Get returns a single server (with latest metrics and tags) by ID.
+func (h *ServerHandler) Get(c *gin.Context) {
+	userID := c.MustGet("user_id").(uuid.UUID)
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	db := c.MustGet("db").(*models.DB)
+	s, err := models.GetServerSummary(db.Raw, id, userID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
+		return
+	}
+	tags, _ := models.GetServerTags(db.Raw, s.ID)
+	if tags != nil {
+		s.Tags = tags
+	}
+	c.JSON(http.StatusOK, s)
+}
+
 func (h *ServerHandler) Create(c *gin.Context) {
 	userID := c.MustGet("user_id").(uuid.UUID)
 	var req CreateServerRequest

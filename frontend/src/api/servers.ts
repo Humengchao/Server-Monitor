@@ -68,6 +68,8 @@ export interface MetricPoint {
 export const serversApi = {
   list: () => client.get<Server[]>('/servers'),
 
+  get: (id: string) => client.get<Server>(`/servers/${id}`),
+
   create: (data: {
     name: string;
     host: string;

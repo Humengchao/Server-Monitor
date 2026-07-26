@@ -55,20 +55,10 @@ func (h *SSHHandler) Handle(c *gin.Context) {
 	}
 	defer ts.Close()
 
-	// stdin: websocket → SSH (NewTerminalSession already handles stdout/stderr → websocket via io.Copy)
-	go func() {
-		buf := make([]byte, 4096)
-		for {
-			n, err := ts.Read(buf)
-			if err != nil {
-				return
-			}
-			if n > 0 {
-				ts.Stdin().Write(buf[:n])
-			}
-		}
-	}()
+	// stdin: websocket → SSH, including resize control messages
+	// (NewTerminalSession already handles stdout/stderr → websocket)
+	go ts.PumpStdin()
 
-	// Wait for session to complete
+	// Wait for session to complete (client disconnect or shell exit)
 	<-ts.Done()
 }

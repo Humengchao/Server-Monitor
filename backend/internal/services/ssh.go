@@ -1,6 +1,7 @@
 package services
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -12,13 +13,22 @@ import (
 )
 
 type TerminalSession struct {
-	conn    *websocket.Conn
-	client  *ssh.Client
-	session *ssh.Session
-	stdin   io.WriteCloser
-	stdout  io.Reader
-	done    chan struct{}
-	mu      sync.Mutex
+	conn      *websocket.Conn
+	client    *ssh.Client
+	session   *ssh.Session
+	stdin     io.WriteCloser
+	stdout    io.Reader
+	done      chan struct{}
+	closeOnce sync.Once
+	mu        sync.Mutex
+}
+
+// controlMsg is a client -> server control message. The client sends it on the
+// websocket prefixed with a 0x01 byte; regular keystrokes are sent raw.
+type controlMsg struct {
+	Type string `json:"type"`
+	Cols int    `json:"cols"`
+	Rows int    `json:"rows"`
 }
 
 func NewTerminalSession(conn *websocket.Conn, client *ssh.Client) (*TerminalSession, error) {
@@ -63,45 +73,52 @@ func NewTerminalSession(conn *websocket.Conn, client *ssh.Client) (*TerminalSess
 		stdout:  stdout,
 		done:    make(chan struct{}),
 	}
-	// read stdout + stderr combined
+	// stdout + stderr -> websocket; signal Done when the SSH session ends
+	// (e.g. the user types "exit") so the handler can tear everything down.
 	go func() {
 		go io.Copy(ts, stdout)
 		io.Copy(ts, stderr)
+		sess.Wait()
+		ts.closeDone()
 	}()
 	return ts, nil
 }
 
+func (ts *TerminalSession) closeDone() {
+	ts.closeOnce.Do(func() { close(ts.done) })
+}
+
+// Write sends SSH output to the websocket (io.Copy destination).
 func (ts *TerminalSession) Write(data []byte) (int, error) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
 	return len(data), ts.conn.WriteMessage(websocket.TextMessage, data)
 }
 
-func (ts *TerminalSession) Read(p []byte) (int, error) {
-	mt, msg, err := ts.conn.ReadMessage()
-	if err != nil {
-		close(ts.done)
-		return 0, err
-	}
-	// Close on close message from client
-	if mt == websocket.CloseMessage {
-		close(ts.done)
-		return 0, io.EOF
-	}
-	return copy(p, msg), nil
-}
-
-func (ts *TerminalSession) Start() {
-	// forward user input to ssh stdin
+// PumpStdin reads websocket messages and forwards them to the SSH session's
+// stdin. Messages prefixed with 0x01 carry a JSON control payload (currently
+// only terminal resize). Blocks until the websocket closes or errors, then
+// signals Done.
+func (ts *TerminalSession) PumpStdin() {
+	defer ts.closeDone()
 	for {
-		buf := make([]byte, 4096)
-		n, err := ts.stdout.Read(buf)
+		_, msg, err := ts.conn.ReadMessage()
 		if err != nil {
-			close(ts.done)
 			return
 		}
-		if n > 0 {
-			ts.Write(buf[:n])
+		if len(msg) == 0 {
+			continue
+		}
+		if msg[0] == 0x01 {
+			var cm controlMsg
+			if err := json.Unmarshal(msg[1:], &cm); err == nil &&
+				cm.Type == "resize" && cm.Cols > 0 && cm.Rows > 0 {
+				ts.Resize(cm.Rows, cm.Cols)
+			}
+			continue
+		}
+		if _, err := ts.stdin.Write(msg); err != nil {
+			return
 		}
 	}
 }

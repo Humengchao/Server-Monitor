@@ -72,6 +72,7 @@ func Setup(db *sql.DB, cfg *config.Config) *gin.Engine {
 		servers := api.Group("/servers", middleware.AuthRequired(cfg))
 		{
 			servers.GET("", serverH.List)
+			servers.GET("/:id", serverH.Get)
 			servers.POST("", serverH.Create)
 			servers.PUT("/:id", serverH.Update)
 			servers.DELETE("/:id", serverH.Delete)

@@ -66,31 +66,26 @@ func CreateServer(db *DB, s *Server) error {
 	).Scan(&s.CreatedAt)
 }
 
-func GetServersByUserID(db *sql.DB, userID uuid.UUID) ([]Server, error) {
-	rows, err := db.Query(
-		`SELECT s.id, s.user_id, s.name, s.host, s.port, s.ssh_username, s.last_seen_at, s.created_at,
-		 COALESCE(s.ssh_host_key, ''),
-		 COALESCE(s.credential_id::text, ''),
-		 COALESCE(c.name, ''),
-		 COALESCE(s.cpu_cores, 0), COALESCE(s.memory_total_bytes, 0), COALESCE(s.disk_total_bytes, 0),
-		 COALESCE(s.has_docker, FALSE), COALESCE(s.docker_version, ''),
-		 s.expires_at, COALESCE(s.server_type, 'linux'), COALESCE(s.notes, ''),
-		 COALESCE(sm.cpu_percent, 0), COALESCE(sm.memory_used, 0), COALESCE(sm.memory_total, 0),
-		 COALESCE(sm.network_rx_bytes, 0), COALESCE(sm.network_tx_bytes, 0),
-		 COALESCE(sm.disk_rx_bytes, 0), COALESCE(sm.disk_tx_bytes, 0),
-		 COALESCE(sm.uptime_seconds, 0), sm.recorded_at
-		 FROM servers s
-		 LEFT JOIN credentials c ON c.id = s.credential_id
-		 LEFT JOIN LATERAL (
-			 SELECT * FROM server_metrics WHERE server_id = s.id ORDER BY recorded_at DESC LIMIT 1
-		 ) sm ON true
-		 WHERE s.user_id = $1
-		 ORDER BY s.created_at DESC`, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
+// serverSummarySelect returns servers without decrypted secrets, joined with
+// their linked credential name and latest metrics sample.
+const serverSummarySelect = `SELECT s.id, s.user_id, s.name, s.host, s.port, s.ssh_username, s.last_seen_at, s.created_at,
+	 COALESCE(s.ssh_host_key, ''),
+	 COALESCE(s.credential_id::text, ''),
+	 COALESCE(c.name, ''),
+	 COALESCE(s.cpu_cores, 0), COALESCE(s.memory_total_bytes, 0), COALESCE(s.disk_total_bytes, 0),
+	 COALESCE(s.has_docker, FALSE), COALESCE(s.docker_version, ''),
+	 s.expires_at, COALESCE(s.server_type, 'linux'), COALESCE(s.notes, ''),
+	 COALESCE(sm.cpu_percent, 0), COALESCE(sm.memory_used, 0), COALESCE(sm.memory_total, 0),
+	 COALESCE(sm.network_rx_bytes, 0), COALESCE(sm.network_tx_bytes, 0),
+	 COALESCE(sm.disk_rx_bytes, 0), COALESCE(sm.disk_tx_bytes, 0),
+	 COALESCE(sm.uptime_seconds, 0), sm.recorded_at
+	 FROM servers s
+	 LEFT JOIN credentials c ON c.id = s.credential_id
+	 LEFT JOIN LATERAL (
+		 SELECT * FROM server_metrics WHERE server_id = s.id ORDER BY recorded_at DESC LIMIT 1
+	 ) sm ON true`
 
+func scanServerSummaries(rows *sql.Rows) ([]Server, error) {
 	var servers []Server
 	for rows.Next() {
 		var s Server
@@ -124,7 +119,37 @@ func GetServersByUserID(db *sql.DB, userID uuid.UUID) ([]Server, error) {
 		}
 		servers = append(servers, s)
 	}
-	return servers, nil
+	return servers, rows.Err()
+}
+
+func GetServersByUserID(db *sql.DB, userID uuid.UUID) ([]Server, error) {
+	rows, err := db.Query(serverSummarySelect+`
+		 WHERE s.user_id = $1
+		 ORDER BY s.created_at DESC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanServerSummaries(rows)
+}
+
+// GetServerSummary returns a single server (without decrypted secrets) with
+// its latest metrics, scoped to the owning user.
+func GetServerSummary(db *sql.DB, id, userID uuid.UUID) (*Server, error) {
+	rows, err := db.Query(serverSummarySelect+`
+		 WHERE s.id = $1 AND s.user_id = $2`, id, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	servers, err := scanServerSummaries(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(servers) == 0 {
+		return nil, sql.ErrNoRows
+	}
+	return &servers[0], nil
 }
 
 func GetServerByIDAndUser(db *DB, id, userID uuid.UUID) (*Server, error) {
@@ -244,9 +269,9 @@ func SetServerTags(db *sql.DB, serverID, userID uuid.UUID, tagIDs []uuid.UUID) e
 		return err
 	}
 	if len(tagIDs) > 0 {
-		stmt, _ := tx.Prepare(`INSERT INTO server_tags (server_id, tag_id)
-			SELECT $1, id FROM tags WHERE id = ANY($2) AND user_id = $3`)
-		_, err = stmt.Exec(serverID, pq.Array(tagIDs), userID)
+		_, err = tx.Exec(`INSERT INTO server_tags (server_id, tag_id)
+			SELECT $1, id FROM tags WHERE id = ANY($2) AND user_id = $3`,
+			serverID, pq.Array(tagIDs), userID)
 		if err != nil {
 			return err
 		}

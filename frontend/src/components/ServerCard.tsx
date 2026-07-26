@@ -86,7 +86,7 @@ interface Props {
   server: Server;
 }
 
-export default function ServerCard({ server }: Props) {
+function ServerCard({ server }: Props) {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const m = server.latest_metrics;
@@ -181,3 +181,28 @@ export default function ServerCard({ server }: Props) {
     </Card>
   );
 }
+
+function isOnlineNow(s: Server): boolean {
+  const at = s.latest_metrics?.recorded_at;
+  return !!at && Date.now() - new Date(at).getTime() < 120000;
+}
+
+// Memoized: the dashboard replaces the whole servers array every poll, so we
+// only re-render a card when its own displayed data (or online state) changes.
+export default React.memo(ServerCard, (prev, next) => {
+  const a = prev.server;
+  const b = next.server;
+  return (
+    a.id === b.id &&
+    a.name === b.name &&
+    a.host === b.host &&
+    a.server_type === b.server_type &&
+    a.expires_at === b.expires_at &&
+    a.cpu_cores === b.cpu_cores &&
+    a.memory_total === b.memory_total &&
+    a.disk_total === b.disk_total &&
+    isOnlineNow(a) === isOnlineNow(b) &&
+    JSON.stringify(a.tags || []) === JSON.stringify(b.tags || []) &&
+    JSON.stringify(a.latest_metrics) === JSON.stringify(b.latest_metrics)
+  );
+});

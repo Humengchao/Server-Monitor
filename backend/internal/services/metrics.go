@@ -83,14 +83,6 @@ func (c *Collector) cleanupOldMetrics() {
 	}
 }
 
-func (c *Collector) PollNow(serverID uuid.UUID) (*models.MetricPoint, error) {
-	s, err := models.GetServerByID(c.db.Raw, serverID)
-	if err != nil {
-		return nil, fmt.Errorf("server not found: %w", err)
-	}
-	return c.collectOne(s)
-}
-
 func (c *Collector) pollAll() {
 	servers, err := models.GetAllServers(c.db)
 	if err != nil {
