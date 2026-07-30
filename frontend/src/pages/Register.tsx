@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Form, Input, Button, Card, Typography, App } from 'antd';
-import { UserOutlined, LockOutlined } from '@ant-design/icons';
+import { UserOutlined, LockOutlined, CloudServerOutlined, CheckCircleFilled } from '@ant-design/icons';
 import { useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { authApi } from '../api/auth';
@@ -26,9 +26,29 @@ export default function Register() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f0f2f5' }}>
-      <Card style={{ width: 400, borderRadius: 12 }}>
-        <Title level={3} style={{ textAlign: 'center', marginBottom: 32 }}>{t('register.title')}</Title>
+    <div className="auth-page auth-register-page">
+      <div className="auth-backdrop auth-backdrop-one" />
+      <div className="auth-backdrop auth-backdrop-two" />
+      <section className="auth-showcase">
+        <div className="auth-brand"><span><CloudServerOutlined /></span>{t('app.title')}</div>
+        <div className="auth-showcase-copy">
+          <Text className="eyebrow">GET STARTED</Text>
+          <Title>{t('auth.registerHeroTitle')}</Title>
+          <Text>{t('auth.registerHeroSubtitle')}</Text>
+          <div className="auth-checklist">
+            <span><CheckCircleFilled />{t('auth.registerFeatureOne')}</span>
+            <span><CheckCircleFilled />{t('auth.registerFeatureTwo')}</span>
+            <span><CheckCircleFilled />{t('auth.registerFeatureThree')}</span>
+          </div>
+        </div>
+        <Text className="auth-copyright">© {new Date().getFullYear()} Server Monitor</Text>
+      </section>
+      <main className="auth-form-side">
+      <Card className="auth-card" variant="borderless">
+        <div className="auth-mobile-brand"><CloudServerOutlined /> {t('app.title')}</div>
+        <Text className="eyebrow">{t('auth.createAccount')}</Text>
+        <Title level={2}>{t('register.title')}</Title>
+        <Text type="secondary" className="auth-form-subtitle">{t('auth.registerSubtitle')}</Text>
         <Form onFinish={handleRegister} size="large">
           <Form.Item name="username" rules={[
             { required: true, message: t('register.usernameRequired') },
@@ -42,17 +62,18 @@ export default function Register() {
           ]}>
             <Input.Password prefix={<LockOutlined />} placeholder={t('register.passwordPlaceholder')} />
           </Form.Item>
-          <Form.Item>
+          <Form.Item className="auth-submit">
             <Button type="primary" htmlType="submit" loading={loading} block>
               {t('register.submit')}
             </Button>
           </Form.Item>
         </Form>
-        <div style={{ textAlign: 'center' }}>
+        <div className="auth-switch">
           <Text>{t('register.hasAccount')}</Text>
           <Link to="/login">{t('register.login')}</Link>
         </div>
       </Card>
+      </main>
     </div>
   );
 }

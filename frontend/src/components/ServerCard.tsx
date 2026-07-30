@@ -1,8 +1,7 @@
 import React from 'react';
-import { Card, Tag, Progress, Typography, Space, Divider } from 'antd';
+import { Card, Tag, Progress, Typography, Space } from 'antd';
 import {
   WindowsOutlined,
-  AppleOutlined,
   CloudServerOutlined,
   ArrowUpOutlined,
   ArrowDownOutlined,
@@ -84,35 +83,42 @@ function getExpirationInfo(expiresAt?: string | null, lang?: string): { text: st
 
 interface Props {
   server: Server;
+  observedAt: number;
 }
 
-function ServerCard({ server }: Props) {
+function ServerCard({ server, observedAt }: Props) {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const m = server.latest_metrics;
   const cpuPercent = m ? Math.round(m.cpu_percent) : 0;
   const memPercent = m && m.memory_total ? Math.round((m.memory_used / m.memory_total) * 100) : 0;
 
-  const isOnline = m?.recorded_at && (Date.now() - new Date(m.recorded_at).getTime()) < 120000;
+  const isOnline = observedAt > 0 && !!m?.recorded_at && observedAt - new Date(m.recorded_at).getTime() < 120000;
   const lang = i18n.language?.startsWith('zh') ? 'zh' : 'en';
   const expInfo = getExpirationInfo(server.expires_at, lang);
 
   return (
     <Card
       hoverable
-      style={{ borderRadius: 12, minHeight: 240 }}
+      className="server-card"
       onClick={() => navigate(`/servers/${server.id}`)}
-      title={
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Space>
-            {server.server_type === 'windows' ? <WindowsOutlined /> : <CloudServerOutlined />}
-            <span>{server.name}</span>
-          </Space>
-          <span style={{ width: 8, height: 8, borderRadius: '50%', background: isOnline ? '#52c41a' : '#ff4d4f', display: 'inline-block' }} />
-        </div>
-      }
+      tabIndex={0}
+      onKeyDown={(event) => { if (event.key === 'Enter') navigate(`/servers/${server.id}`); }}
     >
-      <div style={{ marginBottom: 8, minHeight: 22, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+      <div className="server-card-header">
+        <div className={`server-platform ${server.server_type === 'windows' ? 'windows' : 'linux'}`}>
+          {server.server_type === 'windows' ? <WindowsOutlined /> : <CloudServerOutlined />}
+        </div>
+        <div className="server-identity">
+          <Text strong ellipsis title={server.name}>{server.name}</Text>
+          <Text type="secondary" ellipsis title={server.host}>{server.host}</Text>
+        </div>
+        <div className={`status-pill ${isOnline ? 'online' : 'offline'}`}>
+          <span />{isOnline ? t('dashboard.online') : t('dashboard.offline')}
+        </div>
+      </div>
+
+      <div className="server-tags">
         {server.tags?.map((tag) => (
           <Tag key={tag.id} color={tag.color}>
             {tag.name}
@@ -120,71 +126,59 @@ function ServerCard({ server }: Props) {
         ))}
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 8, flexWrap: 'wrap', gap: 4 }}>
-        <Space size={4}><DashboardOutlined style={{ color: '#8c8c8c' }} /><Text type="secondary" style={{ fontSize: 12 }}>{server.cpu_cores || 0} {t('card.core')}</Text></Space>
-        <Space size={4}><DatabaseOutlined style={{ color: '#8c8c8c' }} /><Text type="secondary" style={{ fontSize: 12 }}>{formatGB(server.memory_total)}</Text></Space>
-        <Space size={4}><HddOutlined style={{ color: '#8c8c8c' }} /><Text type="secondary" style={{ fontSize: 12 }}>{formatGB(server.disk_total)}</Text></Space>
-        <Space size={4}><ClockCircleOutlined style={{ color: '#8c8c8c' }} /><Text type="secondary" style={{ fontSize: 12 }}>{formatUptime(m?.uptime_seconds || 0)}</Text></Space>
+      <div className="server-specs">
+        <Space size={5}><DashboardOutlined /><Text type="secondary">{server.cpu_cores || 0} {t('card.core')}</Text></Space>
+        <Space size={5}><DatabaseOutlined /><Text type="secondary">{formatGB(server.memory_total)}</Text></Space>
+        <Space size={5}><HddOutlined /><Text type="secondary">{formatGB(server.disk_total)}</Text></Space>
+        <Space size={5}><ClockCircleOutlined /><Text type="secondary">{formatUptime(m?.uptime_seconds || 0)}</Text></Space>
         {expInfo && (
-          <Space size={4}><CalendarOutlined style={{ color: expInfo.color }} /><Text style={{ fontSize: 12, color: expInfo.color }}>{expInfo.text}</Text></Space>
+          <Space size={5}><CalendarOutlined style={{ color: expInfo.color }} /><Text style={{ color: expInfo.color }}>{expInfo.text}</Text></Space>
         )}
       </div>
 
-      <Divider style={{ margin: '8px 0' }} />
-
-      {m && (
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ textAlign: 'center', flex: 1 }}>
-            <Progress
-              type="circle"
-              percent={cpuPercent}
-              size={64}
-              strokeColor={cpuPercent > 80 ? '#ff4d4f' : '#52c41a'}
-              format={(p) => p + '%'}
-            />
-            <div style={{ marginTop: 2 }}><Text type="secondary" style={{ fontSize: 11 }}>{t('card.cpu')}</Text></div>
+      {m ? (
+        <div className="server-metrics">
+          <div className="metric-progress">
+            <div><Text type="secondary">{t('card.cpu')}</Text><strong>{cpuPercent}%</strong></div>
+            <Progress percent={cpuPercent} showInfo={false} strokeColor={cpuPercent > 80 ? '#ff5d6c' : '#5d7df7'} trailColor="rgba(128, 140, 170, .14)" />
           </div>
-          <div style={{ textAlign: 'center', flex: 1 }}>
-            <Progress
-              type="circle"
-              percent={memPercent}
-              size={64}
-              strokeColor="#1890ff"
-              format={(p) => p + '%'}
-            />
-            <div style={{ marginTop: 2 }}><Text type="secondary" style={{ fontSize: 11 }}>{t('card.memory')}</Text></div>
+          <div className="metric-progress">
+            <div><Text type="secondary">{t('card.memory')}</Text><strong>{memPercent}%</strong></div>
+            <Progress percent={memPercent} showInfo={false} strokeColor="#18b690" trailColor="rgba(128, 140, 170, .14)" />
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, alignItems: 'center' }}>
-            <Text type="secondary" style={{ fontSize: 11, fontWeight: 500 }}>{t('card.network')}</Text>
+          <div className="throughput-grid">
+            <div>
+            <Text type="secondary">{t('card.network')}</Text>
             <Space size={4}>
-              <ArrowDownOutlined style={{ color: '#52c41a', fontSize: 12 }} />
-              <Text type="secondary" style={{ fontSize: 12 }}>{formatBytes(m.network_rx_bytes)}/s</Text>
+              <ArrowDownOutlined className="rx" />
+              <Text>{formatBytes(m.network_rx_bytes)}/s</Text>
             </Space>
             <Space size={4}>
-              <ArrowUpOutlined style={{ color: '#1890ff', fontSize: 12 }} />
-              <Text type="secondary" style={{ fontSize: 12 }}>{formatBytes(m.network_tx_bytes)}/s</Text>
+              <ArrowUpOutlined className="tx" />
+              <Text>{formatBytes(m.network_tx_bytes)}/s</Text>
             </Space>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, alignItems: 'center' }}>
-            <Text type="secondary" style={{ fontSize: 11, fontWeight: 500 }}>{t('card.disk')}</Text>
+            </div>
+            <div>
+            <Text type="secondary">{t('card.disk')}</Text>
             <Space size={4}>
-              <ArrowDownOutlined style={{ color: '#722ed1', fontSize: 12 }} />
-              <Text type="secondary" style={{ fontSize: 12 }}>{formatBytes(m.disk_rx_bytes)}/s</Text>
+              <ArrowDownOutlined className="rx" />
+              <Text>{formatBytes(m.disk_rx_bytes)}/s</Text>
             </Space>
             <Space size={4}>
-              <ArrowUpOutlined style={{ color: '#eb2f96', fontSize: 12 }} />
-              <Text type="secondary" style={{ fontSize: 12 }}>{formatBytes(m.disk_tx_bytes)}/s</Text>
+              <ArrowUpOutlined className="tx" />
+              <Text>{formatBytes(m.disk_tx_bytes)}/s</Text>
             </Space>
+            </div>
           </div>
         </div>
-      )}
+      ) : <div className="metrics-unavailable"><span /><Text type="secondary">{t('metrics.noData')}</Text></div>}
     </Card>
   );
 }
 
-function isOnlineNow(s: Server): boolean {
+function isOnlineAt(s: Server, observedAt: number): boolean {
   const at = s.latest_metrics?.recorded_at;
-  return !!at && Date.now() - new Date(at).getTime() < 120000;
+  return observedAt > 0 && !!at && observedAt - new Date(at).getTime() < 120000;
 }
 
 // Memoized: the dashboard replaces the whole servers array every poll, so we
@@ -201,7 +195,7 @@ export default React.memo(ServerCard, (prev, next) => {
     a.cpu_cores === b.cpu_cores &&
     a.memory_total === b.memory_total &&
     a.disk_total === b.disk_total &&
-    isOnlineNow(a) === isOnlineNow(b) &&
+    isOnlineAt(a, prev.observedAt) === isOnlineAt(b, next.observedAt) &&
     JSON.stringify(a.tags || []) === JSON.stringify(b.tags || []) &&
     JSON.stringify(a.latest_metrics) === JSON.stringify(b.latest_metrics)
   );

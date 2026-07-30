@@ -35,6 +35,10 @@ export default function App() {
     return () => { i18n.off('languageChanged', setLang); };
   }, []);
 
+  useEffect(() => {
+    document.documentElement.dataset.theme = darkMode ? 'dark' : 'light';
+  }, [darkMode]);
+
   const toggleTheme = () => {
     setDarkMode((prev) => {
       const next = !prev;
@@ -44,7 +48,25 @@ export default function App() {
   };
 
   return (
-    <ConfigProvider locale={antdLocales[lang] || enUS} theme={{ algorithm: darkMode ? theme.darkAlgorithm : theme.defaultAlgorithm, token: { colorPrimary: '#1890ff' } }}>
+    <ConfigProvider
+      locale={antdLocales[lang] || enUS}
+      theme={{
+        algorithm: darkMode ? theme.darkAlgorithm : theme.defaultAlgorithm,
+        token: {
+          colorPrimary: '#4f7cff',
+          colorInfo: '#4f7cff',
+          borderRadius: 10,
+          borderRadiusLG: 16,
+          controlHeight: 38,
+          fontFamily: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        },
+        components: {
+          Button: { fontWeight: 600, primaryShadow: '0 8px 20px rgba(79, 124, 255, 0.22)' },
+          Card: { headerFontSize: 16 },
+          Menu: { itemBorderRadius: 10, itemHeight: 46 },
+        },
+      }}
+    >
       <DarkModeContext.Provider value={darkMode}>
       <AntApp>
         <BrowserRouter>

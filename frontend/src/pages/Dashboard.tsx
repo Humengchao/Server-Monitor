@@ -1,10 +1,10 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
-  Row, Col, Button, Modal, Form, Input, InputNumber, Select, Typography, Space, App
+  Row, Col, Button, Modal, Form, Input, InputNumber, Select, Typography, Space, App, Card, Skeleton, Empty
 } from 'antd';
 import { DatePicker } from 'antd';
 import dayjs from 'dayjs';
-import { PlusOutlined, ReloadOutlined, FilterOutlined, SafetyOutlined, WindowsOutlined, AppleOutlined } from '@ant-design/icons';
+import { PlusOutlined, ReloadOutlined, FilterOutlined, SafetyOutlined, WindowsOutlined, AppleOutlined, CloudServerOutlined, CheckCircleOutlined, DisconnectOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import ServerCard from '../components/ServerCard';
 import TagSelect from '../components/TagSelect';
@@ -41,6 +41,7 @@ export default function Dashboard() {
   const [tagValues, setTagValues] = useState<string[]>([]);
   const [filterTagIds, setFilterTagIds] = useState<string[]>([]);
   const [selectedCredential, setSelectedCredential] = useState<string | undefined>(undefined);
+  const [refreshTimestamp, setRefreshTimestamp] = useState(0);
 
   useEffect(() => {
     const raw = localStorage.getItem('last_login');
@@ -109,6 +110,7 @@ export default function Dashboard() {
     try {
       const res = await serversApi.list();
       setServers(res.data || []);
+      setRefreshTimestamp(Date.now());
     } catch {
       if (showLoading) message.error(t('server.loadFailed'));
     }
@@ -162,6 +164,11 @@ export default function Dashboard() {
     return servers.filter((s) => filterTagIds.some((id) => s.tags?.some((t) => t.id === id)));
   }, [servers, filterTagIds]);
 
+  const onlineCount = useMemo(() => servers.filter((server) => {
+    const recordedAt = server.latest_metrics?.recorded_at;
+    return !!recordedAt && refreshTimestamp - new Date(recordedAt).getTime() < 120000;
+  }).length, [servers, refreshTimestamp]);
+
   const handleEdit = (server: Server) => {
     setEditingServer(server);
     setSelectedCredential(server.credential_id || undefined);
@@ -195,17 +202,21 @@ export default function Dashboard() {
   };
 
   return (
-    <div>
-      <Space style={{ marginBottom: 24, width: '100%', justifyContent: 'space-between' }}>
-        <Title level={4} style={{ margin: 0 }}>{t('server.title')}</Title>
-        <Space>
+    <div className="dashboard-page">
+      <div className="page-heading">
+        <div>
+          <Text className="eyebrow">{t('dashboard.overview')}</Text>
+          <Title level={2}>{t('server.title')}</Title>
+          <Text type="secondary">{t('dashboard.subtitle')}</Text>
+        </div>
+        <Space wrap className="page-actions">
           {allTags.length > 0 && (
             <Select
               mode="multiple"
               placeholder={<Space><FilterOutlined />{t('server.filterByTag')}</Space>}
               value={filterTagIds}
               onChange={setFilterTagIds}
-              style={{ minWidth: 180 }}
+              className="tag-filter"
               maxTagCount="responsive"
               allowClear
             >
@@ -216,7 +227,7 @@ export default function Dashboard() {
               ))}
             </Select>
           )}
-          <Button icon={<ReloadOutlined />} onClick={() => loadServers()}>{t('common.refresh')}</Button>
+          <Button icon={<ReloadOutlined />} onClick={() => loadServers()} loading={loading}>{t('common.refresh')}</Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={() => {
             setEditingServer(null);
             form.resetFields();
@@ -227,22 +238,48 @@ export default function Dashboard() {
             {t('server.add')}
           </Button>
         </Space>
-      </Space>
+      </div>
 
-      <Row gutter={[16, 16]}>
+      <Row gutter={[16, 16]} className="overview-grid">
+        <Col xs={24} sm={8}>
+          <Card className="overview-card overview-card-primary" variant="borderless">
+            <div className="overview-icon"><CloudServerOutlined /></div>
+            <div><Text type="secondary">{t('dashboard.totalServers')}</Text><strong>{servers.length}</strong></div>
+          </Card>
+        </Col>
+        <Col xs={12} sm={8}>
+          <Card className="overview-card overview-card-success" variant="borderless">
+            <div className="overview-icon"><CheckCircleOutlined /></div>
+            <div><Text type="secondary">{t('dashboard.online')}</Text><strong>{onlineCount}</strong></div>
+          </Card>
+        </Col>
+        <Col xs={12} sm={8}>
+          <Card className="overview-card overview-card-muted" variant="borderless">
+            <div className="overview-icon"><DisconnectOutlined /></div>
+            <div><Text type="secondary">{t('dashboard.offline')}</Text><strong>{Math.max(servers.length - onlineCount, 0)}</strong></div>
+          </Card>
+        </Col>
+      </Row>
+
+      <div className="section-heading">
+        <div><Title level={4}>{t('dashboard.infrastructure')}</Title><Text type="secondary">{t('dashboard.realtime')}</Text></div>
+        {filterTagIds.length > 0 && <Text type="secondary">{filteredServers.length} / {servers.length}</Text>}
+      </div>
+
+      {loading ? (
+        <Row gutter={[18, 18]}>{[1, 2, 3, 4].map((item) => <Col key={item} xs={24} sm={12} xl={6}><Card className="server-card"><Skeleton active /></Card></Col>)}</Row>
+      ) : <Row gutter={[18, 18]}>
         {filteredServers.map((s) => (
           <Col key={s.id} xs={24} sm={12} lg={8} xl={6}>
-            <ServerCard server={s} />
+            <ServerCard server={s} observedAt={refreshTimestamp} />
           </Col>
         ))}
         {!loading && filteredServers.length === 0 && (
           <Col span={24}>
-            <div style={{ textAlign: 'center', padding: 64, color: '#999' }}>
-              {t('server.empty')}
-            </div>
+            <div className="empty-state"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('server.empty')} /></div>
           </Col>
         )}
-      </Row>
+      </Row>}
 
       <Modal
         title={editingServer ? t('server.edit') : t('server.add')}
