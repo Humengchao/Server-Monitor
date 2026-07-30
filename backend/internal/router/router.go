@@ -51,6 +51,7 @@ func Setup(db *sql.DB, cfg *config.Config) *gin.Engine {
 	sshH := handlers.NewSSHHandler()
 	dockerH := handlers.NewDockerHandler()
 	credH := handlers.NewCredentialHandler()
+	publicStatusH := handlers.NewPublicStatusHandler()
 
 	rateLimit := middleware.RateLimit(5, 1*time.Minute)
 
@@ -58,6 +59,10 @@ func Setup(db *sql.DB, cfg *config.Config) *gin.Engine {
 	r.GET("/api/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
+
+	// Public, anonymized status endpoint. It is rate-limited separately and its
+	// model query never selects connection details or ownership information.
+	r.GET("/api/public/status", middleware.RateLimit(60, 1*time.Minute), publicStatusH.Get)
 
 	api := r.Group("/api")
 	{

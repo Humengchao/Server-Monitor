@@ -13,6 +13,7 @@ import Settings from './pages/Settings';
 import LoginHistory from './pages/LoginHistory';
 import Docker from './pages/Docker';
 import Credentials from './pages/Credentials';
+import PublicStatus from './pages/PublicStatus';
 import { useAuthStore } from './store/authStore';
 
 const antdLocales: Record<string, typeof enUS> = { en: enUS, zh: zhCN };
@@ -73,6 +74,8 @@ export default function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
+            <Route path="/status" element={<PublicStatus />} />
+            <Route path="/probe" element={<Navigate to="/status" />} />
             <Route
               path="/"
               element={
