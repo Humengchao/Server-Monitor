@@ -95,5 +95,21 @@ ALTER TABLE servers ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT '';
 -- Server type (linux / windows)
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS server_type VARCHAR(16) DEFAULT 'linux';
 
+-- Optional public-status commercial metadata. These values never contain
+-- connection details and are only used to render plan/expiry information.
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS billing_price DECIMAL(12,2) DEFAULT 0;
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS billing_currency VARCHAR(8) DEFAULT 'CNY';
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS billing_cycle VARCHAR(16) DEFAULT 'year';
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS traffic_limit_bytes BIGINT DEFAULT 0;
+
+-- Rich metrics used by the public probe dashboard.
+ALTER TABLE server_metrics ADD COLUMN IF NOT EXISTS load_1 DECIMAL(8,2) DEFAULT 0;
+ALTER TABLE server_metrics ADD COLUMN IF NOT EXISTS load_5 DECIMAL(8,2) DEFAULT 0;
+ALTER TABLE server_metrics ADD COLUMN IF NOT EXISTS load_15 DECIMAL(8,2) DEFAULT 0;
+ALTER TABLE server_metrics ADD COLUMN IF NOT EXISTS disk_used_bytes BIGINT DEFAULT 0;
+ALTER TABLE server_metrics ADD COLUMN IF NOT EXISTS network_rx_total_bytes BIGINT DEFAULT 0;
+ALTER TABLE server_metrics ADD COLUMN IF NOT EXISTS network_tx_total_bytes BIGINT DEFAULT 0;
+ALTER TABLE server_metrics ADD COLUMN IF NOT EXISTS latency_ms INT DEFAULT 0;
+
 -- Credential type (linux / windows)
 ALTER TABLE credentials ADD COLUMN IF NOT EXISTS credential_type VARCHAR(16) DEFAULT 'linux';

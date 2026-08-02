@@ -134,26 +134,34 @@ func (c *Collector) collectOne(s *models.Server) (*models.MetricPoint, error) {
 	}
 
 	addr := fmt.Sprintf("%s:%d", s.Host, s.Port)
+	dialStarted := time.Now()
 	client, err := ssh.Dial("tcp", addr, config)
 	if err != nil {
 		return nil, fmt.Errorf("ssh dial: %w", err)
 	}
 	defer client.Close()
+	latencyMS := max(1, int(time.Since(dialStarted).Milliseconds()))
 
 	if s.ServerType == "windows" {
-		return c.collectWindows(client, s)
+		m, err := c.collectWindows(client, s)
+		if m != nil {
+			m.LatencyMS = latencyMS
+		}
+		return m, err
 	}
 
-	m := &models.MetricPoint{RecordedAt: time.Now()}
+	m := &models.MetricPoint{RecordedAt: time.Now(), LatencyMS: latencyMS}
 
 	// CPU from /proc/stat
 	m.CPUPercent = collectCPU(client)
+	m.Load1, m.Load5, m.Load15 = collectLoad(client)
 
 	// Memory from /proc/meminfo
 	m.MemoryUsed, m.MemoryTotal = collectMemory(client)
 
 	// Network from /proc/net/dev (cumulative counters -> bytes/sec)
 	netRxRaw, netTxRaw := collectNetwork(client)
+	m.NetworkRxTotal, m.NetworkTxTotal = netRxRaw, netTxRaw
 	// Disk I/O from /proc/diskstats (cumulative counters -> bytes/sec)
 	diskRxRaw, diskTxRaw := collectDiskIO(client)
 	now := m.RecordedAt
@@ -172,6 +180,7 @@ func (c *Collector) collectOne(s *models.Server) (*models.MetricPoint, error) {
 
 	// Uptime
 	m.UptimeSeconds = collectUptime(client)
+	m.DiskUsed = collectDiskUsed(client)
 
 	// Collect and update system info (cores, memory total, disk total)
 	cpuCores, memTotal, diskTotal := collectSystemInfo(client)
@@ -273,6 +282,21 @@ func collectMemory(client *ssh.Client) (int64, int64) {
 	return used * 1024, memTotal * 1024
 }
 
+func collectLoad(client *ssh.Client) (float64, float64, float64) {
+	out, err := RunCmd(client, "cat /proc/loadavg")
+	if err != nil {
+		return 0, 0, 0
+	}
+	fields := strings.Fields(out)
+	if len(fields) < 3 {
+		return 0, 0, 0
+	}
+	load1, _ := strconv.ParseFloat(fields[0], 64)
+	load5, _ := strconv.ParseFloat(fields[1], 64)
+	load15, _ := strconv.ParseFloat(fields[2], 64)
+	return load1, load5, load15
+}
+
 func collectNetwork(client *ssh.Client) (int64, int64) {
 	out, err := RunCmd(client, "cat /proc/net/dev")
 	if err != nil {
@@ -284,6 +308,9 @@ func collectNetwork(client *ssh.Client) (int64, int64) {
 		if strings.Contains(line, ":") {
 			fields := strings.Fields(line)
 			if len(fields) >= 10 {
+				if strings.TrimSuffix(fields[0], ":") == "lo" {
+					continue
+				}
 				rx, _ := strconv.ParseInt(strings.TrimSpace(fields[1]), 10, 64)
 				tx, _ := strconv.ParseInt(strings.TrimSpace(fields[9]), 10, 64)
 				rxTotal += rx
@@ -305,6 +332,19 @@ func collectUptime(client *ssh.Client) int64 {
 		return int64(sec)
 	}
 	return 0
+}
+
+func collectDiskUsed(client *ssh.Client) int64 {
+	out, err := RunCmd(client, "df -B1 / | tail -1")
+	if err != nil {
+		return 0
+	}
+	fields := strings.Fields(strings.TrimSpace(out))
+	if len(fields) < 3 {
+		return 0
+	}
+	used, _ := strconv.ParseInt(fields[2], 10, 64)
+	return used
 }
 
 // collectDiskIO reads /proc/diskstats and returns cumulative bytes read/written for all disks.
@@ -389,7 +429,10 @@ $netrx = ($nics | Measure-Object -Property BytesReceivedPersec -Sum).Sum
 $nettx = ($nics | Measure-Object -Property BytesSentPersec -Sum).Sum
 $disk = Get-CimInstance Win32_PerfRawData_PerfDisk_PhysicalDisk -Filter "Name='_Total'"
 $uptime = [int64]((Get-Date) - $os.LastBootUpTime).TotalSeconds
-$disktotal = (Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | Measure-Object -Property Size -Sum).Sum
+$disks = Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3'
+$disktotal = ($disks | Measure-Object -Property Size -Sum).Sum
+$diskfree = ($disks | Measure-Object -Property FreeSpace -Sum).Sum
+$queue = (Get-CimInstance Win32_PerfFormattedData_PerfOS_System).ProcessorQueueLength
 Write-Output ("cpu=" + [int64][math]::Round([double]$cpu))
 Write-Output ("memtotal=" + $os.TotalVisibleMemorySize)
 Write-Output ("memfree=" + $os.FreePhysicalMemory)
@@ -399,7 +442,9 @@ Write-Output ("diskread=" + [int64]$disk.DiskReadBytesPersec)
 Write-Output ("diskwrite=" + [int64]$disk.DiskWriteBytesPersec)
 Write-Output ("uptime=" + $uptime)
 Write-Output ("cores=" + $cores)
-Write-Output ("disktotal=" + [int64]$disktotal)`
+Write-Output ("disktotal=" + [int64]$disktotal)
+Write-Output ("diskfree=" + [int64]$diskfree)
+Write-Output ("queue=" + [int64]$queue)`
 
 // encodePowerShell encodes a script as UTF-16LE base64 for -EncodedCommand,
 // which sidesteps quoting differences between cmd.exe and powershell default shells.
@@ -444,8 +489,14 @@ func (c *Collector) collectWindows(client *ssh.Client, s *models.Server) (*model
 		m.MemoryUsed = 0
 	}
 	m.UptimeSeconds = vals["uptime"]
+	m.DiskUsed = vals["disktotal"] - vals["diskfree"]
+	if m.DiskUsed < 0 {
+		m.DiskUsed = 0
+	}
+	m.Load1 = float64(vals["queue"])
 
 	netRxRaw, netTxRaw := vals["netrx"], vals["nettx"]
+	m.NetworkRxTotal, m.NetworkTxTotal = netRxRaw, netTxRaw
 	diskRxRaw, diskTxRaw := vals["diskread"], vals["diskwrite"]
 	now := m.RecordedAt
 	c.mu.Lock()

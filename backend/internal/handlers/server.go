@@ -16,31 +16,39 @@ type ServerHandler struct{}
 func NewServerHandler() *ServerHandler { return &ServerHandler{} }
 
 type CreateServerRequest struct {
-	Name         string     `json:"name" binding:"required"`
-	Host         string     `json:"host" binding:"required"`
-	Port         int        `json:"port"`
-	SSHUsername  string     `json:"ssh_username"`
-	SSHPassword  string     `json:"ssh_password"`
-	SSHKey       string     `json:"ssh_key"`
-	SSHHostKey   string     `json:"ssh_host_key"`
-	CredentialID *uuid.UUID `json:"credential_id"`
-	ServerType   string     `json:"server_type"`
-	ExpiresAt    *time.Time `json:"expires_at"`
-	Notes        string     `json:"notes"`
+	Name            string     `json:"name" binding:"required"`
+	Host            string     `json:"host" binding:"required"`
+	Port            int        `json:"port"`
+	SSHUsername     string     `json:"ssh_username"`
+	SSHPassword     string     `json:"ssh_password"`
+	SSHKey          string     `json:"ssh_key"`
+	SSHHostKey      string     `json:"ssh_host_key"`
+	CredentialID    *uuid.UUID `json:"credential_id"`
+	ServerType      string     `json:"server_type"`
+	ExpiresAt       *time.Time `json:"expires_at"`
+	Notes           string     `json:"notes"`
+	BillingPrice    float64    `json:"billing_price"`
+	BillingCurrency string     `json:"billing_currency"`
+	BillingCycle    string     `json:"billing_cycle"`
+	TrafficLimit    int64      `json:"traffic_limit_bytes"`
 }
 
 type UpdateServerRequest struct {
-	Name         string     `json:"name" binding:"required"`
-	Host         string     `json:"host" binding:"required"`
-	Port         int        `json:"port"`
-	SSHUsername  string     `json:"ssh_username"`
-	SSHPassword  string     `json:"ssh_password"`
-	SSHKey       string     `json:"ssh_key"`
-	SSHHostKey   string     `json:"ssh_host_key"`
-	CredentialID *uuid.UUID `json:"credential_id"`
-	ServerType   string     `json:"server_type"`
-	ExpiresAt    *time.Time `json:"expires_at"`
-	Notes        string     `json:"notes"`
+	Name            string     `json:"name" binding:"required"`
+	Host            string     `json:"host" binding:"required"`
+	Port            int        `json:"port"`
+	SSHUsername     string     `json:"ssh_username"`
+	SSHPassword     string     `json:"ssh_password"`
+	SSHKey          string     `json:"ssh_key"`
+	SSHHostKey      string     `json:"ssh_host_key"`
+	CredentialID    *uuid.UUID `json:"credential_id"`
+	ServerType      string     `json:"server_type"`
+	ExpiresAt       *time.Time `json:"expires_at"`
+	Notes           string     `json:"notes"`
+	BillingPrice    float64    `json:"billing_price"`
+	BillingCurrency string     `json:"billing_currency"`
+	BillingCycle    string     `json:"billing_cycle"`
+	TrafficLimit    int64      `json:"traffic_limit_bytes"`
 }
 
 func (h *ServerHandler) List(c *gin.Context) {
@@ -106,20 +114,30 @@ func (h *ServerHandler) Create(c *gin.Context) {
 	if req.ServerType == "" {
 		req.ServerType = "linux"
 	}
+	if req.BillingCurrency == "" {
+		req.BillingCurrency = "CNY"
+	}
+	if req.BillingCycle == "" {
+		req.BillingCycle = "year"
+	}
 	db := c.MustGet("db").(*models.DB)
 	s := &models.Server{
-		UserID:       userID,
-		Name:         req.Name,
-		Host:         req.Host,
-		Port:         req.Port,
-		SSHUsername:  req.SSHUsername,
-		SSHPassword:  req.SSHPassword,
-		SSHKey:       req.SSHKey,
-		SSHHostKey:   req.SSHHostKey,
-		CredentialID: req.CredentialID,
-		ServerType:   req.ServerType,
-		ExpiresAt:    req.ExpiresAt,
-		Notes:        req.Notes,
+		UserID:          userID,
+		Name:            req.Name,
+		Host:            req.Host,
+		Port:            req.Port,
+		SSHUsername:     req.SSHUsername,
+		SSHPassword:     req.SSHPassword,
+		SSHKey:          req.SSHKey,
+		SSHHostKey:      req.SSHHostKey,
+		CredentialID:    req.CredentialID,
+		ServerType:      req.ServerType,
+		ExpiresAt:       req.ExpiresAt,
+		Notes:           req.Notes,
+		BillingPrice:    req.BillingPrice,
+		BillingCurrency: req.BillingCurrency,
+		BillingCycle:    req.BillingCycle,
+		TrafficLimit:    req.TrafficLimit,
 	}
 	if err := models.CreateServer(db, s); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create server"})
@@ -149,21 +167,31 @@ func (h *ServerHandler) Update(c *gin.Context) {
 	if req.ServerType == "" {
 		req.ServerType = "linux"
 	}
+	if req.BillingCurrency == "" {
+		req.BillingCurrency = "CNY"
+	}
+	if req.BillingCycle == "" {
+		req.BillingCycle = "year"
+	}
 	db := c.MustGet("db").(*models.DB)
 	s := &models.Server{
-		ID:           id,
-		UserID:       userID,
-		Name:         req.Name,
-		Host:         req.Host,
-		Port:         req.Port,
-		SSHUsername:  req.SSHUsername,
-		SSHPassword:  req.SSHPassword,
-		SSHKey:       req.SSHKey,
-		SSHHostKey:   req.SSHHostKey,
-		CredentialID: req.CredentialID,
-		ServerType:   req.ServerType,
-		ExpiresAt:    req.ExpiresAt,
-		Notes:        req.Notes,
+		ID:              id,
+		UserID:          userID,
+		Name:            req.Name,
+		Host:            req.Host,
+		Port:            req.Port,
+		SSHUsername:     req.SSHUsername,
+		SSHPassword:     req.SSHPassword,
+		SSHKey:          req.SSHKey,
+		SSHHostKey:      req.SSHHostKey,
+		CredentialID:    req.CredentialID,
+		ServerType:      req.ServerType,
+		ExpiresAt:       req.ExpiresAt,
+		Notes:           req.Notes,
+		BillingPrice:    req.BillingPrice,
+		BillingCurrency: req.BillingCurrency,
+		BillingCycle:    req.BillingCycle,
+		TrafficLimit:    req.TrafficLimit,
 	}
 	if err := models.UpdateServer(db, s); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update server"})

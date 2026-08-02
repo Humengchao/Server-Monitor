@@ -17,6 +17,10 @@ export interface Server {
   has_docker: boolean;
   docker_version: string;
   expires_at?: string | null;
+  billing_price: number;
+  billing_currency: string;
+  billing_cycle: string;
+  traffic_limit_bytes: number;
   notes?: string;
   last_seen_at: string | null;
   created_at: string;
@@ -26,13 +30,20 @@ export interface Server {
 
 export interface LatestMetrics {
   cpu_percent: number;
+  load_1: number;
+  load_5: number;
+  load_15: number;
   memory_used: number;
   memory_total: number;
+  disk_used: number;
   network_rx_bytes: number;
   network_tx_bytes: number;
+  network_rx_total_bytes: number;
+  network_tx_total_bytes: number;
   disk_rx_bytes: number;
   disk_tx_bytes: number;
   uptime_seconds: number;
+  latency_ms: number;
   recorded_at: string;
 }
 
@@ -55,13 +66,20 @@ export interface DockerContainer {
 
 export interface MetricPoint {
   cpu_percent: number;
+  load_1: number;
+  load_5: number;
+  load_15: number;
   memory_used: number;
   memory_total: number;
+  disk_used: number;
   network_rx_bytes: number;
   network_tx_bytes: number;
+  network_rx_total_bytes: number;
+  network_tx_total_bytes: number;
   disk_rx_bytes: number;
   disk_tx_bytes: number;
   uptime_seconds: number;
+  latency_ms: number;
   recorded_at: string;
 }
 
@@ -80,6 +98,10 @@ export const serversApi = {
     ssh_host_key?: string;
     credential_id?: string;
     expires_at?: string | null;
+    billing_price?: number;
+    billing_currency?: string;
+    billing_cycle?: string;
+    traffic_limit_bytes?: number;
     notes?: string;
     server_type?: string;
   }) => client.post<Server>('/servers', data),
@@ -94,6 +116,10 @@ export const serversApi = {
     ssh_host_key?: string;
     credential_id?: string;
     expires_at?: string | null;
+    billing_price?: number;
+    billing_currency?: string;
+    billing_cycle?: string;
+    traffic_limit_bytes?: number;
     notes?: string;
     server_type?: string;
   }) => client.put<Server>(`/servers/${id}`, data),

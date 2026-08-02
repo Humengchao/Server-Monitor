@@ -12,40 +12,51 @@ import (
 )
 
 type Server struct {
-	ID             uuid.UUID      `json:"id"`
-	UserID         uuid.UUID      `json:"user_id"`
-	Name           string         `json:"name"`
-	Host           string         `json:"host"`
-	Port           int            `json:"port"`
-	SSHUsername    string         `json:"ssh_username"`
-	SSHPassword    string         `json:"-"`
-	SSHKey         string         `json:"-"`
-	SSHHostKey     string         `json:"ssh_host_key,omitempty"`
-	CredentialID   *uuid.UUID     `json:"credential_id,omitempty"`
-	CredentialName string         `json:"credential_name,omitempty"`
-	CPUCores       int            `json:"cpu_cores"`
-	MemoryTotal    int64          `json:"memory_total"`
-	DiskTotal      int64          `json:"disk_total"`
-	HasDocker      bool           `json:"has_docker"`
-	DockerVersion  string         `json:"docker_version"`
-	ExpiresAt      *time.Time     `json:"expires_at"`
-	ServerType     string         `json:"server_type"`
-	Notes          string         `json:"notes"`
-	LastSeenAt     *time.Time     `json:"last_seen_at"`
-	CreatedAt      time.Time      `json:"created_at"`
-	Tags           []Tag          `json:"tags,omitempty"`
-	LatestMetrics  *LatestMetrics `json:"latest_metrics,omitempty"`
+	ID              uuid.UUID      `json:"id"`
+	UserID          uuid.UUID      `json:"user_id"`
+	Name            string         `json:"name"`
+	Host            string         `json:"host"`
+	Port            int            `json:"port"`
+	SSHUsername     string         `json:"ssh_username"`
+	SSHPassword     string         `json:"-"`
+	SSHKey          string         `json:"-"`
+	SSHHostKey      string         `json:"ssh_host_key,omitempty"`
+	CredentialID    *uuid.UUID     `json:"credential_id,omitempty"`
+	CredentialName  string         `json:"credential_name,omitempty"`
+	CPUCores        int            `json:"cpu_cores"`
+	MemoryTotal     int64          `json:"memory_total"`
+	DiskTotal       int64          `json:"disk_total"`
+	HasDocker       bool           `json:"has_docker"`
+	DockerVersion   string         `json:"docker_version"`
+	ExpiresAt       *time.Time     `json:"expires_at"`
+	BillingPrice    float64        `json:"billing_price"`
+	BillingCurrency string         `json:"billing_currency"`
+	BillingCycle    string         `json:"billing_cycle"`
+	TrafficLimit    int64          `json:"traffic_limit_bytes"`
+	ServerType      string         `json:"server_type"`
+	Notes           string         `json:"notes"`
+	LastSeenAt      *time.Time     `json:"last_seen_at"`
+	CreatedAt       time.Time      `json:"created_at"`
+	Tags            []Tag          `json:"tags,omitempty"`
+	LatestMetrics   *LatestMetrics `json:"latest_metrics,omitempty"`
 }
 
 type LatestMetrics struct {
 	CPUPercent     float64   `json:"cpu_percent"`
+	Load1          float64   `json:"load_1"`
+	Load5          float64   `json:"load_5"`
+	Load15         float64   `json:"load_15"`
 	MemoryUsed     int64     `json:"memory_used"`
 	MemoryTotal    int64     `json:"memory_total"`
+	DiskUsed       int64     `json:"disk_used"`
 	NetworkRxBytes int64     `json:"network_rx_bytes"`
 	NetworkTxBytes int64     `json:"network_tx_bytes"`
+	NetworkRxTotal int64     `json:"network_rx_total_bytes"`
+	NetworkTxTotal int64     `json:"network_tx_total_bytes"`
 	DiskRxBytes    int64     `json:"disk_rx_bytes"`
 	DiskTxBytes    int64     `json:"disk_tx_bytes"`
 	UptimeSeconds  int64     `json:"uptime_seconds"`
+	LatencyMS      int       `json:"latency_ms"`
 	RecordedAt     time.Time `json:"recorded_at"`
 }
 
@@ -60,9 +71,11 @@ func CreateServer(db *DB, s *Server) error {
 		return err
 	}
 	return db.Raw.QueryRow(
-		`INSERT INTO servers (id, user_id, name, host, port, ssh_username, ssh_password, ssh_key, ssh_host_key, credential_id, expires_at, notes, server_type)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING created_at`,
-		s.ID, s.UserID, s.Name, s.Host, s.Port, s.SSHUsername, encPassword, encKey, s.SSHHostKey, s.CredentialID, s.ExpiresAt, s.Notes, s.ServerType,
+		`INSERT INTO servers (id, user_id, name, host, port, ssh_username, ssh_password, ssh_key, ssh_host_key, credential_id,
+		 expires_at, notes, server_type, billing_price, billing_currency, billing_cycle, traffic_limit_bytes)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING created_at`,
+		s.ID, s.UserID, s.Name, s.Host, s.Port, s.SSHUsername, encPassword, encKey, s.SSHHostKey, s.CredentialID,
+		s.ExpiresAt, s.Notes, s.ServerType, s.BillingPrice, s.BillingCurrency, s.BillingCycle, s.TrafficLimit,
 	).Scan(&s.CreatedAt)
 }
 
@@ -75,10 +88,13 @@ const serverSummarySelect = `SELECT s.id, s.user_id, s.name, s.host, s.port, s.s
 	 COALESCE(s.cpu_cores, 0), COALESCE(s.memory_total_bytes, 0), COALESCE(s.disk_total_bytes, 0),
 	 COALESCE(s.has_docker, FALSE), COALESCE(s.docker_version, ''),
 	 s.expires_at, COALESCE(s.server_type, 'linux'), COALESCE(s.notes, ''),
-	 COALESCE(sm.cpu_percent, 0), COALESCE(sm.memory_used, 0), COALESCE(sm.memory_total, 0),
+	 COALESCE(s.billing_price, 0), COALESCE(s.billing_currency, 'CNY'), COALESCE(s.billing_cycle, 'year'), COALESCE(s.traffic_limit_bytes, 0),
+	 COALESCE(sm.cpu_percent, 0), COALESCE(sm.load_1, 0), COALESCE(sm.load_5, 0), COALESCE(sm.load_15, 0),
+	 COALESCE(sm.memory_used, 0), COALESCE(sm.memory_total, 0), COALESCE(sm.disk_used_bytes, 0),
 	 COALESCE(sm.network_rx_bytes, 0), COALESCE(sm.network_tx_bytes, 0),
+	 COALESCE(sm.network_rx_total_bytes, 0), COALESCE(sm.network_tx_total_bytes, 0),
 	 COALESCE(sm.disk_rx_bytes, 0), COALESCE(sm.disk_tx_bytes, 0),
-	 COALESCE(sm.uptime_seconds, 0), sm.recorded_at
+	 COALESCE(sm.uptime_seconds, 0), COALESCE(sm.latency_ms, 0), sm.recorded_at
 	 FROM servers s
 	 LEFT JOIN credentials c ON c.id = s.credential_id
 	 LEFT JOIN LATERAL (
@@ -99,9 +115,11 @@ func scanServerSummaries(rows *sql.Rows) ([]Server, error) {
 			&s.CPUCores, &s.MemoryTotal, &s.DiskTotal,
 			&s.HasDocker, &s.DockerVersion,
 			&expiresAt, &s.ServerType, &s.Notes,
-			&m.CPUPercent, &m.MemoryUsed, &m.MemoryTotal,
+			&s.BillingPrice, &s.BillingCurrency, &s.BillingCycle, &s.TrafficLimit,
+			&m.CPUPercent, &m.Load1, &m.Load5, &m.Load15, &m.MemoryUsed, &m.MemoryTotal, &m.DiskUsed,
 			&m.NetworkRxBytes, &m.NetworkTxBytes,
-			&m.DiskRxBytes, &m.DiskTxBytes, &m.UptimeSeconds, &recordedAt); err != nil {
+			&m.NetworkRxTotal, &m.NetworkTxTotal,
+			&m.DiskRxBytes, &m.DiskTxBytes, &m.UptimeSeconds, &m.LatencyMS, &recordedAt); err != nil {
 			return nil, err
 		}
 		if expiresAt.Valid {
@@ -159,10 +177,12 @@ func GetServerByIDAndUser(db *DB, id, userID uuid.UUID) (*Server, error) {
 	var expiresAt sql.NullTime
 	err := db.Raw.QueryRow(
 		`SELECT id, user_id, name, host, port, ssh_username, ssh_password, ssh_key, COALESCE(ssh_host_key, ''),
-		 credential_id, last_seen_at, created_at, COALESCE(server_type, 'linux'), expires_at, COALESCE(notes, '')
+		 credential_id, last_seen_at, created_at, COALESCE(server_type, 'linux'), expires_at, COALESCE(notes, ''),
+		 COALESCE(billing_price, 0), COALESCE(billing_currency, 'CNY'), COALESCE(billing_cycle, 'year'), COALESCE(traffic_limit_bytes, 0)
 		 FROM servers WHERE id=$1 AND user_id=$2`, id, userID,
 	).Scan(&s.ID, &s.UserID, &s.Name, &s.Host, &s.Port,
-		&s.SSHUsername, &encPassword, &encKey, &s.SSHHostKey, &credID, &s.LastSeenAt, &s.CreatedAt, &s.ServerType, &expiresAt, &s.Notes)
+		&s.SSHUsername, &encPassword, &encKey, &s.SSHHostKey, &credID, &s.LastSeenAt, &s.CreatedAt, &s.ServerType, &expiresAt, &s.Notes,
+		&s.BillingPrice, &s.BillingCurrency, &s.BillingCycle, &s.TrafficLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -192,9 +212,11 @@ func GetServerByIDAndUser(db *DB, id, userID uuid.UUID) (*Server, error) {
 
 func UpdateServer(db *DB, s *Server) error {
 	_, err := db.Raw.Exec(
-		`UPDATE servers SET name=$1, host=$2, port=$3, ssh_username=$4, ssh_host_key=$5, credential_id=$6, expires_at=$7, notes=$8, server_type=$9
-		 WHERE id=$10 AND user_id=$11`,
-		s.Name, s.Host, s.Port, s.SSHUsername, s.SSHHostKey, s.CredentialID, s.ExpiresAt, s.Notes, s.ServerType, s.ID, s.UserID)
+		`UPDATE servers SET name=$1, host=$2, port=$3, ssh_username=$4, ssh_host_key=$5, credential_id=$6,
+		 expires_at=$7, notes=$8, server_type=$9, billing_price=$10, billing_currency=$11, billing_cycle=$12, traffic_limit_bytes=$13
+		 WHERE id=$14 AND user_id=$15`,
+		s.Name, s.Host, s.Port, s.SSHUsername, s.SSHHostKey, s.CredentialID, s.ExpiresAt, s.Notes, s.ServerType,
+		s.BillingPrice, s.BillingCurrency, s.BillingCycle, s.TrafficLimit, s.ID, s.UserID)
 	if err != nil {
 		return err
 	}

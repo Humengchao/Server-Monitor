@@ -130,6 +130,8 @@ export default function Dashboard() {
         credential_id: selectedCredential || null,
         server_type: values.server_type || 'linux',
         expires_at: values.expires_at ? values.expires_at.toISOString() : null,
+        traffic_limit_bytes: Math.round((values.traffic_limit_gb || 0) * 1024 * 1024 * 1024),
+        notes: editingServer?.notes || '',
       };
       if (editingServer) {
         await serversApi.update(editingServer.id, payload);
@@ -180,6 +182,10 @@ export default function Dashboard() {
       ssh_host_key: server.ssh_host_key || '',
       expires_at: server.expires_at ? dayjs(server.expires_at) : null,
       server_type: server.server_type || 'linux',
+      billing_price: server.billing_price || 0,
+      billing_currency: server.billing_currency || 'CNY',
+      billing_cycle: server.billing_cycle || 'year',
+      traffic_limit_gb: Number(((server.traffic_limit_bytes || 0) / 1024 / 1024 / 1024).toFixed(2)),
     });
     setTagValues(server.tags?.map((t) => t.id) || []);
     setModalOpen(true);
@@ -286,7 +292,7 @@ export default function Dashboard() {
         open={modalOpen}
         onCancel={() => { setModalOpen(false); setEditingServer(null); }}
         onOk={() => form.submit()}
-        width={520}
+        width={680}
       >
         <Form form={form} layout="vertical" onFinish={handleSubmit}>
           <Form.Item name="name" label={t('server.serverName')} rules={[{ required: true }]}>
@@ -325,6 +331,31 @@ export default function Dashboard() {
           </Form.Item>
           <Form.Item name="expires_at" label={t('server.expiresAt')}>
             <DatePicker showTime style={{ width: '100%' }} placeholder={t('server.expiresAtPlaceholder')} />
+          </Form.Item>
+          <Row gutter={12}>
+            <Col xs={24} sm={8}>
+              <Form.Item name="billing_price" label={t('server.billingPrice')} initialValue={0}>
+                <InputNumber min={0} precision={2} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={8}>
+              <Form.Item name="billing_currency" label={t('server.billingCurrency')} initialValue="CNY">
+                <Select options={[{ value: 'CNY', label: '¥ CNY' }, { value: 'USD', label: '$ USD' }, { value: 'EUR', label: '€ EUR' }]} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={8}>
+              <Form.Item name="billing_cycle" label={t('server.billingCycle')} initialValue="year">
+                <Select options={[
+                  { value: 'month', label: t('server.cycleMonth') },
+                  { value: 'quarter', label: t('server.cycleQuarter') },
+                  { value: 'half_year', label: t('server.cycleHalfYear') },
+                  { value: 'year', label: t('server.cycleYear') },
+                ]} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item name="traffic_limit_gb" label={t('server.trafficLimit')} initialValue={0}>
+            <InputNumber min={0} precision={2} addonAfter="GB" style={{ width: '100%' }} />
           </Form.Item>
           <Form.Item label={t('server.tags')}>
             <TagSelect value={tagValues} onChange={setTagValues} />
