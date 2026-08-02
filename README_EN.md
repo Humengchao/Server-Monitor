@@ -8,6 +8,16 @@ Built with Claude Code & DeepSeek-v4-pro
 
 ---
 
+## Live Site
+
+- 🌐 [Public Probe / Service Status](http://svr.hmchxd.com/status)
+
+The public probe refreshes every 15 seconds and exposes only anonymous node aliases, availability, and rounded CPU, memory, and uptime metrics. It does not return real server names, IP addresses / hostnames, ports, SSH users, credentials, notes, or database IDs.
+
+> **Security note:** Management features handle login tokens and SSH credentials. Use them only after the domain has a valid HTTPS certificate and HTTP is forcibly redirected to HTTPS. The link above points only to the anonymous public status page.
+
+---
+
 ## Tech Stack
 
 | Layer | Technology |
@@ -39,7 +49,7 @@ Built with Claude Code & DeepSeek-v4-pro
 
 - Stateless authentication based on **JWT (HS256)** with a 72-hour token expiry
 - All API requests are authenticated via Bearer Token; WebSocket connections use Query Token
-- All data queries are strictly filtered by `user_id` -- **complete data isolation between users** with no cross-tenant access
+- All protected management API queries are strictly filtered by `user_id` for tenant isolation; the public probe uses a separate minimal data model that returns anonymous health metrics only
 
 ### API Protection
 
@@ -135,4 +145,4 @@ Add the following secrets in **Settings -> Secrets and variables -> actions**:
 - [ ] **Process List** -- Show current processes on detail page, sortable by CPU / Memory / Name / PID
 - [x] **Disk Usage** -- Show current disk usage on detail page
 - [ ] **Alert Notifications** -- Push notifications via email or Bark when a server goes offline or CPU exceeds 80%
-- [ ] **Probe API** -- Provide probe API or web page similar to https://dt.quwa.cc/ for account-level monitoring
+- [x] **Public Probe** -- Anonymous public status page and minimal status API with server identity and connection details removed
