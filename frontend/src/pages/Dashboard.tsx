@@ -186,6 +186,7 @@ export default function Dashboard() {
       billing_currency: server.billing_currency || 'CNY',
       billing_cycle: server.billing_cycle || 'year',
       traffic_limit_gb: Number(((server.traffic_limit_bytes || 0) / 1024 / 1024 / 1024).toFixed(2)),
+      public_location: server.public_location || '',
     });
     setTagValues(server.tags?.map((t) => t.id) || []);
     setModalOpen(true);
@@ -331,6 +332,9 @@ export default function Dashboard() {
           </Form.Item>
           <Form.Item name="expires_at" label={t('server.expiresAt')}>
             <DatePicker showTime style={{ width: '100%' }} placeholder={t('server.expiresAtPlaceholder')} />
+          </Form.Item>
+          <Form.Item name="public_location" label={t('server.publicLocation')}>
+            <Input placeholder={t('server.publicLocationPlaceholder')} maxLength={128} />
           </Form.Item>
           <Row gutter={12}>
             <Col xs={24} sm={8}>

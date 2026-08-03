@@ -101,6 +101,7 @@ ALTER TABLE servers ADD COLUMN IF NOT EXISTS billing_price DECIMAL(12,2) DEFAULT
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS billing_currency VARCHAR(8) DEFAULT 'CNY';
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS billing_cycle VARCHAR(16) DEFAULT 'year';
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS traffic_limit_bytes BIGINT DEFAULT 0;
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS public_location VARCHAR(128) DEFAULT '';
 
 -- Rich metrics used by the public probe dashboard.
 ALTER TABLE server_metrics ADD COLUMN IF NOT EXISTS load_1 DECIMAL(8,2) DEFAULT 0;

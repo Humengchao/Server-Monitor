@@ -31,6 +31,7 @@ type CreateServerRequest struct {
 	BillingCurrency string     `json:"billing_currency"`
 	BillingCycle    string     `json:"billing_cycle"`
 	TrafficLimit    int64      `json:"traffic_limit_bytes"`
+	PublicLocation  string     `json:"public_location"`
 }
 
 type UpdateServerRequest struct {
@@ -49,6 +50,7 @@ type UpdateServerRequest struct {
 	BillingCurrency string     `json:"billing_currency"`
 	BillingCycle    string     `json:"billing_cycle"`
 	TrafficLimit    int64      `json:"traffic_limit_bytes"`
+	PublicLocation  string     `json:"public_location"`
 }
 
 func (h *ServerHandler) List(c *gin.Context) {
@@ -138,6 +140,7 @@ func (h *ServerHandler) Create(c *gin.Context) {
 		BillingCurrency: req.BillingCurrency,
 		BillingCycle:    req.BillingCycle,
 		TrafficLimit:    req.TrafficLimit,
+		PublicLocation:  req.PublicLocation,
 	}
 	if err := models.CreateServer(db, s); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create server"})
@@ -192,6 +195,7 @@ func (h *ServerHandler) Update(c *gin.Context) {
 		BillingCurrency: req.BillingCurrency,
 		BillingCycle:    req.BillingCycle,
 		TrafficLimit:    req.TrafficLimit,
+		PublicLocation:  req.PublicLocation,
 	}
 	if err := models.UpdateServer(db, s); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update server"})

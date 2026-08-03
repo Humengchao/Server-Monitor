@@ -21,6 +21,7 @@ export interface Server {
   billing_currency: string;
   billing_cycle: string;
   traffic_limit_bytes: number;
+  public_location: string;
   notes?: string;
   last_seen_at: string | null;
   created_at: string;
@@ -102,6 +103,7 @@ export const serversApi = {
     billing_currency?: string;
     billing_cycle?: string;
     traffic_limit_bytes?: number;
+    public_location?: string;
     notes?: string;
     server_type?: string;
   }) => client.post<Server>('/servers', data),
@@ -120,6 +122,7 @@ export const serversApi = {
     billing_currency?: string;
     billing_cycle?: string;
     traffic_limit_bytes?: number;
+    public_location?: string;
     notes?: string;
     server_type?: string;
   }) => client.put<Server>(`/servers/${id}`, data),

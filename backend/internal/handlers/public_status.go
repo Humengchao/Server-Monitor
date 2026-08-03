@@ -17,35 +17,38 @@ type PublicStatusHandler struct{}
 func NewPublicStatusHandler() *PublicStatusHandler { return &PublicStatusHandler{} }
 
 type publicNode struct {
-	Alias             string     `json:"alias"`
-	ServerType        string     `json:"server_type"`
-	Status            string     `json:"status"`
-	CPUCores          int        `json:"cpu_cores"`
-	CPUPercent        int        `json:"cpu_percent"`
-	Load1             float64    `json:"load_1"`
-	Load5             float64    `json:"load_5"`
-	Load15            float64    `json:"load_15"`
-	MemoryUsed        int64      `json:"memory_used"`
-	MemoryTotal       int64      `json:"memory_total"`
-	MemoryPercent     int        `json:"memory_percent"`
-	DiskUsed          int64      `json:"disk_used"`
-	DiskTotal         int64      `json:"disk_total"`
-	DiskPercent       int        `json:"disk_percent"`
-	NetworkRxBytes    int64      `json:"network_rx_bytes"`
-	NetworkTxBytes    int64      `json:"network_tx_bytes"`
-	NetworkRxTotal    int64      `json:"network_rx_total_bytes"`
-	NetworkTxTotal    int64      `json:"network_tx_total_bytes"`
-	TrafficLimit      int64      `json:"traffic_limit_bytes"`
-	TrafficPercent    int        `json:"traffic_percent"`
-	UptimeSeconds     int64      `json:"uptime_seconds"`
-	ExpiresAt         *time.Time `json:"expires_at"`
-	RemainingDays     int        `json:"remaining_days"`
-	BillingPrice      float64    `json:"billing_price"`
-	BillingCurrency   string     `json:"billing_currency"`
-	BillingCycle      string     `json:"billing_cycle"`
-	RemainingValue    float64    `json:"remaining_value"`
-	LatencyMS         int        `json:"latency_ms"`
-	PacketLossPercent int        `json:"packet_loss_percent"`
+	Alias             string             `json:"alias"`
+	Name              string             `json:"name"`
+	Location          string             `json:"location"`
+	Tags              []models.PublicTag `json:"tags"`
+	ServerType        string             `json:"server_type"`
+	Status            string             `json:"status"`
+	CPUCores          int                `json:"cpu_cores"`
+	CPUPercent        int                `json:"cpu_percent"`
+	Load1             float64            `json:"load_1"`
+	Load5             float64            `json:"load_5"`
+	Load15            float64            `json:"load_15"`
+	MemoryUsed        int64              `json:"memory_used"`
+	MemoryTotal       int64              `json:"memory_total"`
+	MemoryPercent     int                `json:"memory_percent"`
+	DiskUsed          int64              `json:"disk_used"`
+	DiskTotal         int64              `json:"disk_total"`
+	DiskPercent       int                `json:"disk_percent"`
+	NetworkRxBytes    int64              `json:"network_rx_bytes"`
+	NetworkTxBytes    int64              `json:"network_tx_bytes"`
+	NetworkRxTotal    int64              `json:"network_rx_total_bytes"`
+	NetworkTxTotal    int64              `json:"network_tx_total_bytes"`
+	TrafficLimit      int64              `json:"traffic_limit_bytes"`
+	TrafficPercent    int                `json:"traffic_percent"`
+	UptimeSeconds     int64              `json:"uptime_seconds"`
+	ExpiresAt         *time.Time         `json:"expires_at"`
+	RemainingDays     int                `json:"remaining_days"`
+	BillingPrice      float64            `json:"billing_price"`
+	BillingCurrency   string             `json:"billing_currency"`
+	BillingCycle      string             `json:"billing_cycle"`
+	RemainingValue    float64            `json:"remaining_value"`
+	LatencyMS         int                `json:"latency_ms"`
+	PacketLossPercent int                `json:"packet_loss_percent"`
 }
 
 type publicSummary struct {
@@ -106,7 +109,8 @@ func (h *PublicStatusHandler) Get(c *gin.Context) {
 		}
 
 		nodes = append(nodes, publicNode{
-			Alias: fmt.Sprintf("NODE %02d", index+1), ServerType: metric.ServerType, Status: status,
+			Alias: fmt.Sprintf("NODE %02d", index+1), Name: metric.Name, Location: metric.PublicLocation, Tags: metric.Tags,
+			ServerType: metric.ServerType, Status: status,
 			CPUCores: metric.CPUCores, CPUPercent: cpuPercent,
 			Load1: metric.Load1, Load5: metric.Load5, Load15: metric.Load15,
 			MemoryUsed: metric.MemoryUsed, MemoryTotal: metric.MemoryTotal, MemoryPercent: memoryPercent,
@@ -141,7 +145,7 @@ func (h *PublicStatusHandler) Get(c *gin.Context) {
 		"overall": overall, "generated_at": now, "summary": summary, "nodes": nodes,
 		"privacy": gin.H{
 			"anonymized":    true,
-			"hidden_fields": []string{"hostname", "ip_address", "port", "ssh_user", "credentials", "notes", "database_id", "real_name", "location"},
+			"hidden_fields": []string{"hostname", "ip_address", "port", "ssh_user", "credentials", "notes", "database_id"},
 		},
 	})
 }

@@ -2,12 +2,22 @@ package models
 
 import (
 	"database/sql"
+	"encoding/json"
 	"time"
 )
 
-// PublicServerMetric is deliberately separate from Server. This query never
-// selects names, hosts, ports, credentials, user IDs, notes or database IDs.
+type PublicTag struct {
+	Name  string `json:"name"`
+	Color string `json:"color"`
+}
+
+// PublicServerMetric is deliberately separate from Server. Names, manually
+// configured public locations and tags are intentionally public; hosts, ports,
+// credentials, user IDs, notes and database IDs are still excluded.
 type PublicServerMetric struct {
+	Name            string
+	PublicLocation  string
+	Tags            []PublicTag
 	ServerType      string
 	CPUCores        int
 	DiskTotal       int64
@@ -34,7 +44,12 @@ type PublicServerMetric struct {
 
 func GetPublicServerMetrics(db *sql.DB) ([]PublicServerMetric, error) {
 	rows, err := db.Query(`
-		SELECT COALESCE(s.server_type, 'linux'), COALESCE(s.cpu_cores, 0), COALESCE(s.disk_total_bytes, 0),
+		SELECT s.name, COALESCE(s.public_location, ''),
+			COALESCE((
+				SELECT JSON_AGG(JSON_BUILD_OBJECT('name', t.name, 'color', t.color) ORDER BY t.name)::TEXT
+				FROM tags t JOIN server_tags st ON st.tag_id = t.id WHERE st.server_id = s.id
+			), '[]'),
+			COALESCE(s.server_type, 'linux'), COALESCE(s.cpu_cores, 0), COALESCE(s.disk_total_bytes, 0),
 			s.expires_at, COALESCE(s.billing_price, 0), COALESCE(s.billing_currency, 'CNY'),
 			COALESCE(s.billing_cycle, 'year'), COALESCE(s.traffic_limit_bytes, 0),
 			COALESCE(sm.cpu_percent, 0), COALESCE(sm.load_1, 0), COALESCE(sm.load_5, 0), COALESCE(sm.load_15, 0),
@@ -62,7 +77,9 @@ func GetPublicServerMetrics(db *sql.DB) ([]PublicServerMetric, error) {
 	for rows.Next() {
 		var item PublicServerMetric
 		var expiresAt, recordedAt sql.NullTime
+		var tagsJSON string
 		if err := rows.Scan(
+			&item.Name, &item.PublicLocation, &tagsJSON,
 			&item.ServerType, &item.CPUCores, &item.DiskTotal, &expiresAt,
 			&item.BillingPrice, &item.BillingCurrency, &item.BillingCycle, &item.TrafficLimit,
 			&item.CPUPercent, &item.Load1, &item.Load5, &item.Load15,
@@ -70,6 +87,9 @@ func GetPublicServerMetrics(db *sql.DB) ([]PublicServerMetric, error) {
 			&item.NetworkRxBytes, &item.NetworkTxBytes, &item.NetworkRxTotal, &item.NetworkTxTotal,
 			&item.UptimeSeconds, &item.LatencyMS, &recordedAt,
 		); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(tagsJSON), &item.Tags); err != nil {
 			return nil, err
 		}
 		if expiresAt.Valid {

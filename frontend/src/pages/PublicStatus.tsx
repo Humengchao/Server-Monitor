@@ -11,11 +11,11 @@ import {
   DashboardOutlined,
   DatabaseOutlined,
   DollarOutlined,
+  EnvironmentOutlined,
   HddOutlined,
   LockOutlined,
   MoonOutlined,
   ReloadOutlined,
-  SafetyCertificateOutlined,
   SearchOutlined,
   SwapOutlined,
   TranslationOutlined,
@@ -31,6 +31,9 @@ type FilterKey = 'all' | 'default' | 'traffic' | 'peak' | 'offline' | 'load' | '
 
 interface PublicNode {
   alias: string;
+  name: string;
+  location: string;
+  tags: Array<{ name: string; color: string }>;
   server_type: string;
   status: NodeStatus;
   cpu_cores: number;
@@ -159,7 +162,7 @@ export default function PublicStatus() {
   const visibleNodes = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return (data?.nodes || []).filter((node) => {
-      const matchesSearch = !normalized || `${node.alias} ${node.server_type}`.toLowerCase().includes(normalized);
+      const matchesSearch = !normalized || `${node.name} ${node.location} ${node.server_type} ${(node.tags || []).map((tag) => tag.name).join(' ')}`.toLowerCase().includes(normalized);
       if (!matchesSearch) return false;
       if (filter === 'default') return node.status === 'online';
       if (filter === 'traffic') return node.network_rx_total_bytes + node.network_tx_total_bytes > 0;
@@ -183,6 +186,7 @@ export default function PublicStatus() {
 
   const overall = error ? 'outage' : (data?.overall || 'operational');
   const updatedAt = data ? new Date(data.generated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—';
+  const hasRemainingValue = (data?.nodes || []).some((node) => node.remaining_value > 0);
   const remainingValueLabel = useMemo(() => {
     const valued = (data?.nodes || []).filter((node) => node.remaining_value > 0);
     const currencies = [...new Set(valued.map((node) => node.billing_currency || 'CNY'))];
@@ -214,23 +218,16 @@ export default function PublicStatus() {
         </div>
       </header>
 
-      <main className="glass-shell">
-        <section className="glass-intro">
-          <div>
-            <span className="glass-kicker"><i /> {t('probe.live')}</span>
-            <h1>{t('probe.dashboardTitle')}</h1>
-            <p>{t('probe.dashboardSubtitle')}</p>
-          </div>
-          <div className="privacy-seal"><SafetyCertificateOutlined /><span><strong>{t('probe.privacyMode')}</strong><small>{t('probe.privacyCompact')}</small></span></div>
-        </section>
-
+      <main className="glass-shell compact-shell">
         <section className="glass-summary-grid">
           <SummaryCard icon={<DatabaseOutlined />} label={t('probe.memoryUsage')} value={`${formatBytes(data?.summary.memory_used || 0)} / ${formatBytes(data?.summary.memory_total || 0)}`} tone="purple" />
           <SummaryCard icon={<HddOutlined />} label={t('probe.diskUsage')} value={`${formatBytes(data?.summary.disk_used || 0)} / ${formatBytes(data?.summary.disk_total || 0)}`} tone="blue" />
           <SummaryCard icon={<SwapOutlined />} label={t('probe.totalTraffic')} value={formatBytes(data?.summary.traffic_total_bytes || 0)} tone="cyan" />
           <SummaryCard icon={<ArrowUpOutlined />} label={t('probe.realtimeUpload')} value={formatRate(data?.summary.network_tx_bytes || 0)} tone="pink" />
           <SummaryCard icon={<ArrowDownOutlined />} label={t('probe.realtimeDownload')} value={formatRate(data?.summary.network_rx_bytes || 0)} tone="green" />
-          <SummaryCard icon={<DollarOutlined />} label={t('probe.remainingValue')} value={remainingValueLabel} tone="amber" />
+          {hasRemainingValue
+            ? <SummaryCard icon={<DollarOutlined />} label={t('probe.remainingValue')} value={remainingValueLabel} tone="amber" />
+            : <SummaryCard icon={<CloudServerOutlined />} label={t('probe.online')} value={`${data?.summary.online || 0} / ${data?.summary.total || 0}`} tone="amber" />}
         </section>
 
         <section className="glass-toolbar">
@@ -263,18 +260,7 @@ export default function PublicStatus() {
           <div className="glass-empty"><CloudServerOutlined /><h3>{t('probe.noMatches')}</h3><p>{t('probe.noMatchesHint')}</p></div>
         )}
 
-        <section className="glass-privacy-note">
-          <SafetyCertificateOutlined />
-          <div><strong>{t('probe.privacyTitle')}</strong><span>{t('probe.privacyDescription')}</span></div>
-          <div className="glass-privacy-tags"><span>{t('probe.hidden.ip')}</span><span>{t('probe.hidden.credentials')}</span><span>{t('probe.hidden.identity')}</span></div>
-        </section>
       </main>
-
-      <footer className="glass-footer">
-        <span><MoonOutlined /> {t('probe.brand')}</span>
-        <span>{t('probe.poweredBy')}</span>
-        <span><i /> {t('probe.autoRefresh')}</span>
-      </footer>
     </div>
   );
 }
@@ -294,13 +280,13 @@ function ProbeNodeCard({ node, zh }: { node: PublicNode; zh: boolean }) {
     <article className={`glass-node-card ${node.status}`}>
       <header className="glass-node-head">
         <span className="node-system-icon">{node.server_type === 'windows' ? <WindowsOutlined /> : <CloudServerOutlined />}</span>
-        <div className="node-title"><span>{t('probe.anonymousNode')}</span><h2>{node.alias}</h2><small>{t('probe.locationHidden')} · {node.server_type === 'windows' ? 'Windows' : 'Linux'}</small></div>
+        <div className="node-title"><h2>{node.name || node.alias}</h2><small><EnvironmentOutlined /> {node.location || t('probe.locationUnset')}<b>·</b>{node.server_type === 'windows' ? 'Windows' : 'Linux'}</small></div>
         <span className={`node-online ${node.status}`}><i /> {t(`probe.nodeStatus.${node.status}`)}</span>
       </header>
 
       <div className="node-plan-row">
         <span><DashboardOutlined /> {t('probe.uptime')} <strong>{formatUptime(node.uptime_seconds, zh)}</strong></span>
-        <span><DollarOutlined /> {node.billing_price > 0 ? <><strong>{symbol}{node.billing_price.toFixed(2)}</strong> / {cycleLabel}</> : t('probe.notConfigured')}</span>
+        {node.billing_price > 0 && <span><DollarOutlined /> <strong>{symbol}{node.billing_price.toFixed(2)}</strong> / {cycleLabel}</span>}
       </div>
 
       <div className="resource-stack">
@@ -319,12 +305,12 @@ function ProbeNodeCard({ node, zh }: { node: PublicNode; zh: boolean }) {
 
       <div className="node-bottom-grid">
         <div><CalendarOutlined /><span>{t('probe.expiry')}<strong>{expiryText}{node.remaining_days > 0 ? ` · ${node.remaining_days} ${t('probe.days')}` : ''}</strong></span></div>
-        <div><DollarOutlined /><span>{t('probe.remainingValue')}<strong>{node.remaining_value > 0 ? `${symbol}${node.remaining_value.toFixed(2)}` : '—'}</strong></span></div>
+        {node.billing_price > 0 && <div><DollarOutlined /><span>{t('probe.remainingValue')}<strong>{node.remaining_value > 0 ? `${symbol}${node.remaining_value.toFixed(2)}` : '—'}</strong></span></div>}
         <div><WifiOutlined /><span>{t('probe.latency')}<strong>{node.status === 'offline' ? '—' : `${node.latency_ms} ms`}</strong></span></div>
         <div><SwapOutlined /><span>{t('probe.packetLoss')}<strong>{node.packet_loss_percent}%</strong></span></div>
       </div>
 
-      <footer className="node-tag-row"><span>{node.server_type === 'windows' ? 'Windows' : 'Linux'}</span><span>{t('probe.slaMonitored')}</span><span>{t('probe.anonymized')}</span></footer>
+      {(node.tags || []).length > 0 && <footer className="node-tag-row">{node.tags.map((tag) => <span key={tag.name} style={{ color: tag.color, borderColor: `${tag.color}66`, backgroundColor: `${tag.color}18` }}>{tag.name}</span>)}</footer>}
     </article>
   );
 }
