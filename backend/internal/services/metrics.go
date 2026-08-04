@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -27,6 +28,11 @@ type prevStats struct {
 	diskTx int64
 	time   time.Time
 }
+
+const (
+	sshDialTimeout       = 10 * time.Second
+	sshCollectionTimeout = 20 * time.Second
+)
 
 type Collector struct {
 	db       *models.DB
@@ -139,10 +145,20 @@ func (c *Collector) collectOne(s *models.Server) (*models.MetricPoint, error) {
 	}
 
 	addr := fmt.Sprintf("%s:%d", s.Host, s.Port)
-	client, err := ssh.Dial("tcp", addr, config)
+	tcpConn, err := net.DialTimeout("tcp", addr, sshDialTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("ssh dial: %w", err)
 	}
+	if err := tcpConn.SetDeadline(time.Now().Add(sshCollectionTimeout)); err != nil {
+		tcpConn.Close()
+		return nil, fmt.Errorf("ssh deadline: %w", err)
+	}
+	sshConn, chans, reqs, err := ssh.NewClientConn(tcpConn, addr, config)
+	if err != nil {
+		tcpConn.Close()
+		return nil, fmt.Errorf("ssh handshake: %w", err)
+	}
+	client := ssh.NewClient(sshConn, chans, reqs)
 	defer client.Close()
 
 	if s.ServerType == "windows" {
