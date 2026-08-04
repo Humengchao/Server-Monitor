@@ -2,10 +2,12 @@ package services
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"fmt"
 	"io"
 	"log"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -116,6 +118,9 @@ func (c *Collector) pollAll() {
 }
 
 func (c *Collector) collectOne(s *models.Server) (*models.MetricPoint, error) {
+	pingLatency := make(chan int, 1)
+	go func() { pingLatency <- collectPingLatency(s.Host) }()
+
 	config := &ssh.ClientConfig{
 		User:            s.SSHUsername,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
@@ -134,23 +139,21 @@ func (c *Collector) collectOne(s *models.Server) (*models.MetricPoint, error) {
 	}
 
 	addr := fmt.Sprintf("%s:%d", s.Host, s.Port)
-	dialStarted := time.Now()
 	client, err := ssh.Dial("tcp", addr, config)
 	if err != nil {
 		return nil, fmt.Errorf("ssh dial: %w", err)
 	}
 	defer client.Close()
-	latencyMS := max(1, int(time.Since(dialStarted).Milliseconds()))
 
 	if s.ServerType == "windows" {
 		m, err := c.collectWindows(client, s)
 		if m != nil {
-			m.LatencyMS = latencyMS
+			m.LatencyMS = <-pingLatency
 		}
 		return m, err
 	}
 
-	m := &models.MetricPoint{RecordedAt: time.Now(), LatencyMS: latencyMS}
+	m := &models.MetricPoint{RecordedAt: time.Now()}
 
 	// CPU from /proc/stat
 	m.CPUPercent = collectCPU(client)
@@ -191,8 +194,37 @@ func (c *Collector) collectOne(s *models.Server) (*models.MetricPoint, error) {
 	// Check Docker availability (cheap: reuses existing SSH connection)
 	dockerVersion := collectDockerVersion(client)
 	models.UpdateDockerInfo(c.db.Raw, s.ID, dockerVersion != "", dockerVersion)
+	m.LatencyMS = <-pingLatency
 
 	return m, nil
+}
+
+func collectPingLatency(host string) int {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	out, _ := exec.CommandContext(ctx, "ping", "-n", "-c", "3", "-W", "1", host).CombinedOutput()
+	return parsePingAverage(string(out))
+}
+
+func parsePingAverage(output string) int {
+	for _, line := range strings.Split(output, "\n") {
+		if !strings.Contains(line, "min/avg/max") && !strings.Contains(line, "round-trip") {
+			continue
+		}
+		_, values, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		parts := strings.Split(strings.TrimSpace(values), "/")
+		if len(parts) < 2 {
+			continue
+		}
+		average, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+		if err == nil {
+			return max(1, int(average+0.5))
+		}
+	}
+	return 0
 }
 
 func RunCmd(client *ssh.Client, cmd string) (string, error) {

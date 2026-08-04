@@ -514,6 +514,8 @@ button, input, textarea, select { font: inherit; }
   box-shadow: 0 20px 60px rgba(0, 0, 0, .22), inset 0 1px rgba(255, 255, 255, .07);
   backdrop-filter: blur(24px) saturate(1.25);
 }
+.glass-header.minimal-header { grid-template-columns: 1fr auto; }
+.minimal-header .glass-header-status { justify-self: start; }
 
 .glass-brand { display: flex; align-items: center; gap: 11px; color: #fff; text-decoration: none; }
 .glass-brand:hover { color: #fff; }
@@ -565,6 +567,7 @@ button, input, textarea, select { font: inherit; }
 .glass-filter-list button:hover { color: #fff; background: rgba(255,255,255,.06); }
 .glass-filter-list button.active { color: #fff; background: rgba(131,110,224,.27); box-shadow: inset 0 0 0 1px rgba(187,174,255,.13); }
 .glass-filter-list em { min-width: 20px; height: 20px; padding: 0 5px; display: grid; place-items: center; border-radius: 6px; color: rgba(231,235,255,.72); background: rgba(255,255,255,.07); font-size: 10px; font-style: normal; }
+.filter-tag-dot { width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 8px currentColor; }
 .glass-tools { display: flex; align-items: center; gap: 7px; }
 .glass-tools .ant-input-affix-wrapper { width: 220px; border-color: rgba(255,255,255,.1); border-radius: 9px; color: #edf1ff; background: rgba(255,255,255,.06); box-shadow: none; }
 .glass-tools .ant-input { color: #edf1ff; background: transparent; font-size: 12px; }

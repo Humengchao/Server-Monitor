@@ -27,7 +27,7 @@ import { useTranslation } from 'react-i18next';
 
 type NodeStatus = 'online' | 'degraded' | 'offline';
 type OverallStatus = 'operational' | 'degraded' | 'outage';
-type FilterKey = 'all' | 'default' | 'traffic' | 'peak' | 'offline' | 'load' | 'expiring';
+type FilterKey = 'all' | `tag:${string}`;
 
 interface PublicNode {
   alias: string;
@@ -132,7 +132,7 @@ export default function PublicStatus() {
 
   useEffect(() => {
     const initial = window.setTimeout(() => loadStatus(true), 0);
-    const timer = window.setInterval(() => loadStatus(), 15000);
+    const timer = window.setInterval(() => loadStatus(), 3000);
     return () => {
       window.clearTimeout(initial);
       window.clearInterval(timer);
@@ -146,17 +146,15 @@ export default function PublicStatus() {
     localStorage.setItem('lang', next);
   };
 
-  const counts = useMemo(() => {
-    const nodes = data?.nodes || [];
-    return {
-      all: nodes.length,
-      default: nodes.filter((n) => n.status === 'online').length,
-      traffic: nodes.filter((n) => n.network_rx_total_bytes + n.network_tx_total_bytes > 0).length,
-      peak: nodes.filter((n) => Math.max(n.cpu_percent, n.memory_percent, n.disk_percent) >= 80).length,
-      offline: nodes.filter((n) => n.status === 'offline').length,
-      load: nodes.filter((n) => n.status === 'degraded').length,
-      expiring: nodes.filter((n) => n.remaining_days > 0 && n.remaining_days <= 30).length,
-    };
+  const publicTags = useMemo(() => {
+    const tags = new Map<string, { name: string; color: string; count: number }>();
+    for (const node of data?.nodes || []) {
+      for (const tag of node.tags || []) {
+        const current = tags.get(tag.name);
+        tags.set(tag.name, { name: tag.name, color: tag.color, count: (current?.count || 0) + 1 });
+      }
+    }
+    return [...tags.values()].sort((a, b) => a.name.localeCompare(b.name));
   }, [data]);
 
   const visibleNodes = useMemo(() => {
@@ -164,24 +162,14 @@ export default function PublicStatus() {
     return (data?.nodes || []).filter((node) => {
       const matchesSearch = !normalized || `${node.name} ${node.location} ${node.server_type} ${(node.tags || []).map((tag) => tag.name).join(' ')}`.toLowerCase().includes(normalized);
       if (!matchesSearch) return false;
-      if (filter === 'default') return node.status === 'online';
-      if (filter === 'traffic') return node.network_rx_total_bytes + node.network_tx_total_bytes > 0;
-      if (filter === 'peak') return Math.max(node.cpu_percent, node.memory_percent, node.disk_percent) >= 80;
-      if (filter === 'offline') return node.status === 'offline';
-      if (filter === 'load') return node.status === 'degraded';
-      if (filter === 'expiring') return node.remaining_days > 0 && node.remaining_days <= 30;
+      if (filter.startsWith('tag:')) return (node.tags || []).some((tag) => tag.name === filter.slice(4));
       return true;
     });
   }, [data, filter, query]);
 
-  const filters: Array<{ key: FilterKey; label: string }> = [
-    { key: 'all', label: t('probe.filter.all') },
-    { key: 'default', label: t('probe.filter.default') },
-    { key: 'traffic', label: t('probe.filter.traffic') },
-    { key: 'peak', label: t('probe.filter.peak') },
-    { key: 'offline', label: t('probe.filter.offline') },
-    { key: 'load', label: t('probe.filter.load') },
-    { key: 'expiring', label: t('probe.filter.expiring') },
+  const filters: Array<{ key: FilterKey; label: string; count: number; color?: string }> = [
+    { key: 'all', label: t('probe.filter.all'), count: data?.nodes.length || 0 },
+    ...publicTags.map((tag) => ({ key: `tag:${tag.name}` as FilterKey, label: tag.name, count: tag.count, color: tag.color })),
   ];
 
   const overall = error ? 'outage' : (data?.overall || 'operational');
@@ -201,11 +189,7 @@ export default function PublicStatus() {
       <div className="probe-bg" />
       <div className="probe-bg-shade" />
 
-      <header className="glass-header">
-        <Link to="/status" className="glass-brand">
-          <span className="glass-brand-mark"><MoonOutlined /></span>
-          <span><strong>{t('probe.brand')}</strong><small>PUBLIC MONITOR</small></span>
-        </Link>
+      <header className="glass-header minimal-header">
         <div className="glass-header-status">
           <span className={`overall-dot ${overall}`} />
           <span>{t(`probe.status.${overall}`)}</span>
@@ -234,7 +218,8 @@ export default function PublicStatus() {
           <div className="glass-filter-list">
             {filters.map((item) => (
               <button className={filter === item.key ? 'active' : ''} key={item.key} onClick={() => setFilter(item.key)}>
-                {item.label}<em>{counts[item.key]}</em>
+                {item.color && <i className="filter-tag-dot" style={{ backgroundColor: item.color }} />}
+                {item.label}<em>{item.count}</em>
               </button>
             ))}
           </div>
@@ -306,7 +291,7 @@ function ProbeNodeCard({ node, zh }: { node: PublicNode; zh: boolean }) {
       <div className="node-bottom-grid">
         <div><CalendarOutlined /><span>{t('probe.expiry')}<strong>{expiryText}{node.remaining_days > 0 ? ` · ${node.remaining_days} ${t('probe.days')}` : ''}</strong></span></div>
         {node.billing_price > 0 && <div><DollarOutlined /><span>{t('probe.remainingValue')}<strong>{node.remaining_value > 0 ? `${symbol}${node.remaining_value.toFixed(2)}` : '—'}</strong></span></div>}
-        <div><WifiOutlined /><span>{t('probe.latency')}<strong>{node.status === 'offline' ? '—' : `${node.latency_ms} ms`}</strong></span></div>
+        <div><WifiOutlined /><span>{t('probe.latency')}<strong>{node.status === 'offline' || node.latency_ms <= 0 ? '—' : `${node.latency_ms} ms`}</strong></span></div>
         <div><SwapOutlined /><span>{t('probe.packetLoss')}<strong>{node.packet_loss_percent}%</strong></span></div>
       </div>
 
