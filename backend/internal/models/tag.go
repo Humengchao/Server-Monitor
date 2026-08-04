@@ -2,6 +2,7 @@ package models
 
 import (
 	"database/sql"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -63,16 +64,49 @@ type MetricPoint struct {
 	RecordedAt     time.Time `json:"recorded_at"`
 }
 
-func InsertMetric(db *sql.DB, serverID uuid.UUID, m *MetricPoint) error {
-	_, err := db.Exec(
-		`INSERT INTO server_metrics (server_id, cpu_percent, load_1, load_5, load_15, memory_used, memory_total,
+// SaveMetric atomically updates the one-row latest table and appends the raw
+// three-second sample used by the 24-hour history tier.
+func SaveMetric(db *sql.DB, serverID uuid.UUID, m *MetricPoint) error {
+	if m.RecordedAt.IsZero() {
+		m.RecordedAt = time.Now()
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(
+		`INSERT INTO server_latest_metrics (server_id, cpu_percent, load_1, load_5, load_15, memory_used, memory_total,
 		 disk_used_bytes, network_rx_bytes, network_tx_bytes, network_rx_total_bytes, network_tx_total_bytes,
-		 disk_rx_bytes, disk_tx_bytes, uptime_seconds, latency_ms)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+		 disk_rx_bytes, disk_tx_bytes, uptime_seconds, latency_ms, recorded_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+		 ON CONFLICT (server_id) DO UPDATE SET
+		 cpu_percent=EXCLUDED.cpu_percent, load_1=EXCLUDED.load_1, load_5=EXCLUDED.load_5, load_15=EXCLUDED.load_15,
+		 memory_used=EXCLUDED.memory_used, memory_total=EXCLUDED.memory_total, disk_used_bytes=EXCLUDED.disk_used_bytes,
+		 network_rx_bytes=EXCLUDED.network_rx_bytes, network_tx_bytes=EXCLUDED.network_tx_bytes,
+		 network_rx_total_bytes=EXCLUDED.network_rx_total_bytes, network_tx_total_bytes=EXCLUDED.network_tx_total_bytes,
+		 disk_rx_bytes=EXCLUDED.disk_rx_bytes, disk_tx_bytes=EXCLUDED.disk_tx_bytes,
+		 uptime_seconds=EXCLUDED.uptime_seconds, latency_ms=EXCLUDED.latency_ms, recorded_at=EXCLUDED.recorded_at`,
 		serverID, m.CPUPercent, m.Load1, m.Load5, m.Load15, m.MemoryUsed, m.MemoryTotal,
 		m.DiskUsed, m.NetworkRxBytes, m.NetworkTxBytes, m.NetworkRxTotal, m.NetworkTxTotal,
-		m.DiskRxBytes, m.DiskTxBytes, m.UptimeSeconds, m.LatencyMS)
-	return err
+		m.DiskRxBytes, m.DiskTxBytes, m.UptimeSeconds, m.LatencyMS, m.RecordedAt)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(
+		`INSERT INTO server_metrics (server_id, cpu_percent, load_1, load_5, load_15, memory_used, memory_total,
+		 disk_used_bytes, network_rx_bytes, network_tx_bytes, network_rx_total_bytes, network_tx_total_bytes,
+		 disk_rx_bytes, disk_tx_bytes, uptime_seconds, latency_ms, recorded_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+		serverID, m.CPUPercent, m.Load1, m.Load5, m.Load15, m.MemoryUsed, m.MemoryTotal,
+		m.DiskUsed, m.NetworkRxBytes, m.NetworkTxBytes, m.NetworkRxTotal, m.NetworkTxTotal,
+		m.DiskRxBytes, m.DiskTxBytes, m.UptimeSeconds, m.LatencyMS, m.RecordedAt)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // MaxMetricsPoints limits data points returned to keep charts responsive.
@@ -85,16 +119,38 @@ func GetMetrics(db *sql.DB, serverID uuid.UUID, since, until time.Time) ([]Metri
 		bucketSecs = 1
 	}
 
+	now := time.Now()
+	rawCutoff := now.Add(-24 * time.Hour)
+	minuteCutoff := now.AddDate(0, 0, -30)
 	rows, err := db.Query(
-		`SELECT AVG(cpu_percent)::DECIMAL(5,2), AVG(load_1)::DECIMAL(8,2), AVG(load_5)::DECIMAL(8,2), AVG(load_15)::DECIMAL(8,2),
-		        AVG(memory_used)::BIGINT, AVG(memory_total)::BIGINT, AVG(disk_used_bytes)::BIGINT,
-		        AVG(network_rx_bytes)::BIGINT, AVG(network_tx_bytes)::BIGINT,
-		        AVG(network_rx_total_bytes)::BIGINT, AVG(network_tx_total_bytes)::BIGINT,
-		        AVG(disk_rx_bytes)::BIGINT, AVG(disk_tx_bytes)::BIGINT,
-		        AVG(uptime_seconds)::BIGINT, AVG(latency_ms)::INT,
-		        TO_TIMESTAMP(FLOOR(EXTRACT(EPOCH FROM recorded_at) / $4) * $4) AS bucket_time
-		 FROM server_metrics WHERE server_id=$1 AND recorded_at >= $2 AND recorded_at <= $3
-		 GROUP BY bucket_time ORDER BY bucket_time ASC`, serverID, since, until, bucketSecs)
+		`WITH source AS (
+			SELECT cpu_percent, load_1, load_5, load_15, memory_used, memory_total, disk_used_bytes,
+				network_rx_bytes, network_tx_bytes, network_rx_total_bytes, network_tx_total_bytes,
+				disk_rx_bytes, disk_tx_bytes, uptime_seconds, latency_ms, recorded_at
+			FROM server_metrics_15m
+			WHERE server_id=$1 AND recorded_at >= $2 AND recorded_at <= $3 AND recorded_at < $6
+			UNION ALL
+			SELECT cpu_percent, load_1, load_5, load_15, memory_used, memory_total, disk_used_bytes,
+				network_rx_bytes, network_tx_bytes, network_rx_total_bytes, network_tx_total_bytes,
+				disk_rx_bytes, disk_tx_bytes, uptime_seconds, latency_ms, recorded_at
+			FROM server_metrics_1m
+			WHERE server_id=$1 AND recorded_at >= $2 AND recorded_at <= $3 AND recorded_at >= $6 AND recorded_at < $5
+			UNION ALL
+			SELECT cpu_percent, load_1, load_5, load_15, memory_used, memory_total, disk_used_bytes,
+				network_rx_bytes, network_tx_bytes, network_rx_total_bytes, network_tx_total_bytes,
+				disk_rx_bytes, disk_tx_bytes, uptime_seconds, latency_ms, recorded_at
+			FROM server_metrics
+			WHERE server_id=$1 AND recorded_at >= $2 AND recorded_at <= $3 AND recorded_at >= $5
+		)
+		SELECT AVG(cpu_percent)::DECIMAL(5,2), AVG(load_1)::DECIMAL(8,2), AVG(load_5)::DECIMAL(8,2), AVG(load_15)::DECIMAL(8,2),
+		       ROUND(AVG(memory_used))::BIGINT, MAX(memory_total)::BIGINT, ROUND(AVG(disk_used_bytes))::BIGINT,
+		       ROUND(AVG(network_rx_bytes))::BIGINT, ROUND(AVG(network_tx_bytes))::BIGINT,
+		       MAX(network_rx_total_bytes)::BIGINT, MAX(network_tx_total_bytes)::BIGINT,
+		       ROUND(AVG(disk_rx_bytes))::BIGINT, ROUND(AVG(disk_tx_bytes))::BIGINT,
+		       MAX(uptime_seconds)::BIGINT, ROUND(AVG(latency_ms))::INT,
+		       TO_TIMESTAMP(FLOOR(EXTRACT(EPOCH FROM recorded_at) / $4) * $4) AS bucket_time
+		FROM source
+		GROUP BY bucket_time ORDER BY bucket_time ASC`, serverID, since, until, bucketSecs, rawCutoff, minuteCutoff)
 	if err != nil {
 		return nil, err
 	}
@@ -115,21 +171,13 @@ func GetMetrics(db *sql.DB, serverID uuid.UUID, since, until time.Time) ([]Metri
 	return points, nil
 }
 
-func DeleteOldMetrics(db *sql.DB, before time.Time) (int64, error) {
-	result, err := db.Exec("DELETE FROM server_metrics WHERE recorded_at < $1", before)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
-}
-
 func GetLatestMetric(db *sql.DB, serverID uuid.UUID) (*MetricPoint, error) {
 	m := &MetricPoint{}
 	err := db.QueryRow(
 		`SELECT cpu_percent, load_1, load_5, load_15, memory_used, memory_total, disk_used_bytes,
 		 network_rx_bytes, network_tx_bytes, network_rx_total_bytes, network_tx_total_bytes,
 		 disk_rx_bytes, disk_tx_bytes, uptime_seconds, latency_ms, recorded_at
-		 FROM server_metrics WHERE server_id=$1 ORDER BY recorded_at DESC LIMIT 1`, serverID,
+		 FROM server_latest_metrics WHERE server_id=$1`, serverID,
 	).Scan(&m.CPUPercent, &m.Load1, &m.Load5, &m.Load15, &m.MemoryUsed, &m.MemoryTotal, &m.DiskUsed,
 		&m.NetworkRxBytes, &m.NetworkTxBytes, &m.NetworkRxTotal, &m.NetworkTxTotal,
 		&m.DiskRxBytes, &m.DiskTxBytes, &m.UptimeSeconds, &m.LatencyMS, &m.RecordedAt)
@@ -137,4 +185,92 @@ func GetLatestMetric(db *sql.DB, serverID uuid.UUID) (*MetricPoint, error) {
 		return nil, err
 	}
 	return m, nil
+}
+
+func RollupMetrics1m(db *sql.DB, since, until time.Time) error {
+	return rollupMetrics(db, "server_metrics", "server_metrics_1m", 60, "COUNT(*)::INT", since, until)
+}
+
+func RollupMetrics15m(db *sql.DB, since, until time.Time) error {
+	return rollupMetrics(db, "server_metrics_1m", "server_metrics_15m", 15*60, "COALESCE(SUM(sample_count), 0)::INT", since, until)
+}
+
+func rollupMetrics(db *sql.DB, sourceTable, targetTable string, bucketSeconds int, sampleExpression string, since, until time.Time) error {
+	allowed := (sourceTable == "server_metrics" && targetTable == "server_metrics_1m") ||
+		(sourceTable == "server_metrics_1m" && targetTable == "server_metrics_15m")
+	if !allowed {
+		return fmt.Errorf("unsupported metric rollup %s -> %s", sourceTable, targetTable)
+	}
+	query := fmt.Sprintf(`INSERT INTO %s (server_id, cpu_percent, load_1, load_5, load_15, memory_used, memory_total,
+		 disk_used_bytes, network_rx_bytes, network_tx_bytes, network_rx_total_bytes, network_tx_total_bytes,
+		 disk_rx_bytes, disk_tx_bytes, uptime_seconds, latency_ms, sample_count, recorded_at)
+		 SELECT server_id, AVG(cpu_percent)::DECIMAL(5,2), AVG(load_1)::DECIMAL(8,2), AVG(load_5)::DECIMAL(8,2), AVG(load_15)::DECIMAL(8,2),
+		 ROUND(AVG(memory_used))::BIGINT, MAX(memory_total)::BIGINT, ROUND(AVG(disk_used_bytes))::BIGINT,
+		 ROUND(AVG(network_rx_bytes))::BIGINT, ROUND(AVG(network_tx_bytes))::BIGINT,
+		 MAX(network_rx_total_bytes)::BIGINT, MAX(network_tx_total_bytes)::BIGINT,
+		 ROUND(AVG(disk_rx_bytes))::BIGINT, ROUND(AVG(disk_tx_bytes))::BIGINT,
+		 MAX(uptime_seconds)::BIGINT, ROUND(AVG(latency_ms))::INT, %s,
+		 TO_TIMESTAMP(FLOOR(EXTRACT(EPOCH FROM recorded_at) / $3) * $3)
+		 FROM %s WHERE recorded_at >= $1 AND recorded_at < $2
+		 GROUP BY server_id, FLOOR(EXTRACT(EPOCH FROM recorded_at) / $3)
+		 ON CONFLICT (server_id, recorded_at) DO UPDATE SET
+		 cpu_percent=EXCLUDED.cpu_percent, load_1=EXCLUDED.load_1, load_5=EXCLUDED.load_5, load_15=EXCLUDED.load_15,
+		 memory_used=EXCLUDED.memory_used, memory_total=EXCLUDED.memory_total, disk_used_bytes=EXCLUDED.disk_used_bytes,
+		 network_rx_bytes=EXCLUDED.network_rx_bytes, network_tx_bytes=EXCLUDED.network_tx_bytes,
+		 network_rx_total_bytes=EXCLUDED.network_rx_total_bytes, network_tx_total_bytes=EXCLUDED.network_tx_total_bytes,
+		 disk_rx_bytes=EXCLUDED.disk_rx_bytes, disk_tx_bytes=EXCLUDED.disk_tx_bytes,
+		 uptime_seconds=EXCLUDED.uptime_seconds, latency_ms=EXCLUDED.latency_ms, sample_count=EXCLUDED.sample_count`,
+		targetTable, sampleExpression, sourceTable)
+	_, err := db.Exec(query, since, until, bucketSeconds)
+	return err
+}
+
+func MetricRollupBackfilled(db *sql.DB) (bool, error) {
+	var exists bool
+	err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM metric_maintenance_state WHERE name='tiered_metrics_v1')`).Scan(&exists)
+	return exists, err
+}
+
+func MarkMetricRollupBackfilled(db *sql.DB) error {
+	_, err := db.Exec(`INSERT INTO metric_maintenance_state (name, completed_at) VALUES ('tiered_metrics_v1', NOW())
+		ON CONFLICT (name) DO UPDATE SET completed_at=EXCLUDED.completed_at`)
+	return err
+}
+
+func MetricRollupStart(db *sql.DB, table string, fallback time.Time, overlap time.Duration) (time.Time, error) {
+	switch table {
+	case "server_metrics_1m", "server_metrics_15m":
+	default:
+		return time.Time{}, fmt.Errorf("unsupported rollup table %q", table)
+	}
+	var latest sql.NullTime
+	if err := db.QueryRow(fmt.Sprintf("SELECT MAX(recorded_at) FROM %s", table)).Scan(&latest); err != nil {
+		return time.Time{}, err
+	}
+	if !latest.Valid {
+		return fallback, nil
+	}
+	start := latest.Time.Add(-overlap)
+	if start.Before(fallback) {
+		return fallback, nil
+	}
+	return start, nil
+}
+
+// DeleteMetricBatch bounds locks, WAL bursts and dead tuples created by
+// retention cleanup. Table names are selected internally and never user input.
+func DeleteMetricBatch(db *sql.DB, table string, before time.Time, limit int) (int64, error) {
+	switch table {
+	case "server_metrics", "server_metrics_1m", "server_metrics_15m":
+	default:
+		return 0, fmt.Errorf("unsupported metric table %q", table)
+	}
+	query := fmt.Sprintf(`WITH doomed AS (
+		SELECT ctid FROM %s WHERE recorded_at < $1 LIMIT $2
+	) DELETE FROM %s WHERE ctid IN (SELECT ctid FROM doomed)`, table, table)
+	result, err := db.Exec(query, before, limit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }

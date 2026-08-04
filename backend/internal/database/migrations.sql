@@ -112,5 +112,86 @@ ALTER TABLE server_metrics ADD COLUMN IF NOT EXISTS network_rx_total_bytes BIGIN
 ALTER TABLE server_metrics ADD COLUMN IF NOT EXISTS network_tx_total_bytes BIGINT DEFAULT 0;
 ALTER TABLE server_metrics ADD COLUMN IF NOT EXISTS latency_ms INT DEFAULT 0;
 
+-- Latest metrics are updated in-place on every poll. Keeping this hot path in
+-- a one-row-per-server table avoids scanning the raw history for dashboards.
+CREATE TABLE IF NOT EXISTS server_latest_metrics (
+    server_id UUID PRIMARY KEY REFERENCES servers(id) ON DELETE CASCADE,
+    cpu_percent DECIMAL(5,2) DEFAULT 0,
+    load_1 DECIMAL(8,2) DEFAULT 0,
+    load_5 DECIMAL(8,2) DEFAULT 0,
+    load_15 DECIMAL(8,2) DEFAULT 0,
+    memory_used BIGINT DEFAULT 0,
+    memory_total BIGINT DEFAULT 0,
+    disk_used_bytes BIGINT DEFAULT 0,
+    network_rx_bytes BIGINT DEFAULT 0,
+    network_tx_bytes BIGINT DEFAULT 0,
+    network_rx_total_bytes BIGINT DEFAULT 0,
+    network_tx_total_bytes BIGINT DEFAULT 0,
+    disk_rx_bytes BIGINT DEFAULT 0,
+    disk_tx_bytes BIGINT DEFAULT 0,
+    uptime_seconds BIGINT DEFAULT 0,
+    latency_ms INT DEFAULT 0,
+    recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Tiered rollups retain useful trends without keeping every three-second
+-- sample forever. Their schemas intentionally mirror server_metrics so the
+-- history API can merge all tiers transparently.
+CREATE TABLE IF NOT EXISTS server_metrics_1m (
+    server_id UUID NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    cpu_percent DECIMAL(5,2) DEFAULT 0,
+    load_1 DECIMAL(8,2) DEFAULT 0,
+    load_5 DECIMAL(8,2) DEFAULT 0,
+    load_15 DECIMAL(8,2) DEFAULT 0,
+    memory_used BIGINT DEFAULT 0,
+    memory_total BIGINT DEFAULT 0,
+    disk_used_bytes BIGINT DEFAULT 0,
+    network_rx_bytes BIGINT DEFAULT 0,
+    network_tx_bytes BIGINT DEFAULT 0,
+    network_rx_total_bytes BIGINT DEFAULT 0,
+    network_tx_total_bytes BIGINT DEFAULT 0,
+    disk_rx_bytes BIGINT DEFAULT 0,
+    disk_tx_bytes BIGINT DEFAULT 0,
+    uptime_seconds BIGINT DEFAULT 0,
+    latency_ms INT DEFAULT 0,
+    sample_count INT NOT NULL DEFAULT 0,
+    recorded_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (server_id, recorded_at)
+);
+
+CREATE TABLE IF NOT EXISTS server_metrics_15m (
+    server_id UUID NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    cpu_percent DECIMAL(5,2) DEFAULT 0,
+    load_1 DECIMAL(8,2) DEFAULT 0,
+    load_5 DECIMAL(8,2) DEFAULT 0,
+    load_15 DECIMAL(8,2) DEFAULT 0,
+    memory_used BIGINT DEFAULT 0,
+    memory_total BIGINT DEFAULT 0,
+    disk_used_bytes BIGINT DEFAULT 0,
+    network_rx_bytes BIGINT DEFAULT 0,
+    network_tx_bytes BIGINT DEFAULT 0,
+    network_rx_total_bytes BIGINT DEFAULT 0,
+    network_tx_total_bytes BIGINT DEFAULT 0,
+    disk_rx_bytes BIGINT DEFAULT 0,
+    disk_tx_bytes BIGINT DEFAULT 0,
+    uptime_seconds BIGINT DEFAULT 0,
+    latency_ms INT DEFAULT 0,
+    sample_count INT NOT NULL DEFAULT 0,
+    recorded_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (server_id, recorded_at)
+);
+
+-- BRIN is compact and well suited to append-only time-series data. The
+-- existing btree indexes continue to serve per-server latest/range lookups.
+CREATE INDEX IF NOT EXISTS idx_server_metrics_recorded_brin ON server_metrics USING BRIN (recorded_at);
+CREATE INDEX IF NOT EXISTS idx_server_metrics_1m_recorded_brin ON server_metrics_1m USING BRIN (recorded_at);
+CREATE INDEX IF NOT EXISTS idx_server_metrics_15m_recorded_brin ON server_metrics_15m USING BRIN (recorded_at);
+
+-- Prevent an expensive historical backfill from running on every restart.
+CREATE TABLE IF NOT EXISTS metric_maintenance_state (
+    name VARCHAR(64) PRIMARY KEY,
+    completed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- Credential type (linux / windows)
 ALTER TABLE credentials ADD COLUMN IF NOT EXISTS credential_type VARCHAR(16) DEFAULT 'linux';

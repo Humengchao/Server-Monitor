@@ -58,15 +58,7 @@ func GetPublicServerMetrics(db *sql.DB) ([]PublicServerMetric, error) {
 			COALESCE(sm.network_rx_total_bytes, 0), COALESCE(sm.network_tx_total_bytes, 0),
 			COALESCE(sm.uptime_seconds, 0), COALESCE(sm.latency_ms, 0), sm.recorded_at
 		FROM servers s
-		LEFT JOIN LATERAL (
-			SELECT cpu_percent, load_1, load_5, load_15, memory_used, memory_total, disk_used_bytes,
-				network_rx_bytes, network_tx_bytes, network_rx_total_bytes, network_tx_total_bytes,
-				uptime_seconds, latency_ms, recorded_at
-			FROM server_metrics
-			WHERE server_id = s.id
-			ORDER BY recorded_at DESC
-			LIMIT 1
-		) sm ON true
+		LEFT JOIN server_latest_metrics sm ON sm.server_id = s.id
 		ORDER BY s.created_at ASC, s.id ASC`)
 	if err != nil {
 		return nil, err

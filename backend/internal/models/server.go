@@ -98,9 +98,7 @@ const serverSummarySelect = `SELECT s.id, s.user_id, s.name, s.host, s.port, s.s
 	 COALESCE(sm.uptime_seconds, 0), COALESCE(sm.latency_ms, 0), sm.recorded_at
 	 FROM servers s
 	 LEFT JOIN credentials c ON c.id = s.credential_id
-	 LEFT JOIN LATERAL (
-		 SELECT * FROM server_metrics WHERE server_id = s.id ORDER BY recorded_at DESC LIMIT 1
-	 ) sm ON true`
+	 LEFT JOIN server_latest_metrics sm ON sm.server_id = s.id`
 
 func scanServerSummaries(rows *sql.Rows) ([]Server, error) {
 	var servers []Server

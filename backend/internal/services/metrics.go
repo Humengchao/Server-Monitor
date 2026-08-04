@@ -32,6 +32,10 @@ type prevStats struct {
 const (
 	sshDialTimeout       = 10 * time.Second
 	sshCollectionTimeout = 20 * time.Second
+	maintenanceDelay     = 15 * time.Second
+	maintenanceInterval  = 1 * time.Minute
+	metricDeleteBatch    = 5000
+	metricDeleteRuns     = 20
 )
 
 type Collector struct {
@@ -63,14 +67,18 @@ func (c *Collector) Start() {
 			time.Sleep(c.interval)
 		}
 	}()
-	// Cleanup metrics older than 30 days every hour
+	// Roll up and prune history independently so maintenance never blocks live
+	// collection or API startup.
 	go func() {
+		timer := time.NewTimer(maintenanceDelay)
+		defer timer.Stop()
 		for {
 			select {
 			case <-c.stopCh:
 				return
-			case <-time.After(1 * time.Hour):
-				c.cleanupOldMetrics()
+			case <-timer.C:
+				c.maintainMetricHistory()
+				timer.Reset(maintenanceInterval)
 			}
 		}
 	}()
@@ -81,15 +89,68 @@ func (c *Collector) Stop() {
 	close(c.stopCh)
 }
 
-func (c *Collector) cleanupOldMetrics() {
-	cutoff := time.Now().AddDate(0, 0, -30)
-	rows, err := models.DeleteOldMetrics(c.db.Raw, cutoff)
+func (c *Collector) maintainMetricHistory() {
+	now := time.Now()
+	backfilled, err := models.MetricRollupBackfilled(c.db.Raw)
 	if err != nil {
-		log.Printf("collector: cleanup failed: %v", err)
+		log.Printf("collector: read metric maintenance state: %v", err)
 		return
 	}
-	if rows > 0 {
-		log.Printf("collector: cleaned up %d old metrics rows", rows)
+
+	if !backfilled {
+		// Preserve existing history before applying the shorter raw retention.
+		if err := models.RollupMetrics1m(c.db.Raw, now.AddDate(0, 0, -30), now); err != nil {
+			log.Printf("collector: initial one-minute rollup failed: %v", err)
+			return
+		}
+		if err := models.RollupMetrics15m(c.db.Raw, now.AddDate(0, 0, -30), now); err != nil {
+			log.Printf("collector: initial fifteen-minute rollup failed: %v", err)
+			return
+		}
+		if err := models.MarkMetricRollupBackfilled(c.db.Raw); err != nil {
+			log.Printf("collector: mark metric backfill complete: %v", err)
+			return
+		}
+		log.Printf("collector: tiered metric history backfill completed")
+	} else {
+		// Rebuild a small overlap so incomplete time buckets and brief restarts
+		// are repaired idempotently via ON CONFLICT. Starting from the last
+		// completed rollup also catches up after a longer application outage.
+		oneMinuteStart, err := models.MetricRollupStart(c.db.Raw, "server_metrics_1m", now.AddDate(0, 0, -30), 5*time.Minute)
+		if err != nil {
+			log.Printf("collector: find one-minute rollup cursor: %v", err)
+			return
+		}
+		if err := models.RollupMetrics1m(c.db.Raw, oneMinuteStart, now); err != nil {
+			log.Printf("collector: one-minute rollup failed: %v", err)
+			return
+		}
+		fifteenMinuteStart, err := models.MetricRollupStart(c.db.Raw, "server_metrics_15m", now.AddDate(0, 0, -30), time.Hour)
+		if err != nil {
+			log.Printf("collector: find fifteen-minute rollup cursor: %v", err)
+			return
+		}
+		if err := models.RollupMetrics15m(c.db.Raw, fifteenMinuteStart, now); err != nil {
+			log.Printf("collector: fifteen-minute rollup failed: %v", err)
+			return
+		}
+	}
+
+	c.deleteMetricTier("server_metrics", now.Add(-24*time.Hour))
+	c.deleteMetricTier("server_metrics_1m", now.AddDate(0, 0, -30))
+	c.deleteMetricTier("server_metrics_15m", now.AddDate(-1, 0, 0))
+}
+
+func (c *Collector) deleteMetricTier(table string, before time.Time) {
+	for range metricDeleteRuns {
+		rows, err := models.DeleteMetricBatch(c.db.Raw, table, before, metricDeleteBatch)
+		if err != nil {
+			log.Printf("collector: prune %s failed: %v", table, err)
+			return
+		}
+		if rows < metricDeleteBatch {
+			return
+		}
 	}
 }
 
@@ -101,7 +162,7 @@ func (c *Collector) pollAll() {
 	}
 
 	// Parallel polling: one dead server shouldn't delay metrics for live ones.
-	// SSH timeout is 10s, so even with many servers max cycle is ~10s per batch.
+	// A per-host deadline prevents one stalled command from blocking the batch.
 	sem := make(chan struct{}, 10) // max 10 concurrent SSH connections
 	var wg sync.WaitGroup
 	for i := range servers {
@@ -115,8 +176,8 @@ func (c *Collector) pollAll() {
 				log.Printf("collector: poll %s failed: %v", s.Name, err)
 				return
 			}
-			if err := models.InsertMetric(c.db.Raw, s.ID, m); err != nil {
-				log.Printf("collector: insert metric for %s failed: %v", s.Name, err)
+			if err := models.SaveMetric(c.db.Raw, s.ID, m); err != nil {
+				log.Printf("collector: save metric for %s failed: %v", s.Name, err)
 			}
 		}(&servers[i])
 	}
@@ -144,7 +205,7 @@ func (c *Collector) collectOne(s *models.Server) (*models.MetricPoint, error) {
 		return nil, fmt.Errorf("no auth method")
 	}
 
-	addr := fmt.Sprintf("%s:%d", s.Host, s.Port)
+	addr := net.JoinHostPort(s.Host, strconv.Itoa(s.Port))
 	tcpConn, err := net.DialTimeout("tcp", addr, sshDialTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("ssh dial: %w", err)

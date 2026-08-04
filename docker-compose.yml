@@ -17,6 +17,11 @@ services:
       CORS_ORIGIN: http://${DOMAIN:-localhost:19080}
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
 
   frontend:
     image: ${FRONTEND_IMAGE}
@@ -27,3 +32,8 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"

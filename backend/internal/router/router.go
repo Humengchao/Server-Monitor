@@ -13,7 +13,10 @@ import (
 )
 
 func Setup(db *sql.DB, cfg *config.Config) *gin.Engine {
-	r := gin.Default()
+	r := gin.New()
+	r.Use(gin.LoggerWithConfig(gin.LoggerConfig{
+		SkipPaths: []string{"/api/health", "/api/public/status"},
+	}), gin.Recovery())
 
 	// CORS
 	r.Use(func(c *gin.Context) {
