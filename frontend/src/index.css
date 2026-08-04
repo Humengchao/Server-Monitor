@@ -273,8 +273,47 @@ button, input, textarea, select { font: inherit; }
 .xterm-viewport::-webkit-scrollbar-track { background: transparent; }
 .xterm-viewport::-webkit-scrollbar-thumb { background: rgba(128, 134, 158, .5); border-radius: 4px; }
 
-.server-detail-tabs .ant-tabs-content { height: 100%; }
-.server-detail-tabs .ant-tabs-tabpane { height: 100%; overflow-y: auto; }
+.server-detail-page {
+  min-width: 0;
+  min-height: calc(100vh - 142px);
+  display: flex;
+  flex-direction: column;
+}
+
+.server-detail-tabs { min-width: 0; }
+.server-detail-tabs .ant-tabs-content { height: auto; }
+.server-detail-tabs .ant-tabs-tabpane { height: auto; overflow: visible; }
+
+.server-detail-page--terminal {
+  height: max(720px, calc(100dvh - 142px));
+}
+
+.server-detail-page--terminal .server-detail-tabs {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.server-detail-page--terminal .server-detail-tabs .ant-tabs-content-holder {
+  flex: 1;
+  min-height: 0;
+}
+
+.server-detail-page--terminal .server-detail-tabs .ant-tabs-content,
+.server-detail-page--terminal .server-detail-tabs .ant-tabs-tabpane-active {
+  height: 100%;
+}
+
+.server-detail-terminal {
+  height: 100%;
+  min-height: 520px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
 
 @media (max-width: 991px) {
   .app-sidebar.ant-layout-sider { position: fixed; }

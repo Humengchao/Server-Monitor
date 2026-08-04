@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { Collapse, Table, Tag, Button, Space, Typography, Spin, Empty, Drawer, App } from 'antd';
+import { Collapse, Table, Tag, Button, Space, Typography, Spin, Empty, Drawer, App, Card } from 'antd';
 import { ReloadOutlined, CaretRightOutlined, PauseOutlined, SyncOutlined, ArrowRightOutlined, FileTextOutlined, CodeOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useTranslation } from 'react-i18next';
@@ -194,6 +194,138 @@ function ExecDrawer({ serverId, containerId, containerName, open, onClose }: {
     >
       <div ref={termRef} style={{ width: '100%', height: 'calc(100vh - 110px)' }} />
     </Drawer>
+  );
+}
+
+export function ServerDockerPanel({ serverId, version }: { serverId: string; version?: string }) {
+  const { t } = useTranslation();
+  const { message } = App.useApp();
+  const [containers, setContainers] = useState<DockerContainer[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [logsTarget, setLogsTarget] = useState<{ containerId: string; containerName: string } | null>(null);
+  const [execTarget, setExecTarget] = useState<{ containerId: string; containerName: string } | null>(null);
+
+  const loadContainers = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await serversApi.getContainers(serverId);
+      setContainers(res.data || []);
+    } catch {
+      message.error(t('docker.loadFailed'));
+    } finally {
+      setLoading(false);
+    }
+  }, [message, serverId, t]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadContainers();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadContainers]);
+
+  const handleAction = async (containerId: string, action: 'start' | 'stop' | 'restart') => {
+    try {
+      await serversApi.containerAction(serverId, containerId, action);
+      message.success(t('docker.actionSuccess', { action: t(`docker.${action}`) }));
+      await loadContainers();
+    } catch {
+      message.error(t('docker.actionFailed', { action: t(`docker.${action}`) }));
+    }
+  };
+
+  const columns: ColumnsType<DockerContainer> = [
+    {
+      title: t('common.name'),
+      dataIndex: 'name',
+      key: 'name',
+      render: (value: string) => <Text strong>{value}</Text>,
+    },
+    {
+      title: t('docker.image'),
+      dataIndex: 'image',
+      key: 'image',
+      ellipsis: true,
+    },
+    {
+      title: t('docker.state'),
+      dataIndex: 'state',
+      key: 'state',
+      width: 110,
+      render: (value: string) => <Tag color={stateColor[value] || 'default'}>{value}</Tag>,
+    },
+    {
+      title: t('common.status'),
+      dataIndex: 'status',
+      key: 'status',
+      ellipsis: true,
+    },
+    {
+      title: t('docker.ports'),
+      dataIndex: 'ports',
+      key: 'ports',
+      ellipsis: true,
+      width: 200,
+    },
+    {
+      title: t('common.actions'),
+      key: 'actions',
+      width: 320,
+      render: (_, record) => (
+        <Space size="small" wrap>
+          {record.state !== 'running' ? (
+            <Button size="small" type="primary" icon={<CaretRightOutlined />} onClick={() => handleAction(record.id, 'start')}>{t('docker.start')}</Button>
+          ) : (
+            <>
+              <Button size="small" icon={<PauseOutlined />} onClick={() => handleAction(record.id, 'stop')}>{t('docker.stop')}</Button>
+              <Button size="small" icon={<SyncOutlined />} onClick={() => handleAction(record.id, 'restart')}>{t('docker.restart')}</Button>
+            </>
+          )}
+          <Button size="small" icon={<FileTextOutlined />} onClick={() => setLogsTarget({ containerId: record.id, containerName: record.name })}>{t('docker.logs')}</Button>
+          <Button size="small" icon={<CodeOutlined />} onClick={() => setExecTarget({ containerId: record.id, containerName: record.name })}>{t('docker.exec')}</Button>
+        </Space>
+      ),
+    },
+  ];
+
+  return (
+    <Card
+      title={(
+        <Space wrap>
+          {version && <Tag color="blue">{t('docker.version', { version })}</Tag>}
+          <Text type="secondary">{t('docker.containers', { count: containers.length })}</Text>
+        </Space>
+      )}
+      extra={<Button icon={<ReloadOutlined />} onClick={loadContainers}>{t('common.refresh')}</Button>}
+    >
+      <Table
+        rowKey="id"
+        columns={columns}
+        dataSource={containers}
+        loading={loading}
+        pagination={false}
+        size="small"
+        scroll={{ x: 1100 }}
+        locale={{ emptyText: <Empty description={t('docker.noContainers')} /> }}
+      />
+
+      {logsTarget && (
+        <LogsModal
+          serverId={serverId}
+          containerId={logsTarget.containerId}
+          containerName={logsTarget.containerName}
+          onClose={() => setLogsTarget(null)}
+        />
+      )}
+
+      <ExecDrawer
+        serverId={serverId}
+        containerId={execTarget?.containerId || ''}
+        containerName={execTarget?.containerName || ''}
+        open={!!execTarget}
+        onClose={() => setExecTarget(null)}
+      />
+    </Card>
   );
 }
 

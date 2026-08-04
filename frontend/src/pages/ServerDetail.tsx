@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Typography, Descriptions, Tag, Space, Button, Card, Tabs, Spin, Modal, Form, Input, InputNumber, Select, App, Row, Col } from 'antd';
+import { Typography, Descriptions, Tag, Space, Button, Card, Tabs, Spin, Modal, Form, Input, InputNumber, Select, App, Row, Col, Empty } from 'antd';
 import { ArrowLeftOutlined, EditOutlined, DeleteOutlined, DockerOutlined, KeyOutlined, SaveOutlined, WindowsOutlined, AppleOutlined } from '@ant-design/icons';
 import { DatePicker } from 'antd';
 import dayjs, { Dayjs } from 'dayjs';
@@ -11,6 +11,7 @@ import MetricsChart from '../components/MetricsChart';
 import SshTerminal from '../components/SshTerminal';
 import TagSelect from '../components/TagSelect';
 import CredentialSelect from '../components/CredentialSelect';
+import { ServerDockerPanel } from './Docker';
 
 const { Title } = Typography;
 const { RangePicker } = DatePicker;
@@ -50,6 +51,7 @@ export default function ServerDetail() {
   const [dockerInstalled, setDockerInstalled] = useState<boolean | null>(null);
   const [notes, setNotes] = useState('');
   const [notesChanged, setNotesChanged] = useState(false);
+  const [activeTab, setActiveTab] = useState('metrics');
   const [activePreset, setActivePreset] = useState<PresetKey>('1h');
   const [timeRange, setTimeRange] = useState<TimeRange>(() => getPresetRange('1h'));
 
@@ -181,7 +183,7 @@ export default function ServerDetail() {
   if (!server) return <div>{t('server.notFound')}</div>;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 136px)', overflow: 'hidden' }}>
+    <div className={`server-detail-page${activeTab === 'terminal' ? ' server-detail-page--terminal' : ''}`}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <Space>
           <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/dashboard')}>{t('common.back')}</Button>
@@ -240,7 +242,7 @@ export default function ServerDetail() {
         )}
       </Descriptions>
 
-      <Tabs className="server-detail-tabs" style={{ flex: 1, minHeight: 0 }} defaultActiveKey="metrics" items={[
+      <Tabs className="server-detail-tabs" activeKey={activeTab} onChange={setActiveTab} items={[
         {
           key: 'metrics',
           label: t('metrics.title'),
@@ -289,9 +291,18 @@ export default function ServerDetail() {
           key: 'terminal',
           label: t('terminal.title'),
           children: (
-            <div style={{ height: '100%' }}>
+            <div className="server-detail-terminal">
               <SshTerminal serverId={id!} />
             </div>
+          ),
+        },
+        {
+          key: 'docker',
+          label: t('docker.title'),
+          children: dockerInstalled === true ? (
+            <ServerDockerPanel serverId={id!} version={server.docker_version} />
+          ) : (
+            <Empty description={t('docker.noServers')} />
           ),
         },
         {
