@@ -20,17 +20,30 @@ import (
 	"server-monitor/internal/services"
 )
 
+const (
+	exitConfigError     = 10
+	exitDatabaseError   = 11
+	exitMigrationError  = 12
+	exitHTTPServerError = 13
+	exitShutdownError   = 14
+)
+
+func exitWithError(code int, message string, err error) {
+	log.Printf("%s: %v", message, err)
+	os.Exit(code)
+}
+
 func main() {
 	loadEnv()
 
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("Config error: %v", err)
+		exitWithError(exitConfigError, "Config error", err)
 	}
 
 	db, err := database.Connect(cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("Database connection failed: %v", err)
+		exitWithError(exitDatabaseError, "Database connection failed", err)
 	}
 	defer db.Close()
 
@@ -41,7 +54,7 @@ func main() {
 
 	// Run database migrations before starting any service
 	if err := database.RunMigrations(db); err != nil {
-		log.Fatalf("Database migration failed: %v", err)
+		exitWithError(exitMigrationError, "Database migration failed", err)
 	}
 	log.Println("Database migrations completed")
 
@@ -69,7 +82,7 @@ func main() {
 			err = srv.ListenAndServe()
 		}
 		if err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Failed to start server: %v", err)
+			exitWithError(exitHTTPServerError, "Failed to start server", err)
 		}
 	}()
 
@@ -84,7 +97,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatalf("Server forced to shutdown: %v", err)
+		exitWithError(exitShutdownError, "Server forced to shutdown", err)
 	}
 	log.Println("Server exited gracefully")
 }
