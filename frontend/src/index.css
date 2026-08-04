@@ -642,6 +642,10 @@ button, input, textarea, select { font: inherit; }
 .glass-footer span:first-child { color: rgba(240,242,255,.68); }
 .glass-footer span:last-child { justify-self: end; }
 .glass-footer i { width: 5px; height: 5px; margin-right: 5px; display: inline-block; border-radius: 50%; background: #50dbae; box-shadow: 0 0 9px #50dbae; }
+.glass-footer.github-footer { display: flex; justify-content: center; }
+.github-footer a { padding: 9px 14px; display: inline-flex; align-items: center; gap: 8px; border: 1px solid rgba(255,255,255,.1); border-radius: 999px; color: rgba(238,241,255,.7); background: rgba(255,255,255,.045); font-size: 11px; text-decoration: none; transition: .18s ease; }
+.github-footer a:hover { border-color: rgba(190,178,246,.3); color: #fff; background: rgba(131,110,224,.16); transform: translateY(-1px); }
+.github-footer .anticon { font-size: 15px; }
 
 @media (max-width: 1080px) {
   .glass-toolbar { align-items: stretch; flex-direction: column; }

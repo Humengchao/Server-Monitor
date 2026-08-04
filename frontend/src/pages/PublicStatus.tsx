@@ -12,6 +12,7 @@ import {
   DatabaseOutlined,
   DollarOutlined,
   EnvironmentOutlined,
+  GithubOutlined,
   HddOutlined,
   LockOutlined,
   MoonOutlined,
@@ -246,6 +247,13 @@ export default function PublicStatus() {
         )}
 
       </main>
+
+      <footer className="glass-footer github-footer">
+        <a href="https://github.com/Humengchao" target="_blank" rel="noreferrer" aria-label="Humengchao on GitHub">
+          <GithubOutlined />
+          <span>github.com/Humengchao</span>
+        </a>
+      </footer>
     </div>
   );
 }
