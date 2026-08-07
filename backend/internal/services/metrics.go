@@ -29,6 +29,11 @@ type prevStats struct {
 	time   time.Time
 }
 
+type collectionResult struct {
+	metric *models.MetricPoint
+	err    error
+}
+
 const (
 	sshDialTimeout       = 10 * time.Second
 	sshCollectionTimeout = 20 * time.Second
@@ -222,14 +227,37 @@ func (c *Collector) collectOne(s *models.Server) (*models.MetricPoint, error) {
 	client := ssh.NewClient(sshConn, chans, reqs)
 	defer client.Close()
 
-	if s.ServerType == "windows" {
-		m, err := c.collectWindows(client, s)
+	// A TCP deadline alone is not enough here: x/crypto/ssh can remain blocked
+	// waiting for an open-channel response after the transport stops making
+	// progress. Run the complete host collection behind a hard deadline and
+	// close the SSH client on timeout so one broken host never blocks pollAll.
+	resultCh := make(chan collectionResult, 1)
+	go func() {
+		var m *models.MetricPoint
+		var err error
+		if s.ServerType == "windows" {
+			m, err = c.collectWindows(client, s)
+		} else {
+			m, err = c.collectLinux(client, s)
+		}
 		if m != nil {
 			m.LatencyMS = <-pingLatency
 		}
-		return m, err
-	}
+		resultCh <- collectionResult{metric: m, err: err}
+	}()
 
+	timer := time.NewTimer(sshCollectionTimeout)
+	defer timer.Stop()
+	select {
+	case result := <-resultCh:
+		return result.metric, result.err
+	case <-timer.C:
+		_ = client.Close()
+		return nil, fmt.Errorf("collection timed out after %s", sshCollectionTimeout)
+	}
+}
+
+func (c *Collector) collectLinux(client *ssh.Client, s *models.Server) (*models.MetricPoint, error) {
 	m := &models.MetricPoint{RecordedAt: time.Now()}
 
 	// CPU from /proc/stat
@@ -271,7 +299,6 @@ func (c *Collector) collectOne(s *models.Server) (*models.MetricPoint, error) {
 	// Check Docker availability (cheap: reuses existing SSH connection)
 	dockerVersion := collectDockerVersion(client)
 	models.UpdateDockerInfo(c.db.Raw, s.ID, dockerVersion != "", dockerVersion)
-	m.LatencyMS = <-pingLatency
 
 	return m, nil
 }
