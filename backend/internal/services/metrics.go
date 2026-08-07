@@ -44,32 +44,39 @@ const (
 )
 
 type Collector struct {
-	db       *models.DB
-	interval time.Duration
-	mu       sync.Mutex
-	prev     map[uuid.UUID]*prevStats
-	stopCh   chan struct{}
+	db        *models.DB
+	interval  time.Duration
+	mu        sync.Mutex
+	prev      map[uuid.UUID]*prevStats
+	pollMu    sync.Mutex
+	inFlight  map[uuid.UUID]struct{}
+	pollSlots chan struct{}
+	stopCh    chan struct{}
 }
 
 func NewCollector(db *models.DB, interval time.Duration) *Collector {
 	return &Collector{
-		db:       db,
-		interval: interval,
-		prev:     make(map[uuid.UUID]*prevStats),
-		stopCh:   make(chan struct{}),
+		db:        db,
+		interval:  interval,
+		prev:      make(map[uuid.UUID]*prevStats),
+		inFlight:  make(map[uuid.UUID]struct{}),
+		pollSlots: make(chan struct{}, 10),
+		stopCh:    make(chan struct{}),
 	}
 }
 
 func (c *Collector) Start() {
 	go func() {
+		ticker := time.NewTicker(c.interval)
+		defer ticker.Stop()
+		c.pollAll()
 		for {
 			select {
 			case <-c.stopCh:
 				return
-			default:
+			case <-ticker.C:
+				c.pollAll()
 			}
-			c.pollAll()
-			time.Sleep(c.interval)
 		}
 	}()
 	// Roll up and prune history independently so maintenance never blocks live
@@ -166,17 +173,22 @@ func (c *Collector) pollAll() {
 		return
 	}
 
-	// Parallel polling: one dead server shouldn't delay metrics for live ones.
-	// A per-host deadline prevents one stalled command from blocking the batch.
-	sem := make(chan struct{}, 10) // max 10 concurrent SSH connections
-	var wg sync.WaitGroup
+	// Schedule each host independently. Slow hosts remain in-flight and are
+	// skipped on the next tick, while healthy hosts keep their regular cadence.
 	for i := range servers {
-		wg.Add(1)
-		go func(s *models.Server) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			m, err := c.collectOne(s)
+		s := servers[i]
+		if !c.beginPoll(s.ID) {
+			continue
+		}
+		go func() {
+			defer c.endPoll(s.ID)
+			select {
+			case c.pollSlots <- struct{}{}:
+				defer func() { <-c.pollSlots }()
+			case <-c.stopCh:
+				return
+			}
+			m, err := c.collectOne(&s)
 			if err != nil {
 				log.Printf("collector: poll %s failed: %v", s.Name, err)
 				return
@@ -184,9 +196,24 @@ func (c *Collector) pollAll() {
 			if err := models.SaveMetric(c.db.Raw, s.ID, m); err != nil {
 				log.Printf("collector: save metric for %s failed: %v", s.Name, err)
 			}
-		}(&servers[i])
+		}()
 	}
-	wg.Wait()
+}
+
+func (c *Collector) beginPoll(serverID uuid.UUID) bool {
+	c.pollMu.Lock()
+	defer c.pollMu.Unlock()
+	if _, exists := c.inFlight[serverID]; exists {
+		return false
+	}
+	c.inFlight[serverID] = struct{}{}
+	return true
+}
+
+func (c *Collector) endPoll(serverID uuid.UUID) {
+	c.pollMu.Lock()
+	delete(c.inFlight, serverID)
+	c.pollMu.Unlock()
 }
 
 func (c *Collector) collectOne(s *models.Server) (*models.MetricPoint, error) {
