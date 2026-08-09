@@ -22,8 +22,13 @@ func (h *MetricsHandler) GetLatest(c *gin.Context) {
 		return
 	}
 	db := c.MustGet("db").(*models.DB)
-	// verify ownership
-	if _, err := models.GetServerByIDAndUser(db, id, userID); err != nil {
+	// Authorization must not depend on SSH credentials being decryptable.
+	owned, err := models.ServerOwnedByUser(db.Raw, id, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify server ownership"})
+		return
+	}
+	if !owned {
 		c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
 		return
 	}
@@ -43,7 +48,12 @@ func (h *MetricsHandler) GetHistory(c *gin.Context) {
 		return
 	}
 	db := c.MustGet("db").(*models.DB)
-	if _, err := models.GetServerByIDAndUser(db, id, userID); err != nil {
+	owned, err := models.ServerOwnedByUser(db.Raw, id, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify server ownership"})
+		return
+	}
+	if !owned {
 		c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
 		return
 	}

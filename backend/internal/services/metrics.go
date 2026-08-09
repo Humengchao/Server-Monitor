@@ -3,6 +3,7 @@ package services
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -34,6 +35,13 @@ type collectionResult struct {
 	err    error
 }
 
+type pollFailureState struct {
+	attempts        int
+	retryAt         time.Time
+	fingerprint     [32]byte
+	securityFailure bool
+}
+
 const (
 	sshDialTimeout       = 10 * time.Second
 	sshCollectionTimeout = 20 * time.Second
@@ -41,6 +49,10 @@ const (
 	maintenanceInterval  = 1 * time.Minute
 	metricDeleteBatch    = 5000
 	metricDeleteRuns     = 20
+	pollFailureBase      = 15 * time.Second
+	pollFailureMax       = 15 * time.Minute
+	securityFailureBase  = 10 * time.Minute
+	securityFailureMax   = 1 * time.Hour
 )
 
 type Collector struct {
@@ -50,6 +62,7 @@ type Collector struct {
 	prev      map[uuid.UUID]*prevStats
 	pollMu    sync.Mutex
 	inFlight  map[uuid.UUID]struct{}
+	failures  map[uuid.UUID]pollFailureState
 	pollSlots chan struct{}
 	stopCh    chan struct{}
 }
@@ -60,6 +73,7 @@ func NewCollector(db *models.DB, interval time.Duration) *Collector {
 		interval:  interval,
 		prev:      make(map[uuid.UUID]*prevStats),
 		inFlight:  make(map[uuid.UUID]struct{}),
+		failures:  make(map[uuid.UUID]pollFailureState),
 		pollSlots: make(chan struct{}, 10),
 		stopCh:    make(chan struct{}),
 	}
@@ -177,7 +191,8 @@ func (c *Collector) pollAll() {
 	// skipped on the next tick, while healthy hosts keep their regular cadence.
 	for i := range servers {
 		s := servers[i]
-		if !c.beginPoll(s.ID) {
+		fingerprint := serverPollFingerprint(&s)
+		if !c.beginPoll(s.ID, fingerprint) {
 			continue
 		}
 		go func() {
@@ -190,21 +205,55 @@ func (c *Collector) pollAll() {
 			}
 			m, err := c.collectOne(&s)
 			if err != nil {
-				log.Printf("collector: poll %s failed: %v", s.Name, err)
+				delay := c.recordPollFailure(s.ID, fingerprint, err, time.Now())
+				log.Printf("collector: poll %s failed: %v; retry in %s", s.Name, err, delay)
 				return
 			}
 			if err := models.SaveMetric(c.db.Raw, s.ID, m); err != nil {
-				log.Printf("collector: save metric for %s failed: %v", s.Name, err)
+				delay := c.recordPollFailure(s.ID, fingerprint, err, time.Now())
+				log.Printf("collector: save metric for %s failed: %v; retry in %s", s.Name, err, delay)
+				return
 			}
+			c.clearPollFailure(s.ID)
 		}()
 	}
 }
 
-func (c *Collector) beginPoll(serverID uuid.UUID) bool {
+func serverPollFingerprint(server *models.Server) [32]byte {
+	hash := sha256.New()
+	for _, field := range []string{
+		server.Host,
+		strconv.Itoa(server.Port),
+		server.SSHUsername,
+		server.SSHPassword,
+		server.SSHKey,
+		server.SSHHostKey,
+		server.ServerType,
+	} {
+		_, _ = io.WriteString(hash, field)
+		_, _ = hash.Write([]byte{0})
+	}
+	var fingerprint [32]byte
+	copy(fingerprint[:], hash.Sum(nil))
+	return fingerprint
+}
+
+func (c *Collector) beginPoll(serverID uuid.UUID, fingerprint [32]byte) bool {
+	return c.beginPollAt(serverID, fingerprint, time.Now())
+}
+
+func (c *Collector) beginPollAt(serverID uuid.UUID, fingerprint [32]byte, now time.Time) bool {
 	c.pollMu.Lock()
 	defer c.pollMu.Unlock()
 	if _, exists := c.inFlight[serverID]; exists {
 		return false
+	}
+	if failure, exists := c.failures[serverID]; exists {
+		if failure.fingerprint != fingerprint {
+			delete(c.failures, serverID)
+		} else if now.Before(failure.retryAt) {
+			return false
+		}
 	}
 	c.inFlight[serverID] = struct{}{}
 	return true
@@ -216,25 +265,77 @@ func (c *Collector) endPoll(serverID uuid.UUID) {
 	c.pollMu.Unlock()
 }
 
+func pollFailureDelay(attempt int) time.Duration {
+	return exponentialDelay(attempt, pollFailureBase, pollFailureMax)
+}
+
+func securityFailureDelay(attempt int) time.Duration {
+	return exponentialDelay(attempt, securityFailureBase, securityFailureMax)
+}
+
+func exponentialDelay(attempt int, base, maximum time.Duration) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	delay := base
+	for i := 1; i < attempt && delay < maximum; i++ {
+		if delay > maximum/2 {
+			return maximum
+		}
+		delay *= 2
+	}
+	if delay > maximum {
+		return maximum
+	}
+	return delay
+}
+
+func isSSHAuthenticationFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	return strings.Contains(message, "ssh handshake:") &&
+		strings.Contains(message, "unable to authenticate")
+}
+
+func (c *Collector) recordPollFailure(serverID uuid.UUID, fingerprint [32]byte, pollErr error, now time.Time) time.Duration {
+	c.pollMu.Lock()
+	defer c.pollMu.Unlock()
+	state := c.failures[serverID]
+	if state.fingerprint != fingerprint {
+		state = pollFailureState{fingerprint: fingerprint}
+	}
+	if isSSHAuthenticationFailure(pollErr) && !state.securityFailure {
+		// Authentication failures use their own attempt counter so preceding
+		// transient DNS/network errors cannot turn the first rejected password
+		// into an unexpectedly long circuit-breaker delay.
+		state.securityFailure = true
+		state.attempts = 0
+	}
+	state.attempts++
+	delay := pollFailureDelay(state.attempts)
+	if state.securityFailure {
+		delay = securityFailureDelay(state.attempts)
+	}
+	state.retryAt = now.Add(delay)
+	c.failures[serverID] = state
+	return delay
+}
+
+func (c *Collector) clearPollFailure(serverID uuid.UUID) {
+	c.pollMu.Lock()
+	delete(c.failures, serverID)
+	c.pollMu.Unlock()
+}
+
 func (c *Collector) collectOne(s *models.Server) (*models.MetricPoint, error) {
 	pingLatency := make(chan int, 1)
 	go func() { pingLatency <- collectPingLatency(s.Host) }()
 
-	config := &ssh.ClientConfig{
-		User:            s.SSHUsername,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         10 * time.Second,
-	}
-	if s.SSHPassword != "" {
-		config.Auth = []ssh.AuthMethod{ssh.Password(s.SSHPassword)}
-	} else if s.SSHKey != "" {
-		signer, err := ssh.ParsePrivateKey([]byte(s.SSHKey))
-		if err != nil {
-			return nil, fmt.Errorf("parse key: %w", err)
-		}
-		config.Auth = []ssh.AuthMethod{ssh.PublicKeys(signer)}
-	} else {
-		return nil, fmt.Errorf("no auth method")
+	config, err := buildSSHClientConfig(s.SSHUsername, s.SSHPassword, s.SSHKey, s.SSHHostKey, sshDialTimeout)
+	if err != nil {
+		return nil, err
 	}
 
 	addr := net.JoinHostPort(s.Host, strconv.Itoa(s.Port))

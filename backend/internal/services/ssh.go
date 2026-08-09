@@ -2,9 +2,9 @@ package services
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
-	"log"
+	"net"
+	"strconv"
 	"sync"
 	"time"
 
@@ -138,30 +138,9 @@ func (ts *TerminalSession) Close() {
 }
 
 func DialSSH(host string, port int, username, password, key, hostKey string) (*ssh.Client, error) {
-	hostKeyCallback := ssh.InsecureIgnoreHostKey()
-	if hostKey != "" {
-		parsedKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(hostKey))
-		if err != nil {
-			log.Printf("SSH: failed to parse host key: %v", err)
-		} else {
-			hostKeyCallback = ssh.FixedHostKey(parsedKey)
-		}
+	config, err := buildSSHClientConfig(username, password, key, hostKey, 10*time.Second)
+	if err != nil {
+		return nil, err
 	}
-	config := &ssh.ClientConfig{
-		User:            username,
-		HostKeyCallback: hostKeyCallback,
-		Timeout:         10 * time.Second,
-	}
-	if password != "" {
-		config.Auth = []ssh.AuthMethod{ssh.Password(password)}
-	} else if key != "" {
-		signer, err := ssh.ParsePrivateKey([]byte(key))
-		if err != nil {
-			return nil, err
-		}
-		config.Auth = []ssh.AuthMethod{ssh.PublicKeys(signer)}
-	} else {
-		log.Printf("SSH: no auth method provided")
-	}
-	return ssh.Dial("tcp", fmt.Sprintf("%s:%d", host, port), config)
+	return ssh.Dial("tcp", net.JoinHostPort(host, strconv.Itoa(port)), config)
 }

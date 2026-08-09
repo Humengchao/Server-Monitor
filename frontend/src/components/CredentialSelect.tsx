@@ -41,7 +41,7 @@ export default function CredentialSelect({ value, onChange, serverType }: Props)
     try {
       const res = await credentialsApi.create({
         name: newName.trim(),
-        ssh_username: newUsername || 'root',
+        ssh_username: newUsername.trim() || 'root',
         ssh_password: newPassword,
         ssh_key: newKey,
         credential_type: serverType || 'linux',

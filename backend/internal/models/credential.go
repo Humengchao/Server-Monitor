@@ -2,6 +2,7 @@ package models
 
 import (
 	"database/sql"
+	"fmt"
 
 	"server-monitor/internal/crypto"
 
@@ -65,40 +66,43 @@ func GetCredentialByID(db *DB, id, userID uuid.UUID) (*Credential, error) {
 	if err != nil {
 		return nil, err
 	}
-	c.SSHPassword, _ = crypto.Decrypt(encPassword, db.EncryptionKey)
-	c.SSHKey, _ = crypto.Decrypt(encKey, db.EncryptionKey)
-	return c, nil
-}
-
-// GetCredentialByIDInternal is used internally (e.g., collector) without user check.
-func GetCredentialByIDInternal(db *DB, id uuid.UUID) (*Credential, error) {
-	c := &Credential{}
-	var encPassword, encKey string
-	err := db.Raw.QueryRow(
-		`SELECT id, user_id, name, ssh_username, ssh_password, ssh_key, COALESCE(credential_type, 'linux'), created_at
-		 FROM credentials WHERE id=$1`, id,
-	).Scan(&c.ID, &c.UserID, &c.Name, &c.SSHUsername, &encPassword, &encKey, &c.CredType, &c.CreatedAt)
+	c.SSHPassword, err = crypto.Decrypt(encPassword, db.EncryptionKey)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decrypt credential password: %w", err)
 	}
-	c.SSHPassword, _ = crypto.Decrypt(encPassword, db.EncryptionKey)
-	c.SSHKey, _ = crypto.Decrypt(encKey, db.EncryptionKey)
+	c.SSHKey, err = crypto.Decrypt(encKey, db.EncryptionKey)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt credential key: %w", err)
+	}
 	return c, nil
 }
 
 func UpdateCredential(db *DB, c *Credential) error {
-	_, err := db.Raw.Exec(
+	tx, err := db.Raw.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	result, err := tx.Exec(
 		`UPDATE credentials SET name=$1, ssh_username=$2, credential_type=$3 WHERE id=$4 AND user_id=$5`,
 		c.Name, c.SSHUsername, c.CredType, c.ID, c.UserID)
 	if err != nil {
 		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return sql.ErrNoRows
 	}
 	if c.SSHPassword != "" {
 		enc, err := crypto.Encrypt(c.SSHPassword, db.EncryptionKey)
 		if err != nil {
 			return err
 		}
-		_, err = db.Raw.Exec(`UPDATE credentials SET ssh_password=$1 WHERE id=$2`, enc, c.ID)
+		_, err = tx.Exec(`UPDATE credentials SET ssh_password=$1 WHERE id=$2 AND user_id=$3`, enc, c.ID, c.UserID)
 		if err != nil {
 			return err
 		}
@@ -108,12 +112,12 @@ func UpdateCredential(db *DB, c *Credential) error {
 		if err != nil {
 			return err
 		}
-		_, err = db.Raw.Exec(`UPDATE credentials SET ssh_key=$1 WHERE id=$2`, enc, c.ID)
+		_, err = tx.Exec(`UPDATE credentials SET ssh_key=$1 WHERE id=$2 AND user_id=$3`, enc, c.ID, c.UserID)
 		if err != nil {
 			return err
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 func DeleteCredential(db *sql.DB, id, userID uuid.UUID) error {

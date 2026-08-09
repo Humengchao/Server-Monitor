@@ -34,11 +34,16 @@ export default function Credentials() {
 
   const handleSubmit = async (values: any) => {
     try {
+      const payload = {
+        ...values,
+        name: typeof values.name === 'string' ? values.name.trim() : values.name,
+        ssh_username: typeof values.ssh_username === 'string' ? values.ssh_username.trim() : values.ssh_username,
+      };
       if (editing) {
-        await credentialsApi.update(editing.id, values);
+        await credentialsApi.update(editing.id, payload);
         message.success(t('credential.updated'));
       } else {
-        await credentialsApi.create(values);
+        await credentialsApi.create(payload);
         message.success(t('credential.created'));
       }
       setModalOpen(false);

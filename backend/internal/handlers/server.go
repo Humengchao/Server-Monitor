@@ -1,9 +1,14 @@
 package handlers
 
 import (
+	"database/sql"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"strings"
 	"time"
+	"unicode"
 
 	"server-monitor/internal/models"
 
@@ -51,6 +56,71 @@ type UpdateServerRequest struct {
 	BillingCycle    string     `json:"billing_cycle"`
 	TrafficLimit    int64      `json:"traffic_limit_bytes"`
 	PublicLocation  string     `json:"public_location"`
+}
+
+func normalizeServerConnection(name, host, username string, port int) (string, string, string, int, error) {
+	name = strings.TrimSpace(name)
+	host = strings.TrimSpace(host)
+	username = strings.TrimSpace(username)
+
+	if name == "" {
+		return "", "", "", 0, fmt.Errorf("server name is required")
+	}
+	if host == "" {
+		return "", "", "", 0, fmt.Errorf("host is required")
+	}
+	// Accept the conventional bracketed IPv6 form in the UI, but store the
+	// bare address because net.JoinHostPort adds brackets when dialing.
+	if strings.HasPrefix(host, "[") || strings.HasSuffix(host, "]") {
+		if len(host) <= 2 || !strings.HasPrefix(host, "[") || !strings.HasSuffix(host, "]") {
+			return "", "", "", 0, fmt.Errorf("host has invalid brackets")
+		}
+		candidate := host[1 : len(host)-1]
+		if net.ParseIP(candidate) == nil {
+			return "", "", "", 0, fmt.Errorf("brackets are only valid around an IPv6 address")
+		}
+		host = candidate
+	}
+	if strings.Contains(host, "://") {
+		return "", "", "", 0, fmt.Errorf("host must not include a URL scheme")
+	}
+	if strings.ContainsFunc(host, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.Is(unicode.C, r)
+	}) {
+		return "", "", "", 0, fmt.Errorf("host contains whitespace or invisible characters")
+	}
+	if net.ParseIP(host) == nil && strings.Contains(host, ":") {
+		return "", "", "", 0, fmt.Errorf("host must not include a port")
+	}
+	if len(host) > 255 {
+		return "", "", "", 0, fmt.Errorf("host is too long")
+	}
+	if username == "" {
+		username = "root"
+	}
+	if strings.ContainsFunc(username, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.Is(unicode.C, r)
+	}) {
+		return "", "", "", 0, fmt.Errorf("SSH username contains whitespace or control characters")
+	}
+	if port == 0 {
+		port = 22
+	}
+	if port < 1 || port > 65535 {
+		return "", "", "", 0, fmt.Errorf("SSH port must be between 1 and 65535")
+	}
+	return name, host, username, port, nil
+}
+
+func normalizeServerType(serverType string) (string, error) {
+	serverType = strings.ToLower(strings.TrimSpace(serverType))
+	if serverType == "" {
+		return "linux", nil
+	}
+	if serverType != "linux" && serverType != "windows" {
+		return "", fmt.Errorf("server type must be linux or windows")
+	}
+	return serverType, nil
 }
 
 func (h *ServerHandler) List(c *gin.Context) {
@@ -103,19 +173,17 @@ func (h *ServerHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if req.Port == 0 {
-		req.Port = 22
+	name, host, username, port, err := normalizeServerConnection(req.Name, req.Host, req.SSHUsername, req.Port)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
-	// When using a credential, default username to "root" if not provided
-	if req.CredentialID != nil && req.SSHUsername == "" {
-		req.SSHUsername = "root"
+	serverType, err := normalizeServerType(req.ServerType)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
-	if req.SSHUsername == "" {
-		req.SSHUsername = "root"
-	}
-	if req.ServerType == "" {
-		req.ServerType = "linux"
-	}
+	req.Name, req.Host, req.SSHUsername, req.Port, req.ServerType = name, host, username, port, serverType
 	if req.BillingCurrency == "" {
 		req.BillingCurrency = "CNY"
 	}
@@ -123,6 +191,15 @@ func (h *ServerHandler) Create(c *gin.Context) {
 		req.BillingCycle = "year"
 	}
 	db := c.MustGet("db").(*models.DB)
+	if req.CredentialID != nil {
+		if _, err := models.GetCredentialByID(db, *req.CredentialID, userID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid credential"})
+			return
+		}
+	} else if req.SSHPassword == "" && strings.TrimSpace(req.SSHKey) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "SSH password or key is required"})
+		return
+	}
 	s := &models.Server{
 		UserID:          userID,
 		Name:            req.Name,
@@ -161,15 +238,17 @@ func (h *ServerHandler) Update(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if req.Port == 0 {
-		req.Port = 22
+	name, host, username, port, err := normalizeServerConnection(req.Name, req.Host, req.SSHUsername, req.Port)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
-	if req.SSHUsername == "" {
-		req.SSHUsername = "root"
+	serverType, err := normalizeServerType(req.ServerType)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
-	if req.ServerType == "" {
-		req.ServerType = "linux"
-	}
+	req.Name, req.Host, req.SSHUsername, req.Port, req.ServerType = name, host, username, port, serverType
 	if req.BillingCurrency == "" {
 		req.BillingCurrency = "CNY"
 	}
@@ -177,6 +256,26 @@ func (h *ServerHandler) Update(c *gin.Context) {
 		req.BillingCycle = "year"
 	}
 	db := c.MustGet("db").(*models.DB)
+	if req.CredentialID != nil {
+		if _, err := models.GetCredentialByID(db, *req.CredentialID, userID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid credential"})
+			return
+		}
+	} else if req.SSHPassword == "" && strings.TrimSpace(req.SSHKey) == "" {
+		hasDirectAuth, err := models.ServerHasDirectSSHAuth(db.Raw, id, userID)
+		if err == sql.ErrNoRows {
+			c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
+			return
+		}
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to validate SSH authentication"})
+			return
+		}
+		if !hasDirectAuth {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "SSH password or key is required when removing a credential"})
+			return
+		}
+	}
 	s := &models.Server{
 		ID:              id,
 		UserID:          userID,
@@ -198,6 +297,10 @@ func (h *ServerHandler) Update(c *gin.Context) {
 		PublicLocation:  req.PublicLocation,
 	}
 	if err := models.UpdateServer(db, s); err != nil {
+		if err == sql.ErrNoRows {
+			c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update server"})
 		return
 	}

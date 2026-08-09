@@ -128,6 +128,9 @@ export default function ServerDetail() {
     try {
       const payload = {
         ...values,
+        name: typeof values.name === 'string' ? values.name.trim() : values.name,
+        host: typeof values.host === 'string' ? values.host.trim() : values.host,
+        ssh_username: typeof values.ssh_username === 'string' ? values.ssh_username.trim() : values.ssh_username,
         credential_id: selectedCredential || null,
         server_type: values.server_type || 'linux',
         expires_at: values.expires_at ? values.expires_at.toISOString() : null,
@@ -170,9 +173,20 @@ export default function ServerDetail() {
         name: server.name,
         host: server.host,
         port: server.port,
+        ssh_username: server.ssh_username,
+        ssh_host_key: server.ssh_host_key || '',
+        credential_id: server.credential_id,
+        server_type: server.server_type || 'linux',
+        expires_at: server.expires_at || null,
+        billing_price: server.billing_price || 0,
+        billing_currency: server.billing_currency || 'CNY',
+        billing_cycle: server.billing_cycle || 'year',
+        traffic_limit_bytes: server.traffic_limit_bytes || 0,
+        public_location: server.public_location || '',
         notes,
       });
       message.success(t('server.notesSaved'));
+      setServer((current) => (current ? { ...current, notes } : current));
       setNotesChanged(false);
     } catch {
       message.error(t('server.notesSaveFailed'));

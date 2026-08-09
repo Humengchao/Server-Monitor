@@ -2,6 +2,7 @@ package models
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
 	"time"
 
@@ -97,7 +98,7 @@ const serverSummarySelect = `SELECT s.id, s.user_id, s.name, s.host, s.port, s.s
 	 COALESCE(sm.disk_rx_bytes, 0), COALESCE(sm.disk_tx_bytes, 0),
 	 COALESCE(sm.uptime_seconds, 0), COALESCE(sm.latency_ms, 0), sm.recorded_at
 	 FROM servers s
-	 LEFT JOIN credentials c ON c.id = s.credential_id
+	 LEFT JOIN credentials c ON c.id = s.credential_id AND c.user_id = s.user_id
 	 LEFT JOIN server_latest_metrics sm ON sm.server_id = s.id`
 
 func scanServerSummaries(rows *sql.Rows) ([]Server, error) {
@@ -169,6 +170,15 @@ func GetServerSummary(db *sql.DB, id, userID uuid.UUID) (*Server, error) {
 	return &servers[0], nil
 }
 
+func ServerOwnedByUser(db *sql.DB, id, userID uuid.UUID) (bool, error) {
+	var owned bool
+	err := db.QueryRow(
+		`SELECT EXISTS(SELECT 1 FROM servers WHERE id=$1 AND user_id=$2)`,
+		id, userID,
+	).Scan(&owned)
+	return owned, err
+}
+
 func GetServerByIDAndUser(db *DB, id, userID uuid.UUID) (*Server, error) {
 	s := &Server{}
 	var encPassword, encKey string
@@ -202,15 +212,21 @@ func GetServerByIDAndUser(db *DB, id, userID uuid.UUID) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Override with credential if linked
+	// Override with the linked credential, scoped to the same owner.
 	if err := s.ResolveCredentials(db); err != nil {
-		log.Printf("resolve credentials for server %s: %v", s.Name, err)
+		return nil, fmt.Errorf("resolve credentials for server %s: %w", s.Name, err)
 	}
 	return s, nil
 }
 
 func UpdateServer(db *DB, s *Server) error {
-	_, err := db.Raw.Exec(
+	tx, err := db.Raw.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	result, err := tx.Exec(
 		`UPDATE servers SET name=$1, host=$2, port=$3, ssh_username=$4, ssh_host_key=$5, credential_id=$6,
 		 expires_at=$7, notes=$8, server_type=$9, billing_price=$10, billing_currency=$11, billing_cycle=$12, traffic_limit_bytes=$13, public_location=$14
 		 WHERE id=$15 AND user_id=$16`,
@@ -219,12 +235,19 @@ func UpdateServer(db *DB, s *Server) error {
 	if err != nil {
 		return err
 	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return sql.ErrNoRows
+	}
 	if s.SSHPassword != "" {
 		enc, err := crypto.Encrypt(s.SSHPassword, db.EncryptionKey)
 		if err != nil {
 			return err
 		}
-		_, err = db.Raw.Exec(`UPDATE servers SET ssh_password=$1 WHERE id=$2`, enc, s.ID)
+		_, err = tx.Exec(`UPDATE servers SET ssh_password=$1 WHERE id=$2 AND user_id=$3`, enc, s.ID, s.UserID)
 		if err != nil {
 			return err
 		}
@@ -234,12 +257,12 @@ func UpdateServer(db *DB, s *Server) error {
 		if err != nil {
 			return err
 		}
-		_, err = db.Raw.Exec(`UPDATE servers SET ssh_key=$1 WHERE id=$2`, enc, s.ID)
+		_, err = tx.Exec(`UPDATE servers SET ssh_key=$1 WHERE id=$2 AND user_id=$3`, enc, s.ID, s.UserID)
 		if err != nil {
 			return err
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 func UpdateServerSystemInfo(db *sql.DB, id uuid.UUID, cpuCores int, memTotal, diskTotal int64) error {
@@ -262,7 +285,7 @@ func (s *Server) ResolveCredentials(db *DB) error {
 	if s.CredentialID == nil {
 		return nil
 	}
-	cred, err := GetCredentialByIDInternal(db, *s.CredentialID)
+	cred, err := GetCredentialByID(db, *s.CredentialID, s.UserID)
 	if err != nil {
 		return err
 	}
@@ -270,6 +293,16 @@ func (s *Server) ResolveCredentials(db *DB) error {
 	s.SSHPassword = cred.SSHPassword
 	s.SSHKey = cred.SSHKey
 	return nil
+}
+
+func ServerHasDirectSSHAuth(db *sql.DB, id, userID uuid.UUID) (bool, error) {
+	var hasAuth bool
+	err := db.QueryRow(
+		`SELECT COALESCE(ssh_password, '') <> '' OR COALESCE(ssh_key, '') <> ''
+		 FROM servers WHERE id=$1 AND user_id=$2`,
+		id, userID,
+	).Scan(&hasAuth)
+	return hasAuth, err
 }
 
 func DeleteServer(db *sql.DB, id, userID uuid.UUID) error {
@@ -358,14 +391,17 @@ func GetAllServers(db *DB) ([]Server, error) {
 		s.SSHPassword, decErr = crypto.Decrypt(encPassword, db.EncryptionKey)
 		if decErr != nil {
 			log.Printf("collector: decrypt password for %s failed: %v", s.Name, decErr)
+			continue
 		}
 		s.SSHKey, decErr = crypto.Decrypt(encKey, db.EncryptionKey)
 		if decErr != nil {
 			log.Printf("collector: decrypt key for %s failed: %v", s.Name, decErr)
+			continue
 		}
 		// Override with credential if linked
 		if err := s.ResolveCredentials(db); err != nil {
 			log.Printf("collector: resolve credentials for %s: %v", s.Name, err)
+			continue
 		}
 		servers = append(servers, s)
 	}

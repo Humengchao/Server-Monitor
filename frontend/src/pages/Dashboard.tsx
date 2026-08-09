@@ -127,6 +127,9 @@ export default function Dashboard() {
     try {
       const payload = {
         ...values,
+        name: typeof values.name === 'string' ? values.name.trim() : values.name,
+        host: typeof values.host === 'string' ? values.host.trim() : values.host,
+        ssh_username: typeof values.ssh_username === 'string' ? values.ssh_username.trim() : values.ssh_username,
         credential_id: selectedCredential || null,
         server_type: values.server_type || 'linux',
         expires_at: values.expires_at ? values.expires_at.toISOString() : null,

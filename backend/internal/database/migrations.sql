@@ -48,6 +48,15 @@ CREATE TABLE IF NOT EXISTS server_metrics (
 CREATE INDEX IF NOT EXISTS idx_metrics_server_time ON server_metrics(server_id, recorded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_servers_user ON servers(user_id);
 
+-- Normalize legacy connection fields that may have been pasted with tabs or
+-- line breaks. Secrets are intentionally never trimmed because whitespace can
+-- be part of a valid password or private key.
+UPDATE servers
+SET host = REGEXP_REPLACE(host, '^[[:space:]]+|[[:space:]]+$', '', 'g'),
+    ssh_username = REGEXP_REPLACE(ssh_username, '^[[:space:]]+|[[:space:]]+$', '', 'g')
+WHERE host ~ '^[[:space:]]|[[:space:]]$'
+   OR ssh_username ~ '^[[:space:]]|[[:space:]]$';
+
 -- Add system info columns to servers
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS cpu_cores INT DEFAULT 0;
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS memory_total_bytes BIGINT DEFAULT 0;
@@ -84,8 +93,22 @@ CREATE TABLE IF NOT EXISTS credentials (
 
 CREATE INDEX IF NOT EXISTS idx_credentials_user ON credentials(user_id);
 
+UPDATE credentials
+SET ssh_username = REGEXP_REPLACE(ssh_username, '^[[:space:]]+|[[:space:]]+$', '', 'g')
+WHERE ssh_username ~ '^[[:space:]]|[[:space:]]$';
+
 -- Link servers to credentials
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS credential_id UUID REFERENCES credentials(id) ON DELETE SET NULL;
+
+-- Older API versions accepted arbitrary credential UUIDs. Remove any legacy
+-- cross-owner link before the collector starts resolving secrets.
+UPDATE servers s
+SET credential_id = NULL
+WHERE credential_id IS NOT NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM credentials c
+      WHERE c.id = s.credential_id AND c.user_id = s.user_id
+  );
 
 -- Server expiration date and notes
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
