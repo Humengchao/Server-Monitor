@@ -10,7 +10,7 @@ services:
       retries: 3
       start_period: 15s
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-monitor}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-server_monitor}?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER:-monitor}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-server_monitor}?sslmode=${POSTGRES_SSLMODE:-disable}
       JWT_SECRET: ${JWT_SECRET}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       SERVER_PORT: "19527"
