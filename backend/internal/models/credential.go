@@ -16,6 +16,8 @@ type Credential struct {
 	SSHUsername string    `json:"ssh_username"`
 	SSHPassword string    `json:"-"`
 	SSHKey      string    `json:"-"`
+	HasPassword bool      `json:"has_password"`
+	HasKey      bool      `json:"has_key"`
 	CredType    string    `json:"credential_type"`
 	CreatedAt   string    `json:"created_at"`
 }
@@ -30,6 +32,8 @@ func CreateCredential(db *DB, c *Credential) error {
 	if err != nil {
 		return err
 	}
+	c.HasPassword = encPassword != ""
+	c.HasKey = encKey != ""
 	return db.Raw.QueryRow(
 		`INSERT INTO credentials (id, user_id, name, ssh_username, ssh_password, ssh_key, credential_type)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING created_at`,
@@ -39,7 +43,9 @@ func CreateCredential(db *DB, c *Credential) error {
 
 func GetCredentialsByUserID(db *sql.DB, userID uuid.UUID) ([]Credential, error) {
 	rows, err := db.Query(
-		`SELECT id, user_id, name, ssh_username, COALESCE(credential_type, 'linux'), created_at
+		`SELECT id, user_id, name, ssh_username,
+		        COALESCE(ssh_password, '') <> '', COALESCE(ssh_key, '') <> '',
+		        COALESCE(credential_type, 'linux'), created_at
 		 FROM credentials WHERE user_id=$1 ORDER BY created_at DESC`, userID)
 	if err != nil {
 		return nil, err
@@ -48,7 +54,7 @@ func GetCredentialsByUserID(db *sql.DB, userID uuid.UUID) ([]Credential, error) 
 	var creds []Credential
 	for rows.Next() {
 		var c Credential
-		if err := rows.Scan(&c.ID, &c.UserID, &c.Name, &c.SSHUsername, &c.CredType, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.UserID, &c.Name, &c.SSHUsername, &c.HasPassword, &c.HasKey, &c.CredType, &c.CreatedAt); err != nil {
 			return nil, err
 		}
 		creds = append(creds, c)
@@ -66,6 +72,8 @@ func GetCredentialByID(db *DB, id, userID uuid.UUID) (*Credential, error) {
 	if err != nil {
 		return nil, err
 	}
+	c.HasPassword = encPassword != ""
+	c.HasKey = encKey != ""
 	c.SSHPassword, err = crypto.Decrypt(encPassword, db.EncryptionKey)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt credential password: %w", err)

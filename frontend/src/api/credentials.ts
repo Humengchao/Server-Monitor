@@ -5,6 +5,8 @@ export interface Credential {
   user_id: string;
   name: string;
   ssh_username: string;
+  has_password: boolean;
+  has_key: boolean;
   credential_type: string;
   created_at: string;
 }

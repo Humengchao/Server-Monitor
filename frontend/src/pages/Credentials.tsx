@@ -67,9 +67,12 @@ export default function Credentials() {
 
   const handleEdit = (cred: Credential) => {
     setEditing(cred);
+    form.resetFields();
     form.setFieldsValue({
       name: cred.name,
       ssh_username: cred.ssh_username,
+      ssh_password: undefined,
+      ssh_key: undefined,
       credential_type: cred.credential_type || 'linux',
     });
     setModalOpen(true);
@@ -95,6 +98,17 @@ export default function Credentials() {
       title: t('credential.sshUsername'),
       dataIndex: 'ssh_username',
       key: 'ssh_username',
+    },
+    {
+      title: t('credential.savedAuth'),
+      key: 'saved_auth',
+      render: (_: any, record: Credential) => (
+        <Space size={[4, 4]} wrap>
+          {record.has_password && <Tag color="green">{t('credential.savedPassword')}</Tag>}
+          {record.has_key && <Tag color="blue">{t('credential.savedKey')}</Tag>}
+          {!record.has_password && !record.has_key && <Tag>{t('credential.noSavedAuth')}</Tag>}
+        </Space>
+      ),
     },
     {
       title: t('common.created'),
@@ -149,7 +163,7 @@ export default function Credentials() {
       <Modal
         title={editing ? t('credential.edit') : t('credential.add')}
         open={modalOpen}
-        onCancel={() => { setModalOpen(false); setEditing(null); }}
+        onCancel={() => { setModalOpen(false); form.resetFields(); setEditing(null); }}
         onOk={() => form.submit()}
         width={480}
       >
@@ -161,7 +175,10 @@ export default function Credentials() {
             <Input placeholder={t('credential.sshUsernamePlaceholder')} />
           </Form.Item>
           <Form.Item name="ssh_password" label={t('credential.sshPassword')}>
-            <Input.Password placeholder={t('credential.sshPasswordPlaceholder')} />
+            <Input.Password
+              autoComplete="new-password"
+              placeholder={t(editing ? 'credential.sshPasswordKeepPlaceholder' : 'credential.sshPasswordPlaceholder')}
+            />
           </Form.Item>
           <Form.Item name="credential_type" label={t('common.type')} initialValue="linux">
             <Select>
@@ -170,7 +187,11 @@ export default function Credentials() {
             </Select>
           </Form.Item>
           <Form.Item name="ssh_key" label={t('credential.sshKey')}>
-            <Input.TextArea rows={4} placeholder={t('credential.sshKeyPlaceholder')} />
+            <Input.TextArea
+              autoComplete="off"
+              rows={4}
+              placeholder={t(editing ? 'credential.sshKeyKeepPlaceholder' : 'credential.sshKeyPlaceholder')}
+            />
           </Form.Item>
         </Form>
       </Modal>
