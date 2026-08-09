@@ -280,6 +280,22 @@ button, input, textarea, select { font: inherit; }
   flex-direction: column;
 }
 
+.copyable-host {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  cursor: copy;
+  transition: color .2s ease;
+}
+
+.copyable-host .anticon { color: var(--muted); font-size: 12px; }
+.copyable-host:hover, .copyable-host:focus-visible { color: #5d7df7; outline: none; }
+.copyable-host:hover .anticon, .copyable-host:focus-visible .anticon { color: currentColor; }
+
 .server-detail-tabs { min-width: 0; }
 .server-detail-tabs .ant-tabs-content { height: auto; }
 .server-detail-tabs .ant-tabs-tabpane { height: auto; overflow: visible; }

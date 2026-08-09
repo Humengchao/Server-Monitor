@@ -92,6 +92,9 @@ function ServerCard({ server, observedAt }: Props) {
   const m = server.latest_metrics;
   const cpuPercent = m ? Math.round(m.cpu_percent) : 0;
   const memPercent = m && m.memory_total ? Math.round((m.memory_used / m.memory_total) * 100) : 0;
+  const diskPercent = m && server.disk_total
+    ? Math.min(100, Math.max(0, Math.round((m.disk_used / server.disk_total) * 100)))
+    : 0;
 
   const isOnline = observedAt > 0 && !!m?.recorded_at && observedAt - new Date(m.recorded_at).getTime() < 120000;
   const lang = i18n.language?.startsWith('zh') ? 'zh' : 'en';
@@ -145,6 +148,10 @@ function ServerCard({ server, observedAt }: Props) {
           <div className="metric-progress">
             <div><Text type="secondary">{t('card.memory')}</Text><strong>{memPercent}%</strong></div>
             <Progress percent={memPercent} showInfo={false} strokeColor="#18b690" trailColor="rgba(128, 140, 170, .14)" />
+          </div>
+          <div className="metric-progress">
+            <div><Text type="secondary">{t('card.disk')}</Text><strong>{diskPercent}%</strong></div>
+            <Progress percent={diskPercent} showInfo={false} strokeColor={diskPercent > 80 ? '#ff5d6c' : '#8d6dd7'} trailColor="rgba(128, 140, 170, .14)" />
           </div>
           <div className="throughput-grid">
             <div>

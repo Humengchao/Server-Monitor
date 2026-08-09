@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Typography, Descriptions, Tag, Space, Button, Card, Tabs, Spin, Modal, Form, Input, InputNumber, Select, App, Row, Col, Empty } from 'antd';
-import { ArrowLeftOutlined, EditOutlined, DeleteOutlined, DockerOutlined, KeyOutlined, SaveOutlined, WindowsOutlined, AppleOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, EditOutlined, DeleteOutlined, DockerOutlined, KeyOutlined, SaveOutlined, WindowsOutlined, AppleOutlined, CopyOutlined } from '@ant-design/icons';
 import { DatePicker } from 'antd';
 import dayjs, { Dayjs } from 'dayjs';
 import { useTranslation } from 'react-i18next';
@@ -34,6 +34,33 @@ function getPresetRange(key: PresetKey): TimeRange {
       return { since: now.subtract(7, 'day').startOf('day').toISOString(), until: now.toISOString() };
     case '30d':
       return { since: now.subtract(30, 'day').startOf('day').toISOString(), until: now.toISOString() };
+  }
+}
+
+async function copyToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Fall back for browsers that expose the API but deny clipboard access.
+    }
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  try {
+    textarea.focus();
+    textarea.select();
+    if (!document.execCommand('copy')) {
+      throw new Error('Copy command failed');
+    }
+  } finally {
+    textarea.remove();
   }
 }
 
@@ -193,6 +220,16 @@ export default function ServerDetail() {
     }
   };
 
+  const handleCopyHost = async () => {
+    if (!server?.host) return;
+    try {
+      await copyToClipboard(server.host);
+      message.success(t('server.hostCopied'));
+    } catch {
+      message.error(t('server.hostCopyFailed'));
+    }
+  };
+
   if (loading) return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}><Spin size="large" /></div>;
   if (!server) return <div>{t('server.notFound')}</div>;
 
@@ -220,7 +257,17 @@ export default function ServerDetail() {
       </div>
 
       <Descriptions bordered size="small" column={2} style={{ marginBottom: 24 }}>
-        <Descriptions.Item label={t('server.hostLabel')}>{server.host}</Descriptions.Item>
+        <Descriptions.Item label={t('server.hostLabel')}>
+          <button
+            type="button"
+            className="copyable-host"
+            title={t('server.copyHost')}
+            aria-label={t('server.copyHost')}
+            onClick={handleCopyHost}
+          >
+            {server.host}<CopyOutlined aria-hidden="true" />
+          </button>
+        </Descriptions.Item>
         <Descriptions.Item label={t('server.sshPortLabel')}>{server.port}</Descriptions.Item>
         <Descriptions.Item label={t('server.type')}>{server.server_type === 'windows' ? <><WindowsOutlined /> Windows</> : <><AppleOutlined /> Linux</>}</Descriptions.Item>
         <Descriptions.Item label={t('server.sshUserLabel')}>{server.ssh_username}</Descriptions.Item>
