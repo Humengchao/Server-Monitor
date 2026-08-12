@@ -127,6 +127,8 @@
   "uptimeFormat_removed": "Online: {{days}}d",
   "metrics.network": "Network",
   "metrics.disk": "Disk",
+  "metrics.totalUpload": "Total Upload",
+  "metrics.totalDownload": "Total Download",
   "metrics.noData": "No metric data yet",
   "metrics.cpuMemory": "CPU & Memory",
   "metrics.networkTraffic": "Network Traffic",

@@ -127,6 +127,8 @@
   "uptimeFormat_removed": "在线:{{days}}天",
   "metrics.network": "网络",
   "metrics.disk": "磁盘",
+  "metrics.totalUpload": "累计上传",
+  "metrics.totalDownload": "累计下载",
   "metrics.noData": "暂无监控数据",
   "metrics.cpuMemory": "CPU 和内存",
   "metrics.networkTraffic": "网络流量",

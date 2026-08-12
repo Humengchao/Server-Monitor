@@ -12,8 +12,12 @@ function metricsChanged(a: MetricPoint | null, b: MetricPoint | null): boolean {
   return (
     a.cpu_percent !== b.cpu_percent ||
     a.memory_used !== b.memory_used ||
+    a.memory_total !== b.memory_total ||
+    a.disk_used !== b.disk_used ||
     a.network_rx_bytes !== b.network_rx_bytes ||
     a.network_tx_bytes !== b.network_tx_bytes ||
+    a.network_rx_total_bytes !== b.network_rx_total_bytes ||
+    a.network_tx_total_bytes !== b.network_tx_total_bytes ||
     a.disk_rx_bytes !== b.disk_rx_bytes ||
     a.disk_tx_bytes !== b.disk_tx_bytes ||
     a.uptime_seconds !== b.uptime_seconds

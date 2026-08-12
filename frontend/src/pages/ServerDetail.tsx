@@ -18,6 +18,13 @@ const { RangePicker } = DatePicker;
 
 type PresetKey = '1h' | 'today' | 'yesterday' | '7d' | '30d';
 
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  const unitIndex = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  return `${(bytes / 1024 ** unitIndex).toFixed(unitIndex > 2 ? 1 : 2)} ${units[unitIndex]}`;
+}
+
 function getPresetRange(key: PresetKey): TimeRange {
   const now = dayjs();
   switch (key) {
@@ -310,7 +317,7 @@ export default function ServerDetail() {
           children: (
             <Card loading={metricsLoading}>
               {metrics && (
-                <Descriptions bordered size="small" column={4} style={{ marginBottom: 16 }}>
+                <Descriptions bordered size="small" column={{ xs: 1, sm: 2, lg: 3 }} style={{ marginBottom: 16 }}>
                   <Descriptions.Item label={t('metrics.cpu')}>{(metrics.cpu_percent || 0).toFixed(1)}%</Descriptions.Item>
                   <Descriptions.Item label={t('metrics.memoryUsed')}>{((metrics.memory_used || 0) / 1024 / 1024).toFixed(0)} MB</Descriptions.Item>
                   <Descriptions.Item label={t('metrics.memoryTotal')}>{((metrics.memory_total || 0) / 1024 / 1024).toFixed(0)} MB</Descriptions.Item>
@@ -328,6 +335,8 @@ export default function ServerDetail() {
   if (d > 0 || p.length === 0) p.push(d + 'd');
   return p.join(' ');
 })()}</Descriptions.Item>
+                  <Descriptions.Item label={t('metrics.totalUpload')}>{formatBytes(metrics.network_tx_total_bytes || 0)}</Descriptions.Item>
+                  <Descriptions.Item label={t('metrics.totalDownload')}>{formatBytes(metrics.network_rx_total_bytes || 0)}</Descriptions.Item>
                 </Descriptions>
               )}
 

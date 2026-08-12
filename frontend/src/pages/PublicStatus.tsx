@@ -87,6 +87,15 @@ interface PublicStatusResponse {
 }
 
 const apiURL = `${window.location.origin}/api/public/status`;
+const exchangeRatesURL = 'https://api.frankfurter.dev/v2/rates?base=EUR&quotes=CNY,USD';
+const fallbackRatesPerEUR: Record<string, number> = { EUR: 1, CNY: 7.8, USD: 1.1 };
+
+interface ExchangeRateResponse {
+  date: string;
+  base: string;
+  quote: string;
+  rate: number;
+}
 
 const formatBytes = (value: number, digits = 1) => {
   if (!Number.isFinite(value) || value <= 0) return '0 B';
@@ -107,6 +116,12 @@ const formatUptime = (seconds: number, zh: boolean) => {
 
 const currencySymbol = (currency: string) => ({ CNY: '¥', USD: '$', EUR: '€' }[currency] || currency || '¥');
 
+const convertCurrency = (amount: number, from: string, to: string, ratesPerEUR: Record<string, number>) => {
+  const sourceRate = ratesPerEUR[from] || ratesPerEUR.CNY;
+  const targetRate = ratesPerEUR[to] || ratesPerEUR.CNY;
+  return amount / sourceRate * targetRate;
+};
+
 export default function PublicStatus() {
   const { t, i18n } = useTranslation();
   const [data, setData] = useState<PublicStatusResponse | null>(null);
@@ -116,6 +131,7 @@ export default function PublicStatus() {
   const [query, setQuery] = useState('');
   const [view, setView] = useState<'card' | 'list'>('card');
   const [light, setLight] = useState(false);
+  const [ratesPerEUR, setRatesPerEUR] = useState<Record<string, number>>(fallbackRatesPerEUR);
 
   const loadStatus = useCallback(async (showLoading = false) => {
     if (showLoading) setLoading(true);
@@ -140,7 +156,35 @@ export default function PublicStatus() {
     };
   }, [loadStatus]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const loadExchangeRates = async () => {
+      try {
+        const response = await fetch(exchangeRatesURL, {
+          headers: { Accept: 'application/json' },
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error('exchange rate request failed');
+        const rates = await response.json() as ExchangeRateResponse[];
+        const nextRates = { ...fallbackRatesPerEUR };
+        for (const item of rates) {
+          if (item.base === 'EUR' && Number.isFinite(item.rate) && item.rate > 0) {
+            nextRates[item.quote] = item.rate;
+          }
+        }
+        setRatesPerEUR(nextRates);
+      } catch {
+        // Keep approximate fallback rates when the daily rate service is unavailable.
+      }
+    };
+
+    void loadExchangeRates();
+    return () => controller.abort();
+  }, []);
+
   const zh = i18n.language.startsWith('zh');
+  const displayCurrency = zh ? 'CNY' : 'USD';
   const toggleLanguage = () => {
     const next = zh ? 'en' : 'zh';
     i18n.changeLanguage(next);
@@ -178,12 +222,11 @@ export default function PublicStatus() {
   const hasRemainingValue = (data?.nodes || []).some((node) => node.remaining_value > 0);
   const remainingValueLabel = useMemo(() => {
     const valued = (data?.nodes || []).filter((node) => node.remaining_value > 0);
-    const currencies = [...new Set(valued.map((node) => node.billing_currency || 'CNY'))];
-    if (currencies.length > 1) return t('probe.multiCurrency');
-    const currency = currencies[0] || 'CNY';
-    const total = valued.reduce((sum, node) => sum + node.remaining_value, 0);
-    return `${currencySymbol(currency)}${total.toFixed(2)}`;
-  }, [data, t]);
+    const total = valued.reduce((sum, node) => (
+      sum + convertCurrency(node.remaining_value, node.billing_currency || 'CNY', displayCurrency, ratesPerEUR)
+    ), 0);
+    return `≈ ${currencySymbol(displayCurrency)}${total.toFixed(2)}`;
+  }, [data, displayCurrency, ratesPerEUR]);
 
   return (
     <div className={`probe-page probe-glass-page ${light ? 'light' : ''}`}>
@@ -240,7 +283,15 @@ export default function PublicStatus() {
           <div className="glass-empty"><WarningFilled /><h3>{t('probe.unavailable')}</h3><p>{t('probe.unavailableHint')}</p><Button onClick={() => loadStatus(true)}>{t('probe.retry')}</Button></div>
         ) : visibleNodes.length ? (
           <div className={`glass-node-grid ${view === 'list' ? 'list' : ''}`}>
-            {visibleNodes.map((node) => <ProbeNodeCard key={node.alias} node={node} zh={zh} />)}
+            {visibleNodes.map((node) => (
+              <ProbeNodeCard
+                key={node.alias}
+                node={node}
+                zh={zh}
+                displayCurrency={displayCurrency}
+                ratesPerEUR={ratesPerEUR}
+              />
+            ))}
           </div>
         ) : (
           <div className="glass-empty"><CloudServerOutlined /><h3>{t('probe.noMatches')}</h3><p>{t('probe.noMatchesHint')}</p></div>
@@ -262,10 +313,27 @@ function SummaryCard({ icon, label, value, tone }: { icon: React.ReactNode; labe
   return <article className="glass-summary-card"><span className={`summary-icon ${tone}`}>{icon}</span><div><small>{label}</small><strong>{value}</strong></div></article>;
 }
 
-function ProbeNodeCard({ node, zh }: { node: PublicNode; zh: boolean }) {
+function ProbeNodeCard({
+  node,
+  zh,
+  displayCurrency,
+  ratesPerEUR,
+}: {
+  node: PublicNode;
+  zh: boolean;
+  displayCurrency: string;
+  ratesPerEUR: Record<string, number>;
+}) {
   const { t } = useTranslation();
   const cycleLabel = t(`probe.cycle.${node.billing_cycle || 'year'}`);
   const symbol = currencySymbol(node.billing_currency);
+  const displaySymbol = currencySymbol(displayCurrency);
+  const convertedRemainingValue = convertCurrency(
+    node.remaining_value,
+    node.billing_currency || 'CNY',
+    displayCurrency,
+    ratesPerEUR,
+  );
   const totalTraffic = node.network_rx_total_bytes + node.network_tx_total_bytes;
   const expiryText = node.expires_at ? new Date(node.expires_at).toLocaleDateString() : t('probe.notConfigured');
 
@@ -298,7 +366,7 @@ function ProbeNodeCard({ node, zh }: { node: PublicNode; zh: boolean }) {
 
       <div className="node-bottom-grid">
         <div><CalendarOutlined /><span>{t('probe.expiry')}<strong>{expiryText}{node.remaining_days > 0 ? ` · ${node.remaining_days} ${t('probe.days')}` : ''}</strong></span></div>
-        {node.billing_price > 0 && <div><DollarOutlined /><span>{t('probe.remainingValue')}<strong>{node.remaining_value > 0 ? `${symbol}${node.remaining_value.toFixed(2)}` : '—'}</strong></span></div>}
+        {node.billing_price > 0 && <div><DollarOutlined /><span>{t('probe.remainingValue')}<strong>{node.remaining_value > 0 ? `≈ ${displaySymbol}${convertedRemainingValue.toFixed(2)}` : '—'}</strong></span></div>}
         <div><WifiOutlined /><span>{t('probe.latency')}<strong>{node.status === 'offline' || node.latency_ms <= 0 ? '—' : `${node.latency_ms} ms`}</strong></span></div>
         <div><SwapOutlined /><span>{t('probe.packetLoss')}<strong>{node.packet_loss_percent}%</strong></span></div>
       </div>
