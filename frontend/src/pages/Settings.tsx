@@ -29,9 +29,20 @@ export default function Settings() {
     loadTags();
   }, []);
 
-  const handleCreate = async (values: { name: string; color: string }) => {
+  // antd's ColorPicker hands the form an AggregationColor object (not a hex
+  // string) once the user picks a color; sending it raw makes the backend's
+  // string binding reject the request.
+  const toHexColor = (value: unknown): string => {
+    if (typeof value === 'string' && value) return value;
+    if (value && typeof (value as { toHexString?: unknown }).toHexString === 'function') {
+      return (value as { toHexString: () => string }).toHexString();
+    }
+    return '#1890ff';
+  };
+
+  const handleCreate = async (values: { name: string; color: unknown }) => {
     try {
-      await tagsApi.create(values.name, values.color || '#1890ff');
+      await tagsApi.create(values.name, toHexColor(values.color));
       message.success(t('settings.tagCreated'));
       setModalOpen(false);
       form.resetFields();

@@ -80,7 +80,12 @@ export default function SshTerminal({ serverId }: Props) {
 
     const token = localStorage.getItem('token');
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${wsProtocol}//${window.location.host}/api/ssh/${serverId}?token=${token}`);
+    // The JWT rides in the subprotocol list (backend echoes "bearer") instead
+    // of the query string, so it never lands in gin/nginx access logs.
+    const ws = new WebSocket(
+      `${wsProtocol}//${window.location.host}/api/ssh/${serverId}`,
+      token ? ['bearer', token] : undefined,
+    );
     wsRef.current = ws;
 
     ws.onopen = () => {

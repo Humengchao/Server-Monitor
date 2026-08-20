@@ -8,6 +8,7 @@ import {
   LogoutOutlined,
   CloudServerOutlined,
   DockerOutlined,
+  HistoryOutlined,
   KeyOutlined,
   TranslationOutlined,
 } from '@ant-design/icons';
@@ -33,6 +34,7 @@ export default function AppLayout({ darkMode, onToggleTheme }: Props) {
     { key: '/dashboard', icon: <DashboardOutlined />, label: t('nav.servers') },
     { key: '/docker', icon: <DockerOutlined />, label: t('nav.docker') },
     { key: '/credentials', icon: <KeyOutlined />, label: t('nav.credentials') },
+    { key: '/login-history', icon: <HistoryOutlined />, label: t('nav.loginHistory') },
     { key: '/settings', icon: <SettingOutlined />, label: t('nav.settings') },
   ];
 

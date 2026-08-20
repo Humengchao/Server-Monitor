@@ -8,9 +8,18 @@ interface AuthState {
   isLoggedIn: () => boolean;
 }
 
+// Corrupted localStorage must not crash the whole app at module load time.
+function readStoredUser(): AuthState['user'] {
+  try {
+    return JSON.parse(localStorage.getItem('user') || 'null');
+  } catch {
+    return null;
+  }
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   token: localStorage.getItem('token'),
-  user: JSON.parse(localStorage.getItem('user') || 'null'),
+  user: readStoredUser(),
   setAuth: (token, user) => {
     localStorage.setItem('token', token);
     localStorage.setItem('user', JSON.stringify(user));

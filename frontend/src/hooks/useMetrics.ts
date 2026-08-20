@@ -11,6 +11,9 @@ function metricsChanged(a: MetricPoint | null, b: MetricPoint | null): boolean {
   if (!a || !b) return true;
   return (
     a.cpu_percent !== b.cpu_percent ||
+    a.load_1 !== b.load_1 ||
+    a.load_5 !== b.load_5 ||
+    a.load_15 !== b.load_15 ||
     a.memory_used !== b.memory_used ||
     a.memory_total !== b.memory_total ||
     a.disk_used !== b.disk_used ||
@@ -20,7 +23,8 @@ function metricsChanged(a: MetricPoint | null, b: MetricPoint | null): boolean {
     a.network_tx_total_bytes !== b.network_tx_total_bytes ||
     a.disk_rx_bytes !== b.disk_rx_bytes ||
     a.disk_tx_bytes !== b.disk_tx_bytes ||
-    a.uptime_seconds !== b.uptime_seconds
+    a.uptime_seconds !== b.uptime_seconds ||
+    a.latency_ms !== b.latency_ms
   );
 }
 

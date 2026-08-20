@@ -24,10 +24,17 @@ func AuthRequired(cfg *config.Config) gin.HandlerFunc {
 	}
 }
 
-// WSAuthRequired validates JWT from the "token" query parameter (for WebSocket upgrades).
+// WSAuthRequired validates JWT for WebSocket upgrades. Browsers cannot set an
+// Authorization header on WebSocket handshakes, so the frontend carries the
+// token in the subprotocol list ("bearer, <jwt>") where it stays out of URLs
+// and access logs. The legacy "token" query parameter is still accepted for
+// compatibility.
 func WSAuthRequired(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		tokenString := c.Query("token")
+		tokenString := websocketProtocolToken(c.GetHeader("Sec-WebSocket-Protocol"))
+		if tokenString == "" {
+			tokenString = c.Query("token")
+		}
 		if tokenString == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing token"})
 			return
@@ -35,6 +42,18 @@ func WSAuthRequired(cfg *config.Config) gin.HandlerFunc {
 		parseToken(c, tokenString, cfg)
 		c.Next()
 	}
+}
+
+// websocketProtocolToken extracts the JWT from a "bearer, <jwt>" subprotocol
+// offer. JWTs are base64url tokens, which are valid subprotocol names.
+func websocketProtocolToken(header string) string {
+	for _, part := range strings.Split(header, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" && !strings.EqualFold(part, "bearer") {
+			return part
+		}
+	}
+	return ""
 }
 
 func extractBearerToken(c *gin.Context) string {

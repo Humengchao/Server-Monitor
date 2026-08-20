@@ -113,7 +113,12 @@ export default function Dashboard() {
     try {
       const res = await serversApi.list();
       setServers(res.data || []);
-      setRefreshTimestamp(Date.now());
+      // Judge online/offline against the server's clock (Date header), not the
+      // browser's: local clock skew beyond the 2-minute threshold would
+      // otherwise flip every card to offline (or keep dead ones online).
+      const dateHeader = res.headers?.date;
+      const serverNow = typeof dateHeader === 'string' ? Date.parse(dateHeader) : NaN;
+      setRefreshTimestamp(Number.isNaN(serverNow) ? Date.now() : serverNow);
     } catch {
       if (showLoading) message.error(t('server.loadFailed'));
     }
@@ -180,6 +185,10 @@ export default function Dashboard() {
   const handleEdit = (server: Server) => {
     setEditingServer(server);
     setSelectedCredential(server.credential_id || undefined);
+    // Clear leftovers from a previous add/edit first: antd preserves values of
+    // unmounted fields, so a password typed for another server would otherwise
+    // ride along on submit and silently overwrite this server's credentials.
+    form.resetFields();
     form.setFieldsValue({
       name: server.name,
       host: server.host,

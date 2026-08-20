@@ -16,6 +16,7 @@ interface ServerDocker {
   version: string;
   containers: DockerContainer[];
   loading: boolean;
+  loaded: boolean;
 }
 
 const stateColor: Record<string, string> = {
@@ -41,10 +42,14 @@ function LogsModal({ serverId, containerId, containerName, onClose }: {
   useEffect(() => {
     const ac = new AbortController();
     setLoading(true);
-    serversApi.getContainerLogs(serverId, containerId, 500)
+    serversApi.getContainerLogs(serverId, containerId, 500, ac.signal)
       .then((r) => setLogs(r.data.logs || t('docker.empty')))
-      .catch(() => setLogs(t('docker.loadLogsFailed')))
-      .finally(() => setLoading(false));
+      .catch(() => {
+        if (!ac.signal.aborted) setLogs(t('docker.loadLogsFailed'));
+      })
+      .finally(() => {
+        if (!ac.signal.aborted) setLoading(false);
+      });
     return () => ac.abort();
   }, [serverId, containerId, t]);
 
@@ -88,9 +93,11 @@ function ExecDrawer({ serverId, containerId, containerName, open, onClose }: {
 }) {
   const { t } = useTranslation();
   const termRef = useRef<HTMLDivElement>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const termRef2 = useRef<Terminal | null>(null);
   const [connected, setConnected] = useState(false);
+  // Read t through a ref inside socket callbacks so a language switch doesn't
+  // tear down and restart the exec session just to retranslate messages.
+  const tRef = useRef(t);
+  tRef.current = t;
 
   useEffect(() => {
     if (!open || !containerId || !termRef.current) return;
@@ -102,7 +109,6 @@ function ExecDrawer({ serverId, containerId, containerName, open, onClose }: {
       theme: { background: '#1e1e2e', foreground: '#cdd6f4' },
       scrollback: 5000,
     });
-    termRef2.current = terminal;
 
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
@@ -116,10 +122,10 @@ function ExecDrawer({ serverId, containerId, containerName, open, onClose }: {
 
     const token = localStorage.getItem('token');
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${wsProtocol}//${window.location.host}/api/ws/servers/${serverId}/docker/containers/${containerId}/exec?token=${token}`;
+    const wsUrl = `${wsProtocol}//${window.location.host}/api/ws/servers/${serverId}/docker/containers/${containerId}/exec`;
 
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
+    // Token travels as a subprotocol ("bearer, <jwt>") to stay out of logs.
+    const ws = new WebSocket(wsUrl, token ? ['bearer', token] : undefined);
 
     const sendResize = () => {
       if (ws.readyState === WebSocket.OPEN) {
@@ -143,11 +149,11 @@ function ExecDrawer({ serverId, containerId, containerName, open, onClose }: {
 
     ws.onclose = () => {
       setConnected(false);
-      terminal.write(`\r\n\x1b[31m${t('docker.execDisconnected')}\x1b[0m\r\n`);
+      terminal.write(`\r\n\x1b[31m${tRef.current('docker.execDisconnected')}\x1b[0m\r\n`);
     };
 
     ws.onerror = () => {
-      terminal.write(`\r\n\x1b[31m${t('docker.execConnError')}\x1b[0m\r\n`);
+      terminal.write(`\r\n\x1b[31m${tRef.current('docker.execConnError')}\x1b[0m\r\n`);
     };
 
     terminal.onData((data) => {
@@ -168,13 +174,7 @@ function ExecDrawer({ serverId, containerId, containerName, open, onClose }: {
       ws.close();
       terminal.dispose();
     };
-  }, [open, serverId, containerId, t]);
-
-  const handleClose = () => {
-    if (wsRef.current) wsRef.current.close();
-    if (termRef2.current) termRef2.current.dispose();
-    onClose();
-  };
+  }, [open, serverId, containerId]);
 
   return (
     <Drawer
@@ -186,7 +186,7 @@ function ExecDrawer({ serverId, containerId, containerName, open, onClose }: {
         </Space>
       }
       open={open}
-      onClose={handleClose}
+      onClose={onClose}
       maskClosable={false}
       placement="right"
       rootStyle={{ position: 'fixed' }}
@@ -355,6 +355,7 @@ export default function Docker() {
           version: s.docker_version || '',
           containers: [],
           loading: false,
+          loaded: false,
         }));
 
       setServers(withDocker);
@@ -373,14 +374,23 @@ export default function Docker() {
     setInitialLoading(false);
   }, [expandServerId]);
 
+  // Each request costs an SSH round trip on the backend; the ref guards
+  // against duplicates when a panel is expanded while its initial load is
+  // still in flight (state in handleCollapseChange can be a render behind).
+  const inFlightRef = useRef<Set<string>>(new Set());
+
   const loadContainers = async (serverId: string) => {
+    if (inFlightRef.current.has(serverId)) return;
+    inFlightRef.current.add(serverId);
     setServers((prev) => prev.map((s) => (s.server.id === serverId ? { ...s, loading: true } : s)));
     try {
       const res = await serversApi.getContainers(serverId);
-      setServers((prev) => prev.map((s) => (s.server.id === serverId ? { ...s, containers: res.data || [], loading: false } : s)));
+      setServers((prev) => prev.map((s) => (s.server.id === serverId ? { ...s, containers: res.data || [], loading: false, loaded: true } : s)));
     } catch {
       message.error(t('docker.loadFailed'));
       setServers((prev) => prev.map((s) => (s.server.id === serverId ? { ...s, loading: false } : s)));
+    } finally {
+      inFlightRef.current.delete(serverId);
     }
   };
 
@@ -492,7 +502,9 @@ export default function Docker() {
     setActiveKeys(keyArr);
     for (const key of keyArr) {
       const sd = servers.find((s) => s.server.id === key);
-      if (sd && sd.containers.length === 0 && !sd.loading) {
+      // loaded distinguishes "fetched, genuinely empty" from "never fetched",
+      // so servers without containers aren't re-queried on every toggle.
+      if (sd && !sd.loaded && !sd.loading) {
         loadContainers(key);
       }
     }

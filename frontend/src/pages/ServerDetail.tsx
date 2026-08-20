@@ -86,10 +86,21 @@ export default function ServerDetail() {
   const [notes, setNotes] = useState('');
   const [notesChanged, setNotesChanged] = useState(false);
   const [activeTab, setActiveTab] = useState('metrics');
-  const [activePreset, setActivePreset] = useState<PresetKey>('1h');
+  const [activePreset, setActivePreset] = useState<PresetKey | null>('1h');
   const [timeRange, setTimeRange] = useState<TimeRange>(() => getPresetRange('1h'));
 
   const { metrics, history, loading: metricsLoading } = useMetrics(id!, timeRange);
+
+  // Presets whose window ends "now" keep sliding: recompute the range every
+  // 30s so the chart stays live instead of freezing at the moment of the
+  // click. Fixed windows (yesterday, custom ranges) stay as picked.
+  useEffect(() => {
+    if (!activePreset || activePreset === 'yesterday') return;
+    const timer = window.setInterval(() => {
+      setTimeRange(getPresetRange(activePreset));
+    }, 30000);
+    return () => window.clearInterval(timer);
+  }, [activePreset]);
 
   const presets: { key: PresetKey; label: string }[] = [
     { key: '1h', label: t('preset.1h') },
@@ -128,7 +139,7 @@ export default function ServerDetail() {
 
   const handleRangeChange = (dates: [Dayjs | null, Dayjs | null] | null) => {
     if (dates && dates[0] && dates[1]) {
-      setActivePreset(null as any);
+      setActivePreset(null);
       setTimeRange({
         since: dates[0].toISOString(),
         until: dates[1].toISOString(),
@@ -139,6 +150,9 @@ export default function ServerDetail() {
   const handleEdit = () => {
     if (!server) return;
     setSelectedCredential(server.credential_id || undefined);
+    // Drop any password/key typed in a previously cancelled edit; empty
+    // secret fields mean "keep current" on the backend.
+    form.resetFields();
     form.setFieldsValue({
       name: server.name,
       host: server.host,

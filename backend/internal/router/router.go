@@ -3,6 +3,7 @@ package router
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"server-monitor/internal/config"
@@ -23,6 +24,12 @@ func Setup(db *sql.DB, cfg *config.Config) (*gin.Engine, error) {
 	}
 	r.Use(gin.LoggerWithConfig(gin.LoggerConfig{
 		SkipPaths: []string{"/api/health", "/api/public/status"},
+		// WebSocket URLs may still carry a legacy auth token in their query;
+		// keep them out of the access log entirely.
+		Skip: func(c *gin.Context) bool {
+			path := c.Request.URL.Path
+			return strings.HasPrefix(path, "/api/ssh/") || strings.HasPrefix(path, "/api/ws/")
+		},
 	}), gin.Recovery())
 
 	// CORS

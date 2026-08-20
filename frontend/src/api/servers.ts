@@ -146,8 +146,8 @@ export const serversApi = {
   containerAction: (id: string, containerId: string, action: 'start' | 'stop' | 'restart') =>
     client.post(`/servers/${id}/docker/containers/${containerId}/${action}`),
 
-  getContainerLogs: (id: string, containerId: string, tail?: number) =>
-    client.get<{ logs: string }>(`/servers/${id}/docker/containers/${containerId}/logs`, { params: { tail } }),
+  getContainerLogs: (id: string, containerId: string, tail?: number, signal?: AbortSignal) =>
+    client.get<{ logs: string }>(`/servers/${id}/docker/containers/${containerId}/logs`, { params: { tail }, signal }),
 };
 
 export const tagsApi = {

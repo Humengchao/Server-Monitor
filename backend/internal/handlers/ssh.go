@@ -14,6 +14,10 @@ import (
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
+	// Clients offer ("bearer", <jwt>) as subprotocols to authenticate without
+	// putting the token in the URL; echo "bearer" so browsers accept the
+	// handshake.
+	Subprotocols: []string{"bearer"},
 }
 
 type SSHHandler struct{}
