@@ -149,7 +149,9 @@ export default function PublicStatus() {
 
   useEffect(() => {
     const initial = window.setTimeout(() => loadStatus(true), 0);
-    const timer = window.setInterval(() => loadStatus(), 3000);
+    // A public page can have many concurrent visitors; 10s keeps the status
+    // fresh enough without each open tab eating into the per-IP rate limit.
+    const timer = window.setInterval(() => loadStatus(), 10000);
     return () => {
       window.clearTimeout(initial);
       window.clearInterval(timer);

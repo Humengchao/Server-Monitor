@@ -15,6 +15,8 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       SERVER_PORT: "19527"
       CORS_ORIGIN: http://${DOMAIN:-localhost:19080}
+      POLL_INTERVAL: ${POLL_INTERVAL:-3}
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     logging:

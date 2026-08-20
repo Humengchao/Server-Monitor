@@ -1,20 +1,23 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { ConfigProvider, App as AntApp, theme } from 'antd';
+import { ConfigProvider, App as AntApp, Spin, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import enUS from 'antd/locale/en_US';
 import i18n from './i18n';
 import AppLayout from './components/Layout';
-import Login from './pages/Login';
-import Register from './pages/Register';
-import Dashboard from './pages/Dashboard';
-import ServerDetail from './pages/ServerDetail';
-import Settings from './pages/Settings';
-import LoginHistory from './pages/LoginHistory';
-import Docker from './pages/Docker';
-import Credentials from './pages/Credentials';
-import PublicStatus from './pages/PublicStatus';
 import { useAuthStore } from './store/authStore';
+
+// Route-level code splitting: heavy dependencies (recharts, xterm) load only
+// with the pages that use them, instead of on every first visit.
+const Login = lazy(() => import('./pages/Login'));
+const Register = lazy(() => import('./pages/Register'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const ServerDetail = lazy(() => import('./pages/ServerDetail'));
+const Settings = lazy(() => import('./pages/Settings'));
+const LoginHistory = lazy(() => import('./pages/LoginHistory'));
+const Docker = lazy(() => import('./pages/Docker'));
+const Credentials = lazy(() => import('./pages/Credentials'));
+const PublicStatus = lazy(() => import('./pages/PublicStatus'));
 
 const antdLocales: Record<string, typeof enUS> = { en: enUS, zh: zhCN };
 
@@ -71,6 +74,13 @@ export default function App() {
       <DarkModeContext.Provider value={darkMode}>
       <AntApp>
         <BrowserRouter>
+          <Suspense
+            fallback={
+              <div style={{ display: 'flex', minHeight: '60vh', alignItems: 'center', justifyContent: 'center' }}>
+                <Spin size="large" />
+              </div>
+            }
+          >
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
@@ -94,6 +104,7 @@ export default function App() {
             </Route>
             <Route path="*" element={<Navigate to="/dashboard" />} />
           </Routes>
+          </Suspense>
         </BrowserRouter>
       </AntApp>
       </DarkModeContext.Provider>

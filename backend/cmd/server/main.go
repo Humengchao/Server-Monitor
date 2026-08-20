@@ -64,7 +64,10 @@ func main() {
 	collector.Start()
 
 	log.Printf("Server starting on :%s", cfg.ServerPort)
-	r := router.Setup(db, cfg)
+	r, err := router.Setup(db, cfg)
+	if err != nil {
+		exitWithError(exitConfigError, "Router setup failed", err)
+	}
 
 	// Create http.Server for graceful shutdown support
 	srv := &http.Server{

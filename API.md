@@ -110,7 +110,6 @@ GET /api/servers
     "host": "192.168.1.100",
     "port": 22,
     "ssh_username": "root",
-    "last_seen_at": "2024-01-01T12:00:00Z",
     "created_at": "2024-01-01T00:00:00Z",
     "tags": [
       {

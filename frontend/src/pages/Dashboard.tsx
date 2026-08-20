@@ -13,18 +13,21 @@ import { serversApi, Server, Tag } from '../api/servers';
 
 const { Title, Text } = Typography;
 
+// ipwho.is supports HTTPS on the free tier; the previous ip-api.com endpoint
+// was HTTP-only and got blocked as mixed content on HTTPS deployments.
 async function lookupIP(ip: string): Promise<string> {
   try {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), 3000);
     const res = await fetch(
-      `http://ip-api.com/json/${ip}?fields=status,country,regionName,city,isp`,
+      `https://ipwho.is/${ip}?fields=success,country,city,connection`,
       { signal: ac.signal },
     );
     clearTimeout(timer);
     const data = await res.json();
-    if (data.status === 'success') {
-      return `${data.isp} ${data.country} ${data.city}`;
+    if (data.success) {
+      const isp = data.connection?.isp || '';
+      return [isp, data.country, data.city].filter(Boolean).join(' ');
     }
   } catch { /* timeout or network error */ }
   return '';

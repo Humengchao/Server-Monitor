@@ -135,11 +135,19 @@ func (h *ServerHandler) List(c *gin.Context) {
 	if servers == nil {
 		servers = []models.Server{}
 	}
-	// attach tags
+	// Attach tags with one query for the whole list instead of one per server.
+	ids := make([]uuid.UUID, len(servers))
 	for i := range servers {
-		tags, _ := models.GetServerTags(db.Raw, servers[i].ID)
-		if tags != nil {
-			servers[i].Tags = tags
+		ids[i] = servers[i].ID
+	}
+	tagsByServer, err := models.GetTagsForServers(db.Raw, ids)
+	if err != nil {
+		log.Printf("List server tags error: %v", err)
+	} else {
+		for i := range servers {
+			if tags := tagsByServer[servers[i].ID]; len(tags) > 0 {
+				servers[i].Tags = tags
+			}
 		}
 	}
 	c.JSON(http.StatusOK, servers)

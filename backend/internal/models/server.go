@@ -37,7 +37,6 @@ type Server struct {
 	PublicLocation  string         `json:"public_location"`
 	ServerType      string         `json:"server_type"`
 	Notes           string         `json:"notes"`
-	LastSeenAt      *time.Time     `json:"last_seen_at"`
 	CreatedAt       time.Time      `json:"created_at"`
 	Tags            []Tag          `json:"tags,omitempty"`
 	LatestMetrics   *LatestMetrics `json:"latest_metrics,omitempty"`
@@ -83,7 +82,7 @@ func CreateServer(db *DB, s *Server) error {
 
 // serverSummarySelect returns servers without decrypted secrets, joined with
 // their linked credential name and latest metrics sample.
-const serverSummarySelect = `SELECT s.id, s.user_id, s.name, s.host, s.port, s.ssh_username, s.last_seen_at, s.created_at,
+const serverSummarySelect = `SELECT s.id, s.user_id, s.name, s.host, s.port, s.ssh_username, s.created_at,
 	 COALESCE(s.ssh_host_key, ''),
 	 COALESCE(s.credential_id::text, ''),
 	 COALESCE(c.name, ''),
@@ -110,7 +109,7 @@ func scanServerSummaries(rows *sql.Rows) ([]Server, error) {
 		var credIDStr string
 		var expiresAt sql.NullTime
 		if err := rows.Scan(&s.ID, &s.UserID, &s.Name, &s.Host, &s.Port,
-			&s.SSHUsername, &s.LastSeenAt, &s.CreatedAt, &s.SSHHostKey,
+			&s.SSHUsername, &s.CreatedAt, &s.SSHHostKey,
 			&credIDStr, &s.CredentialName,
 			&s.CPUCores, &s.MemoryTotal, &s.DiskTotal,
 			&s.HasDocker, &s.DockerVersion,
@@ -186,11 +185,11 @@ func GetServerByIDAndUser(db *DB, id, userID uuid.UUID) (*Server, error) {
 	var expiresAt sql.NullTime
 	err := db.Raw.QueryRow(
 		`SELECT id, user_id, name, host, port, ssh_username, ssh_password, ssh_key, COALESCE(ssh_host_key, ''),
-		 credential_id, last_seen_at, created_at, COALESCE(server_type, 'linux'), expires_at, COALESCE(notes, ''),
+		 credential_id, created_at, COALESCE(server_type, 'linux'), expires_at, COALESCE(notes, ''),
 		 COALESCE(billing_price, 0), COALESCE(billing_currency, 'CNY'), COALESCE(billing_cycle, 'year'), COALESCE(traffic_limit_bytes, 0), COALESCE(public_location, '')
 		 FROM servers WHERE id=$1 AND user_id=$2`, id, userID,
 	).Scan(&s.ID, &s.UserID, &s.Name, &s.Host, &s.Port,
-		&s.SSHUsername, &encPassword, &encKey, &s.SSHHostKey, &credID, &s.LastSeenAt, &s.CreatedAt, &s.ServerType, &expiresAt, &s.Notes,
+		&s.SSHUsername, &encPassword, &encKey, &s.SSHHostKey, &credID, &s.CreatedAt, &s.ServerType, &expiresAt, &s.Notes,
 		&s.BillingPrice, &s.BillingCurrency, &s.BillingCycle, &s.TrafficLimit, &s.PublicLocation)
 	if err != nil {
 		return nil, err
@@ -355,10 +354,12 @@ func GetServerTags(db *sql.DB, serverID uuid.UUID) ([]Tag, error) {
 func GetServerByID(db *sql.DB, id uuid.UUID) (*Server, error) {
 	s := &Server{}
 	err := db.QueryRow(
-		`SELECT id, user_id, name, host, port, ssh_username, ssh_password, ssh_key, COALESCE(ssh_host_key, ''), last_seen_at, created_at
+		`SELECT id, user_id, name, host, port, ssh_username, ssh_password, ssh_key, COALESCE(ssh_host_key, ''), created_at,
+		 COALESCE(has_docker, FALSE), COALESCE(docker_version, '')
 		 FROM servers WHERE id=$1`, id,
 	).Scan(&s.ID, &s.UserID, &s.Name, &s.Host, &s.Port,
-		&s.SSHUsername, &s.SSHPassword, &s.SSHKey, &s.SSHHostKey, &s.LastSeenAt, &s.CreatedAt)
+		&s.SSHUsername, &s.SSHPassword, &s.SSHKey, &s.SSHHostKey, &s.CreatedAt,
+		&s.HasDocker, &s.DockerVersion)
 	if err != nil {
 		return nil, err
 	}

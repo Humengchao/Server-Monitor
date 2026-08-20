@@ -15,7 +15,6 @@ CREATE TABLE IF NOT EXISTS servers (
     ssh_password TEXT DEFAULT '',
     ssh_key TEXT DEFAULT '',
     ssh_host_key TEXT DEFAULT '',
-    last_seen_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -218,3 +217,7 @@ CREATE TABLE IF NOT EXISTS metric_maintenance_state (
 
 -- Credential type (linux / windows)
 ALTER TABLE credentials ADD COLUMN IF NOT EXISTS credential_type VARCHAR(16) DEFAULT 'linux';
+
+-- last_seen_at was never written; liveness comes from
+-- server_latest_metrics.recorded_at instead.
+ALTER TABLE servers DROP COLUMN IF EXISTS last_seen_at;

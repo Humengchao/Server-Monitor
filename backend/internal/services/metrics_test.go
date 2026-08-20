@@ -197,6 +197,102 @@ func TestCollectorFirstAuthFailureResetsGenericAttempts(t *testing.T) {
 	}
 }
 
+func TestSplitLinuxSectionsAndParse(t *testing.T) {
+	sep := linuxSectionSeparator + "\n"
+	out := "cpu  100 0 100 700 100 0 0 0\ncpu0 50 0 50 350 50 0 0 0\n" + sep +
+		"cpu  150 0 150 800 100 0 0 0\ncpu0 75 0 75 400 50 0 0 0\n" + sep +
+		"MemTotal:       2048 kB\nMemFree:         512 kB\nBuffers:         128 kB\nCached:          128 kB\n" + sep +
+		"0.50 0.25 0.10 1/234 5678\n" + sep +
+		"Inter-|   Receive\n face |bytes    packets\n    lo: 999 0 0 0 0 0 0 0 999 0 0 0 0 0 0 0\n  eth0: 1000 0 0 0 0 0 0 0 2000 0 0 0 0 0 0 0\n" + sep +
+		"   8       0 sda 100 0 2048 0 200 0 4096 0 0 0 0\n   8       1 sda1 50 0 1024 0 100 0 2048 0 0 0 0\n" + sep +
+		"12345.67 23456.78\n" + sep +
+		"4\n" + sep +
+		"Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/vda1 100000 25000 75000 25% /\n" + sep +
+		"24.0.7\n"
+
+	sections := splitLinuxSections(out, linuxSectionCount)
+	if len(sections) < linuxSectionCount {
+		t.Fatalf("splitLinuxSections() returned %d sections, want at least %d", len(sections), linuxSectionCount)
+	}
+
+	if got := cpuPercentFromSamples(sections[linuxSectionStatFirst], sections[linuxSectionStatSecond]); got != 50 {
+		t.Errorf("cpuPercentFromSamples() = %v, want 50", got)
+	}
+	used, total := parseMemInfo(sections[linuxSectionMemInfo])
+	if used != 1280*1024 || total != 2048*1024 {
+		t.Errorf("parseMemInfo() = (%d, %d), want (%d, %d)", used, total, 1280*1024, 2048*1024)
+	}
+	l1, l5, l15 := parseLoadAvg(sections[linuxSectionLoadAvg])
+	if l1 != 0.5 || l5 != 0.25 || l15 != 0.1 {
+		t.Errorf("parseLoadAvg() = (%v, %v, %v), want (0.5, 0.25, 0.1)", l1, l5, l15)
+	}
+	rx, tx := parseNetDev(sections[linuxSectionNetDev])
+	if rx != 1000 || tx != 2000 {
+		t.Errorf("parseNetDev() = (%d, %d), want (1000, 2000) excluding lo", rx, tx)
+	}
+	diskRx, diskTx := parseDiskStats(sections[linuxSectionDiskStats])
+	if diskRx != 2048*512 || diskTx != 4096*512 {
+		t.Errorf("parseDiskStats() = (%d, %d), want (%d, %d) excluding partitions", diskRx, diskTx, 2048*512, 4096*512)
+	}
+	if got := parseUptime(sections[linuxSectionUptime]); got != 12345 {
+		t.Errorf("parseUptime() = %d, want 12345", got)
+	}
+	if got := parseNproc(sections[linuxSectionNproc]); got != 4 {
+		t.Errorf("parseNproc() = %d, want 4", got)
+	}
+	diskUsed, diskTotal := parseDiskUsage(sections[linuxSectionDiskUsage])
+	if diskUsed != 25000 || diskTotal != 100000 {
+		t.Errorf("parseDiskUsage() = (%d, %d), want (25000, 100000)", diskUsed, diskTotal)
+	}
+	if got := parseDockerVersion(sections[linuxSectionDocker]); got != "24.0.7" {
+		t.Errorf("parseDockerVersion() = %q, want \"24.0.7\"", got)
+	}
+}
+
+func TestSplitLinuxSectionsTruncated(t *testing.T) {
+	out := "cpu  1 2 3 4 5 6 7 8\n" + linuxSectionSeparator + "\ncpu  1 2 3 4 5 6 7 8\n"
+	sections := splitLinuxSections(out, linuxSectionCount)
+	if len(sections) != linuxSectionCount {
+		t.Fatalf("splitLinuxSections() returned %d sections, want %d", len(sections), linuxSectionCount)
+	}
+	for i := linuxSectionMemInfo; i < linuxSectionCount; i++ {
+		if sections[i] != "" {
+			t.Fatalf("section %d = %q, want empty for truncated output", i, sections[i])
+		}
+	}
+	if used, total := parseMemInfo(sections[linuxSectionMemInfo]); used != 0 || total != 0 {
+		t.Fatalf("parseMemInfo(empty) = (%d, %d), want zeros", used, total)
+	}
+}
+
+func TestParseDiskUsageWrappedDeviceName(t *testing.T) {
+	out := "Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/mapper/very-long-volume-name\n 100000 25000 75000 25% /\n"
+	used, total := parseDiskUsage(out)
+	if used != 25000 || total != 100000 {
+		t.Fatalf("parseDiskUsage() = (%d, %d), want (25000, 100000)", used, total)
+	}
+}
+
+func TestParseDockerVersionRejectsNoise(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"version", "24.0.7\n", "24.0.7"},
+		{"empty", "", ""},
+		{"error text", "Cannot connect to the Docker daemon at unix:///var/run/docker.sock\n", ""},
+		{"multiline", "warning\n24.0.7\n", ""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := parseDockerVersion(test.in); got != test.want {
+				t.Fatalf("parseDockerVersion(%q) = %q, want %q", test.in, got, test.want)
+			}
+		})
+	}
+}
+
 func TestServerPollFingerprintChangesWithCredentials(t *testing.T) {
 	server := &models.Server{
 		Host:        "example.com",

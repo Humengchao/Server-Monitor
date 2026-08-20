@@ -23,7 +23,6 @@ export interface Server {
   traffic_limit_bytes: number;
   public_location: string;
   notes?: string;
-  last_seen_at: string | null;
   created_at: string;
   tags: Tag[];
   latest_metrics: LatestMetrics | null;

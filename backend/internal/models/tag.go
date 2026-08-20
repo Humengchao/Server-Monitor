@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 type Tag struct {
@@ -43,6 +44,32 @@ func GetTagsByUserID(db *sql.DB, userID uuid.UUID) ([]Tag, error) {
 func DeleteTag(db *sql.DB, id, userID uuid.UUID) error {
 	_, err := db.Exec("DELETE FROM tags WHERE id=$1 AND user_id=$2", id, userID)
 	return err
+}
+
+// GetTagsForServers returns the tags of all given servers in a single query,
+// keyed by server ID, so list endpoints don't issue one query per server.
+func GetTagsForServers(db *sql.DB, serverIDs []uuid.UUID) (map[uuid.UUID][]Tag, error) {
+	tagsByServer := make(map[uuid.UUID][]Tag, len(serverIDs))
+	if len(serverIDs) == 0 {
+		return tagsByServer, nil
+	}
+	rows, err := db.Query(
+		`SELECT st.server_id, t.id, t.user_id, t.name, t.color FROM tags t
+		 JOIN server_tags st ON t.id = st.tag_id
+		 WHERE st.server_id = ANY($1) ORDER BY t.name`, pq.Array(serverIDs))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var serverID uuid.UUID
+		var t Tag
+		if err := rows.Scan(&serverID, &t.ID, &t.UserID, &t.Name, &t.Color); err != nil {
+			return nil, err
+		}
+		tagsByServer[serverID] = append(tagsByServer[serverID], t)
+	}
+	return tagsByServer, rows.Err()
 }
 
 type MetricPoint struct {

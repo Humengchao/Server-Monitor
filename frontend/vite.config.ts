@@ -13,16 +13,8 @@ export default defineConfig({
       },
     },
   },
-  build: {
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          vendor: ['react', 'react-dom', 'react-router-dom'],
-          antd: ['antd', '@ant-design/icons'],
-          charts: ['recharts'],
-          xterm: ['xterm', '@xterm/addon-fit', '@xterm/addon-web-links'],
-        },
-      },
-    },
-  },
+  // Chunking is left to rollup: with route-level lazy loading it moves each
+  // page's dependencies (recharts, xterm, most of antd) into chunks that load
+  // only when the page is visited. The previous manualChunks config forced
+  // every visitor to download all of them upfront.
 })

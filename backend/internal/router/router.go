@@ -2,6 +2,7 @@ package router
 
 import (
 	"database/sql"
+	"fmt"
 	"time"
 
 	"server-monitor/internal/config"
@@ -12,8 +13,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func Setup(db *sql.DB, cfg *config.Config) *gin.Engine {
+func Setup(db *sql.DB, cfg *config.Config) (*gin.Engine, error) {
 	r := gin.New()
+	// Only honor X-Forwarded-For from the configured reverse proxies; gin's
+	// default trusts every client, which would let direct requests spoof their
+	// IP for rate limiting and login history.
+	if err := r.SetTrustedProxies(cfg.TrustedProxies); err != nil {
+		return nil, fmt.Errorf("set trusted proxies: %w", err)
+	}
 	r.Use(gin.LoggerWithConfig(gin.LoggerConfig{
 		SkipPaths: []string{"/api/health", "/api/public/status"},
 	}), gin.Recovery())
@@ -117,5 +124,5 @@ func Setup(db *sql.DB, cfg *config.Config) *gin.Engine {
 		api.GET("/ssh/:id", middleware.WSAuthRequired(cfg), sshH.Handle)
 	}
 
-	return r
+	return r, nil
 }

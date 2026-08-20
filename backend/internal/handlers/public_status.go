@@ -5,6 +5,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"sync"
 	"time"
 
 	"server-monitor/internal/models"
@@ -12,7 +13,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type PublicStatusHandler struct{}
+// publicStatusCacheTTL bounds how often the status query runs regardless of
+// visitor count. Metrics only change once per poll interval anyway.
+const publicStatusCacheTTL = 2 * time.Second
+
+type PublicStatusHandler struct {
+	mu      sync.Mutex
+	cached  gin.H
+	expires time.Time
+}
 
 func NewPublicStatusHandler() *PublicStatusHandler { return &PublicStatusHandler{} }
 
@@ -67,6 +76,15 @@ type publicSummary struct {
 }
 
 func (h *PublicStatusHandler) Get(c *gin.Context) {
+	h.mu.Lock()
+	if h.cached != nil && time.Now().Before(h.expires) {
+		cached := h.cached
+		h.mu.Unlock()
+		c.JSON(http.StatusOK, cached)
+		return
+	}
+	h.mu.Unlock()
+
 	db := c.MustGet("db").(*models.DB)
 	metrics, err := models.GetPublicServerMetrics(db.Raw)
 	if err != nil {
@@ -141,13 +159,22 @@ func (h *PublicStatusHandler) Get(c *gin.Context) {
 		overall = "degraded"
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	response := gin.H{
 		"overall": overall, "generated_at": now, "summary": summary, "nodes": nodes,
 		"privacy": gin.H{
 			"anonymized":    true,
 			"hidden_fields": []string{"hostname", "ip_address", "port", "ssh_user", "credentials", "notes", "database_id"},
 		},
-	})
+	}
+
+	// The response is read-only once built, so it is safe to share between
+	// requests until the TTL expires.
+	h.mu.Lock()
+	h.cached = response
+	h.expires = time.Now().Add(publicStatusCacheTTL)
+	h.mu.Unlock()
+
+	c.JSON(http.StatusOK, response)
 }
 
 func percent(used, total int64) int {

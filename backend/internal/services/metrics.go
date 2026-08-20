@@ -30,6 +30,20 @@ type prevStats struct {
 	time   time.Time
 }
 
+// sysInfoState and dockerInfoState mirror the values last written successfully
+// to the servers table, so unchanged host facts don't cause an UPDATE on every
+// poll.
+type sysInfoState struct {
+	cores     int
+	memTotal  int64
+	diskTotal int64
+}
+
+type dockerInfoState struct {
+	hasDocker bool
+	version   string
+}
+
 type collectionResult struct {
 	metric *models.MetricPoint
 	err    error
@@ -40,6 +54,14 @@ type pollFailureState struct {
 	retryAt         time.Time
 	fingerprint     [32]byte
 	securityFailure bool
+}
+
+// pooledClient is a persistent SSH connection reused across polls. conn is the
+// underlying TCP connection so a fresh deadline can be armed per collection.
+type pooledClient struct {
+	client      *ssh.Client
+	conn        net.Conn
+	fingerprint [32]byte
 }
 
 const (
@@ -56,26 +78,33 @@ const (
 )
 
 type Collector struct {
-	db        *models.DB
-	interval  time.Duration
-	mu        sync.Mutex
-	prev      map[uuid.UUID]*prevStats
-	pollMu    sync.Mutex
-	inFlight  map[uuid.UUID]struct{}
-	failures  map[uuid.UUID]pollFailureState
-	pollSlots chan struct{}
-	stopCh    chan struct{}
+	db         *models.DB
+	interval   time.Duration
+	mu         sync.Mutex
+	prev       map[uuid.UUID]*prevStats
+	sysInfo    map[uuid.UUID]sysInfoState
+	dockerInfo map[uuid.UUID]dockerInfoState
+	pollMu     sync.Mutex
+	inFlight   map[uuid.UUID]struct{}
+	failures   map[uuid.UUID]pollFailureState
+	clientMu   sync.Mutex
+	clients    map[uuid.UUID]*pooledClient
+	pollSlots  chan struct{}
+	stopCh     chan struct{}
 }
 
 func NewCollector(db *models.DB, interval time.Duration) *Collector {
 	return &Collector{
-		db:        db,
-		interval:  interval,
-		prev:      make(map[uuid.UUID]*prevStats),
-		inFlight:  make(map[uuid.UUID]struct{}),
-		failures:  make(map[uuid.UUID]pollFailureState),
-		pollSlots: make(chan struct{}, 10),
-		stopCh:    make(chan struct{}),
+		db:         db,
+		interval:   interval,
+		prev:       make(map[uuid.UUID]*prevStats),
+		sysInfo:    make(map[uuid.UUID]sysInfoState),
+		dockerInfo: make(map[uuid.UUID]dockerInfoState),
+		inFlight:   make(map[uuid.UUID]struct{}),
+		failures:   make(map[uuid.UUID]pollFailureState),
+		clients:    make(map[uuid.UUID]*pooledClient),
+		pollSlots:  make(chan struct{}, 10),
+		stopCh:     make(chan struct{}),
 	}
 }
 
@@ -110,9 +139,16 @@ func (c *Collector) Start() {
 	}()
 }
 
-// Stop signals the collector to stop polling.
+// Stop signals the collector to stop polling and closes pooled connections.
 func (c *Collector) Stop() {
 	close(c.stopCh)
+	c.clientMu.Lock()
+	clients := c.clients
+	c.clients = make(map[uuid.UUID]*pooledClient)
+	c.clientMu.Unlock()
+	for _, pc := range clients {
+		pc.client.Close()
+	}
 }
 
 func (c *Collector) maintainMetricHistory() {
@@ -187,6 +223,12 @@ func (c *Collector) pollAll() {
 		return
 	}
 
+	active := make(map[uuid.UUID]struct{}, len(servers))
+	for i := range servers {
+		active[servers[i].ID] = struct{}{}
+	}
+	c.pruneServerState(active)
+
 	// Schedule each host independently. Slow hosts remain in-flight and are
 	// skipped on the next tick, while healthy hosts keep their regular cadence.
 	for i := range servers {
@@ -203,7 +245,7 @@ func (c *Collector) pollAll() {
 			case <-c.stopCh:
 				return
 			}
-			m, err := c.collectOne(&s)
+			m, err := c.collectOne(&s, fingerprint)
 			if err != nil {
 				delay := c.recordPollFailure(s.ID, fingerprint, err, time.Now())
 				log.Printf("collector: poll %s failed: %v; retry in %s", s.Name, err, delay)
@@ -217,6 +259,50 @@ func (c *Collector) pollAll() {
 			c.clearPollFailure(s.ID)
 		}()
 	}
+}
+
+// pruneServerState drops pooled connections and per-server bookkeeping for
+// servers that no longer exist, so deleted hosts don't leak connections or
+// stale backoff state.
+func (c *Collector) pruneServerState(active map[uuid.UUID]struct{}) {
+	var stale []*pooledClient
+	c.clientMu.Lock()
+	for id, pc := range c.clients {
+		if _, ok := active[id]; !ok {
+			delete(c.clients, id)
+			stale = append(stale, pc)
+		}
+	}
+	c.clientMu.Unlock()
+	for _, pc := range stale {
+		pc.client.Close()
+	}
+
+	c.pollMu.Lock()
+	for id := range c.failures {
+		if _, ok := active[id]; !ok {
+			delete(c.failures, id)
+		}
+	}
+	c.pollMu.Unlock()
+
+	c.mu.Lock()
+	for id := range c.prev {
+		if _, ok := active[id]; !ok {
+			delete(c.prev, id)
+		}
+	}
+	for id := range c.sysInfo {
+		if _, ok := active[id]; !ok {
+			delete(c.sysInfo, id)
+		}
+	}
+	for id := range c.dockerInfo {
+		if _, ok := active[id]; !ok {
+			delete(c.dockerInfo, id)
+		}
+	}
+	c.mu.Unlock()
 }
 
 func serverPollFingerprint(server *models.Server) [32]byte {
@@ -329,21 +415,30 @@ func (c *Collector) clearPollFailure(serverID uuid.UUID) {
 	c.pollMu.Unlock()
 }
 
-func (c *Collector) collectOne(s *models.Server) (*models.MetricPoint, error) {
-	pingLatency := make(chan int, 1)
-	go func() { pingLatency <- collectPingLatency(s.Host) }()
+// getClient returns the pooled SSH client for the server, dialing a new
+// connection when none exists or the connection settings changed. Polls are
+// serialized per server (inFlight), so two dials for one server cannot race.
+func (c *Collector) getClient(s *models.Server, fingerprint [32]byte) (*pooledClient, error) {
+	c.clientMu.Lock()
+	pc := c.clients[s.ID]
+	c.clientMu.Unlock()
+	if pc != nil {
+		if pc.fingerprint == fingerprint {
+			return pc, nil
+		}
+		c.dropClient(s.ID, pc)
+	}
 
 	config, err := buildSSHClientConfig(s.SSHUsername, s.SSHPassword, s.SSHKey, s.SSHHostKey, sshDialTimeout)
 	if err != nil {
 		return nil, err
 	}
-
 	addr := net.JoinHostPort(s.Host, strconv.Itoa(s.Port))
 	tcpConn, err := net.DialTimeout("tcp", addr, sshDialTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("ssh dial: %w", err)
 	}
-	if err := tcpConn.SetDeadline(time.Now().Add(sshCollectionTimeout)); err != nil {
+	if err := tcpConn.SetDeadline(time.Now().Add(sshDialTimeout)); err != nil {
 		tcpConn.Close()
 		return nil, fmt.Errorf("ssh deadline: %w", err)
 	}
@@ -352,8 +447,39 @@ func (c *Collector) collectOne(s *models.Server) (*models.MetricPoint, error) {
 		tcpConn.Close()
 		return nil, fmt.Errorf("ssh handshake: %w", err)
 	}
-	client := ssh.NewClient(sshConn, chans, reqs)
-	defer client.Close()
+	pc = &pooledClient{client: ssh.NewClient(sshConn, chans, reqs), conn: tcpConn, fingerprint: fingerprint}
+	c.clientMu.Lock()
+	c.clients[s.ID] = pc
+	c.clientMu.Unlock()
+	return pc, nil
+}
+
+// dropClient closes a pooled connection and forgets it if it is still the one
+// tracked for the server.
+func (c *Collector) dropClient(serverID uuid.UUID, pc *pooledClient) {
+	c.clientMu.Lock()
+	if c.clients[serverID] == pc {
+		delete(c.clients, serverID)
+	}
+	c.clientMu.Unlock()
+	pc.client.Close()
+}
+
+func (c *Collector) collectOne(s *models.Server, fingerprint [32]byte) (*models.MetricPoint, error) {
+	pingLatency := make(chan int, 1)
+	go func() { pingLatency <- collectPingLatency(s.Host) }()
+
+	pc, err := c.getClient(s, fingerprint)
+	if err != nil {
+		return nil, err
+	}
+	// Arm a deadline covering this collection so a silently dead connection
+	// cannot block forever. It is cleared on success so the idle pooled
+	// connection survives until the next poll.
+	if err := pc.conn.SetDeadline(time.Now().Add(sshCollectionTimeout)); err != nil {
+		c.dropClient(s.ID, pc)
+		return nil, fmt.Errorf("ssh deadline: %w", err)
+	}
 
 	// A TCP deadline alone is not enough here: x/crypto/ssh can remain blocked
 	// waiting for an open-channel response after the transport stops making
@@ -364,9 +490,9 @@ func (c *Collector) collectOne(s *models.Server) (*models.MetricPoint, error) {
 		var m *models.MetricPoint
 		var err error
 		if s.ServerType == "windows" {
-			m, err = c.collectWindows(client, s)
+			m, err = c.collectWindows(pc.client, s)
 		} else {
-			m, err = c.collectLinux(client, s)
+			m, err = c.collectLinux(pc.client, s)
 		}
 		if m != nil {
 			m.LatencyMS = <-pingLatency
@@ -378,55 +504,155 @@ func (c *Collector) collectOne(s *models.Server) (*models.MetricPoint, error) {
 	defer timer.Stop()
 	select {
 	case result := <-resultCh:
-		return result.metric, result.err
+		if result.err != nil {
+			// A failed command usually means a broken transport; drop the
+			// connection so the next poll redials instead of reusing it.
+			c.dropClient(s.ID, pc)
+			return result.metric, result.err
+		}
+		_ = pc.conn.SetDeadline(time.Time{})
+		return result.metric, nil
 	case <-timer.C:
-		_ = client.Close()
+		c.dropClient(s.ID, pc)
 		return nil, fmt.Errorf("collection timed out after %s", sshCollectionTimeout)
 	}
 }
 
-func (c *Collector) collectLinux(client *ssh.Client, s *models.Server) (*models.MetricPoint, error) {
-	m := &models.MetricPoint{RecordedAt: time.Now()}
-
-	// CPU from /proc/stat
-	m.CPUPercent = collectCPU(client)
-	m.Load1, m.Load5, m.Load15 = collectLoad(client)
-
-	// Memory from /proc/meminfo
-	m.MemoryUsed, m.MemoryTotal = collectMemory(client)
-
-	// Network from /proc/net/dev (cumulative counters -> bytes/sec)
-	netRxRaw, netTxRaw := collectNetwork(client)
-	m.NetworkRxTotal, m.NetworkTxTotal = netRxRaw, netTxRaw
-	// Disk I/O from /proc/diskstats (cumulative counters -> bytes/sec)
-	diskRxRaw, diskTxRaw := collectDiskIO(client)
+// applyRates converts cumulative network/disk counters into per-second rates
+// using the previous poll's sample for this server.
+func (c *Collector) applyRates(serverID uuid.UUID, m *models.MetricPoint, netRx, netTx, diskRx, diskTx int64) {
 	now := m.RecordedAt
 	c.mu.Lock()
-	if prev, ok := c.prev[s.ID]; ok && prev.netRx <= netRxRaw && prev.netTx <= netTxRaw {
+	if prev, ok := c.prev[serverID]; ok && prev.netRx <= netRx && prev.netTx <= netTx {
 		elapsed := now.Sub(prev.time).Seconds()
 		if elapsed > 0 {
-			m.NetworkRxBytes = int64(float64(netRxRaw-prev.netRx) / elapsed)
-			m.NetworkTxBytes = int64(float64(netTxRaw-prev.netTx) / elapsed)
-			m.DiskRxBytes = int64(float64(diskRxRaw-prev.diskRx) / elapsed)
-			m.DiskTxBytes = int64(float64(diskTxRaw-prev.diskTx) / elapsed)
+			m.NetworkRxBytes = int64(float64(netRx-prev.netRx) / elapsed)
+			m.NetworkTxBytes = int64(float64(netTx-prev.netTx) / elapsed)
+			m.DiskRxBytes = int64(float64(diskRx-prev.diskRx) / elapsed)
+			m.DiskTxBytes = int64(float64(diskTx-prev.diskTx) / elapsed)
 		}
 	}
-	c.prev[s.ID] = &prevStats{netRx: netRxRaw, netTx: netTxRaw, diskRx: diskRxRaw, diskTx: diskTxRaw, time: now}
+	c.prev[serverID] = &prevStats{netRx: netRx, netTx: netTx, diskRx: diskRx, diskTx: diskTx, time: now}
 	c.mu.Unlock()
+}
 
-	// Uptime
-	m.UptimeSeconds = collectUptime(client)
-	m.DiskUsed = collectDiskUsed(client)
-
-	// Collect and update system info (cores, memory total, disk total)
-	cpuCores, memTotal, diskTotal := collectSystemInfo(client)
-	if cpuCores > 0 {
-		models.UpdateServerSystemInfo(c.db.Raw, s.ID, cpuCores, memTotal, diskTotal)
+// syncHostInfo persists slow-changing host facts, writing only when they
+// differ from the last successfully stored values so steady-state polls don't
+// UPDATE the servers table every few seconds.
+func (c *Collector) syncHostInfo(serverID uuid.UUID, cores int, memTotal, diskTotal int64, dockerVersion string) {
+	if cores > 0 {
+		info := sysInfoState{cores: cores, memTotal: memTotal, diskTotal: diskTotal}
+		c.mu.Lock()
+		prev, known := c.sysInfo[serverID]
+		c.mu.Unlock()
+		if !known || prev != info {
+			if err := models.UpdateServerSystemInfo(c.db.Raw, serverID, cores, memTotal, diskTotal); err != nil {
+				log.Printf("collector: update system info for %s: %v", serverID, err)
+			} else {
+				c.mu.Lock()
+				c.sysInfo[serverID] = info
+				c.mu.Unlock()
+			}
+		}
 	}
 
-	// Check Docker availability (cheap: reuses existing SSH connection)
-	dockerVersion := collectDockerVersion(client)
-	models.UpdateDockerInfo(c.db.Raw, s.ID, dockerVersion != "", dockerVersion)
+	docker := dockerInfoState{hasDocker: dockerVersion != "", version: dockerVersion}
+	c.mu.Lock()
+	prevDocker, known := c.dockerInfo[serverID]
+	c.mu.Unlock()
+	if !known || prevDocker != docker {
+		if err := models.UpdateDockerInfo(c.db.Raw, serverID, docker.hasDocker, docker.version); err != nil {
+			log.Printf("collector: update docker info for %s: %v", serverID, err)
+		} else {
+			c.mu.Lock()
+			c.dockerInfo[serverID] = docker
+			c.mu.Unlock()
+		}
+	}
+}
+
+// linuxSectionSeparator delimits command outputs inside the batched metrics
+// command. Any line consisting solely of this marker is a section boundary.
+const linuxSectionSeparator = "__SVRMON_SECTION__"
+
+const (
+	linuxSectionStatFirst = iota
+	linuxSectionStatSecond
+	linuxSectionMemInfo
+	linuxSectionLoadAvg
+	linuxSectionNetDev
+	linuxSectionDiskStats
+	linuxSectionUptime
+	linuxSectionNproc
+	linuxSectionDiskUsage
+	linuxSectionDocker
+	linuxSectionCount
+)
+
+// linuxMetricsCommand gathers every sample in a single SSH exec round trip
+// instead of one session per file, which matters on high-latency links. The
+// second /proc/stat read is delayed remotely so CPU usage still comes from two
+// samples half a second apart. A command that fails leaves an empty section
+// and parses to zero values, matching the previous per-command behaviour.
+var linuxMetricsCommand = strings.Join([]string{
+	"cat /proc/stat",
+	"sleep 0.5 || sleep 1; cat /proc/stat",
+	"cat /proc/meminfo",
+	"cat /proc/loadavg",
+	"cat /proc/net/dev",
+	"cat /proc/diskstats",
+	"cat /proc/uptime",
+	"nproc",
+	"df -P -B1 /",
+	"docker info --format '{{.ServerVersion}}' || sudo -n docker info --format '{{.ServerVersion}}' || true",
+}, "; echo "+linuxSectionSeparator+"; ")
+
+// splitLinuxSections splits batched command output on separator lines. If the
+// output was truncated, the remaining sections come back empty.
+func splitLinuxSections(out string, want int) []string {
+	sections := make([]string, 0, want)
+	var current strings.Builder
+	for _, line := range strings.Split(out, "\n") {
+		if strings.TrimSpace(line) == linuxSectionSeparator {
+			sections = append(sections, current.String())
+			current.Reset()
+			continue
+		}
+		current.WriteString(line)
+		current.WriteByte('\n')
+	}
+	sections = append(sections, current.String())
+	for len(sections) < want {
+		sections = append(sections, "")
+	}
+	return sections
+}
+
+func (c *Collector) collectLinux(client *ssh.Client, s *models.Server) (*models.MetricPoint, error) {
+	out, err := RunCmd(client, linuxMetricsCommand)
+	if err != nil && strings.TrimSpace(out) == "" {
+		return nil, fmt.Errorf("linux metrics: %w", err)
+	}
+	sections := splitLinuxSections(out, linuxSectionCount)
+
+	m := &models.MetricPoint{RecordedAt: time.Now()}
+	m.CPUPercent = cpuPercentFromSamples(sections[linuxSectionStatFirst], sections[linuxSectionStatSecond])
+	m.Load1, m.Load5, m.Load15 = parseLoadAvg(sections[linuxSectionLoadAvg])
+	m.MemoryUsed, m.MemoryTotal = parseMemInfo(sections[linuxSectionMemInfo])
+
+	// Cumulative counters from /proc/net/dev and /proc/diskstats -> bytes/sec.
+	netRxRaw, netTxRaw := parseNetDev(sections[linuxSectionNetDev])
+	m.NetworkRxTotal, m.NetworkTxTotal = netRxRaw, netTxRaw
+	diskRxRaw, diskTxRaw := parseDiskStats(sections[linuxSectionDiskStats])
+	c.applyRates(s.ID, m, netRxRaw, netTxRaw, diskRxRaw, diskTxRaw)
+
+	m.UptimeSeconds = parseUptime(sections[linuxSectionUptime])
+	diskUsed, diskTotal := parseDiskUsage(sections[linuxSectionDiskUsage])
+	m.DiskUsed = diskUsed
+
+	cores := parseNproc(sections[linuxSectionNproc])
+	dockerVersion := parseDockerVersion(sections[linuxSectionDocker])
+	c.syncHostInfo(s.ID, cores, m.MemoryTotal, diskTotal, dockerVersion)
 
 	return m, nil
 }
@@ -472,40 +698,11 @@ func RunCmd(client *ssh.Client, cmd string) (string, error) {
 	return buf.String(), err
 }
 
-func collectCPU(client *ssh.Client) float64 {
-	// Take two samples 500ms apart to get instantaneous CPU usage
-	out1, err := RunCmd(client, "cat /proc/stat")
-	if err != nil {
-		return 0
-	}
-	time.Sleep(500 * time.Millisecond)
-	out2, err := RunCmd(client, "cat /proc/stat")
-	if err != nil {
-		return 0
-	}
-
-	parseCPULine := func(out string) (idle, total int64) {
-		for _, line := range strings.Split(out, "\n") {
-			if strings.HasPrefix(line, "cpu ") {
-				fields := strings.Fields(line)
-				if len(fields) < 8 {
-					return
-				}
-				var vals [8]int64
-				for i := 0; i < 8 && i < len(fields)-1; i++ {
-					vals[i], _ = strconv.ParseInt(fields[i+1], 10, 64)
-				}
-				idle = vals[3] + vals[4]
-				total = vals[0] + vals[1] + vals[2] + vals[3] + vals[4] + vals[5] + vals[6] + vals[7]
-				return
-			}
-		}
-		return
-	}
-
-	idle1, total1 := parseCPULine(out1)
-	idle2, total2 := parseCPULine(out2)
-
+// cpuPercentFromSamples derives CPU usage from two /proc/stat snapshots taken
+// half a second apart.
+func cpuPercentFromSamples(first, second string) float64 {
+	idle1, total1 := parseProcStatCPU(first)
+	idle2, total2 := parseProcStatCPU(second)
 	dIdle := idle2 - idle1
 	dTotal := total2 - total1
 	if dTotal > 0 {
@@ -514,14 +711,29 @@ func collectCPU(client *ssh.Client) float64 {
 	return 0
 }
 
-func collectMemory(client *ssh.Client) (int64, int64) {
-	out, err := RunCmd(client, "cat /proc/meminfo")
-	if err != nil {
-		return 0, 0
+func parseProcStatCPU(out string) (idle, total int64) {
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "cpu ") {
+			fields := strings.Fields(line)
+			if len(fields) < 8 {
+				return
+			}
+			var vals [8]int64
+			for i := 0; i < 8 && i < len(fields)-1; i++ {
+				vals[i], _ = strconv.ParseInt(fields[i+1], 10, 64)
+			}
+			idle = vals[3] + vals[4]
+			total = vals[0] + vals[1] + vals[2] + vals[3] + vals[4] + vals[5] + vals[6] + vals[7]
+			return
+		}
 	}
+	return
+}
+
+// parseMemInfo returns used and total memory in bytes from /proc/meminfo.
+func parseMemInfo(out string) (int64, int64) {
 	var memTotal, memFree, buffers, cached int64
-	lines := strings.Split(out, "\n")
-	for _, line := range lines {
+	for _, line := range strings.Split(out, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 2 {
 			continue
@@ -546,11 +758,7 @@ func collectMemory(client *ssh.Client) (int64, int64) {
 	return used * 1024, memTotal * 1024
 }
 
-func collectLoad(client *ssh.Client) (float64, float64, float64) {
-	out, err := RunCmd(client, "cat /proc/loadavg")
-	if err != nil {
-		return 0, 0, 0
-	}
+func parseLoadAvg(out string) (float64, float64, float64) {
 	fields := strings.Fields(out)
 	if len(fields) < 3 {
 		return 0, 0, 0
@@ -561,14 +769,9 @@ func collectLoad(client *ssh.Client) (float64, float64, float64) {
 	return load1, load5, load15
 }
 
-func collectNetwork(client *ssh.Client) (int64, int64) {
-	out, err := RunCmd(client, "cat /proc/net/dev")
-	if err != nil {
-		return 0, 0
-	}
+func parseNetDev(out string) (int64, int64) {
 	var rxTotal, txTotal int64
-	lines := strings.Split(out, "\n")
-	for _, line := range lines {
+	for _, line := range strings.Split(out, "\n") {
 		if strings.Contains(line, ":") {
 			fields := strings.Fields(line)
 			if len(fields) >= 10 {
@@ -585,11 +788,7 @@ func collectNetwork(client *ssh.Client) (int64, int64) {
 	return rxTotal, txTotal
 }
 
-func collectUptime(client *ssh.Client) int64 {
-	out, err := RunCmd(client, "cat /proc/uptime")
-	if err != nil {
-		return 0
-	}
+func parseUptime(out string) int64 {
 	parts := strings.Fields(out)
 	if len(parts) > 0 {
 		sec, _ := strconv.ParseFloat(parts[0], 64)
@@ -598,30 +797,13 @@ func collectUptime(client *ssh.Client) int64 {
 	return 0
 }
 
-func collectDiskUsed(client *ssh.Client) int64 {
-	out, err := RunCmd(client, "df -B1 / | tail -1")
-	if err != nil {
-		return 0
-	}
-	fields := strings.Fields(strings.TrimSpace(out))
-	if len(fields) < 3 {
-		return 0
-	}
-	used, _ := strconv.ParseInt(fields[2], 10, 64)
-	return used
-}
-
-// collectDiskIO reads /proc/diskstats and returns cumulative bytes read/written for all disks.
+// parseDiskStats reads /proc/diskstats content and returns cumulative bytes
+// read/written for all disks.
 // Fields: major minor name reads_completed reads_merged sectors_read time_reading writes_completed writes_merged sectors_written time_writing ...
 // Sector size is 512 bytes. We sum sda/sdb/vda/nvme* etc, skip partitions (numbered).
-func collectDiskIO(client *ssh.Client) (int64, int64) {
-	out, err := RunCmd(client, "cat /proc/diskstats")
-	if err != nil {
-		return 0, 0
-	}
+func parseDiskStats(out string) (int64, int64) {
 	var readSectors, writeSectors int64
-	lines := strings.Split(out, "\n")
-	for _, line := range lines {
+	for _, line := range strings.Split(out, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 14 {
 			continue
@@ -650,34 +832,39 @@ func collectDiskIO(client *ssh.Client) (int64, int64) {
 	return readSectors * 512, writeSectors * 512
 }
 
-// collectSystemInfo returns cpu cores, total memory bytes, total disk bytes.
-func collectSystemInfo(client *ssh.Client) (int, int64, int64) {
-	// CPU cores
-	out, _ := RunCmd(client, "nproc")
+// parseDiskUsage parses `df -P -B1 /` output and returns used and total bytes
+// for the root filesystem. Fields are anchored from the end of the line
+// (…blocks used available capacity mount) so output still parses when a df
+// without -P wraps a long device name onto its own line.
+func parseDiskUsage(out string) (used, total int64) {
+	trimmed := strings.TrimSpace(out)
+	if trimmed == "" {
+		return 0, 0
+	}
+	lines := strings.Split(trimmed, "\n")
+	fields := strings.Fields(lines[len(lines)-1])
+	if len(fields) < 5 {
+		return 0, 0
+	}
+	total, _ = strconv.ParseInt(fields[len(fields)-5], 10, 64)
+	used, _ = strconv.ParseInt(fields[len(fields)-4], 10, 64)
+	return used, total
+}
+
+func parseNproc(out string) int {
 	cores, _ := strconv.Atoi(strings.TrimSpace(out))
+	return cores
+}
 
-	// Memory total from /proc/meminfo
-	out, _ = RunCmd(client, "cat /proc/meminfo")
-	var memTotalKB int64
-	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(line, "MemTotal:") {
-			fields := strings.Fields(line)
-			if len(fields) >= 2 {
-				memTotalKB, _ = strconv.ParseInt(fields[1], 10, 64)
-			}
-			break
-		}
+// parseDockerVersion sanity-checks the docker section of a metrics run: a real
+// server version is a short single token like "24.0.7". Anything else (error
+// text, sudo noise) means docker is not usable on the host.
+func parseDockerVersion(out string) string {
+	version := strings.TrimSpace(out)
+	if version == "" || len(version) > 31 || strings.ContainsAny(version, " \t\n") {
+		return ""
 	}
-
-	// Disk total from df (root filesystem)
-	out, _ = RunCmd(client, "df -B1 / | tail -1")
-	var diskTotal int64
-	fields := strings.Fields(strings.TrimSpace(out))
-	if len(fields) >= 2 {
-		diskTotal, _ = strconv.ParseInt(fields[1], 10, 64)
-	}
-
-	return cores, memTotalKB * 1024, diskTotal
+	return version
 }
 
 // windowsMetricsScript gathers all metrics in a single PowerShell invocation as
@@ -697,6 +884,7 @@ $disks = Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3'
 $disktotal = ($disks | Measure-Object -Property Size -Sum).Sum
 $diskfree = ($disks | Measure-Object -Property FreeSpace -Sum).Sum
 $queue = (Get-CimInstance Win32_PerfFormattedData_PerfOS_System).ProcessorQueueLength
+$docker = if (Get-Command docker -ErrorAction SilentlyContinue) { docker info --format "{{.ServerVersion}}" } else { '' }
 Write-Output ("cpu=" + [int64][math]::Round([double]$cpu))
 Write-Output ("memtotal=" + $os.TotalVisibleMemorySize)
 Write-Output ("memfree=" + $os.FreePhysicalMemory)
@@ -708,7 +896,8 @@ Write-Output ("uptime=" + $uptime)
 Write-Output ("cores=" + $cores)
 Write-Output ("disktotal=" + [int64]$disktotal)
 Write-Output ("diskfree=" + [int64]$diskfree)
-Write-Output ("queue=" + [int64]$queue)`
+Write-Output ("queue=" + [int64]$queue)
+Write-Output ("docker=" + $docker)`
 
 // encodePowerShell encodes a script as UTF-16LE base64 for -EncodedCommand,
 // which sidesteps quoting differences between cmd.exe and powershell default shells.
@@ -730,12 +919,18 @@ func (c *Collector) collectWindows(client *ssh.Client, s *models.Server) (*model
 	}
 
 	vals := make(map[string]int64)
+	dockerVersion := ""
 	for _, line := range strings.Split(out, "\n") {
 		k, v, ok := strings.Cut(strings.TrimSpace(line), "=")
 		if !ok {
 			continue
 		}
-		n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		v = strings.TrimSpace(v)
+		if k == "docker" {
+			dockerVersion = parseDockerVersion(v)
+			continue
+		}
+		n, err := strconv.ParseInt(v, 10, 64)
 		if err == nil {
 			vals[k] = n
 		}
@@ -761,50 +956,11 @@ func (c *Collector) collectWindows(client *ssh.Client, s *models.Server) (*model
 
 	netRxRaw, netTxRaw := vals["netrx"], vals["nettx"]
 	m.NetworkRxTotal, m.NetworkTxTotal = netRxRaw, netTxRaw
-	diskRxRaw, diskTxRaw := vals["diskread"], vals["diskwrite"]
-	now := m.RecordedAt
-	c.mu.Lock()
-	if prev, ok := c.prev[s.ID]; ok && prev.netRx <= netRxRaw && prev.netTx <= netTxRaw {
-		elapsed := now.Sub(prev.time).Seconds()
-		if elapsed > 0 {
-			m.NetworkRxBytes = int64(float64(netRxRaw-prev.netRx) / elapsed)
-			m.NetworkTxBytes = int64(float64(netTxRaw-prev.netTx) / elapsed)
-			m.DiskRxBytes = int64(float64(diskRxRaw-prev.diskRx) / elapsed)
-			m.DiskTxBytes = int64(float64(diskTxRaw-prev.diskTx) / elapsed)
-		}
-	}
-	c.prev[s.ID] = &prevStats{netRx: netRxRaw, netTx: netTxRaw, diskRx: diskRxRaw, diskTx: diskTxRaw, time: now}
-	c.mu.Unlock()
+	c.applyRates(s.ID, m, netRxRaw, netTxRaw, vals["diskread"], vals["diskwrite"])
 
-	if cores := int(vals["cores"]); cores > 0 {
-		models.UpdateServerSystemInfo(c.db.Raw, s.ID, cores, m.MemoryTotal, vals["disktotal"])
-	}
-
-	dockerVersion := collectWindowsDockerVersion(client)
-	models.UpdateDockerInfo(c.db.Raw, s.ID, dockerVersion != "", dockerVersion)
+	c.syncHostInfo(s.ID, int(vals["cores"]), m.MemoryTotal, vals["disktotal"], dockerVersion)
 
 	return m, nil
-}
-
-// collectWindowsDockerVersion uses double quotes: single quotes are not stripped
-// by cmd.exe, which is the default shell for Windows OpenSSH.
-func collectWindowsDockerVersion(client *ssh.Client) string {
-	out, err := RunCmd(client, `docker info --format "{{.ServerVersion}}"`)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(out)
-}
-
-func collectDockerVersion(client *ssh.Client) string {
-	out, err := RunCmd(client, "docker info --format '{{.ServerVersion}}'")
-	if err != nil {
-		out, err = RunCmd(client, "sudo docker info --format '{{.ServerVersion}}'")
-		if err != nil {
-			return ""
-		}
-	}
-	return strings.TrimSpace(out)
 }
 
 // RunDockerCmd runs a docker command, falling back to sudo docker if needed.

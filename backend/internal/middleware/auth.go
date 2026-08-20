@@ -50,9 +50,11 @@ func extractBearerToken(c *gin.Context) string {
 }
 
 func parseToken(c *gin.Context, tokenString string, cfg *config.Config) {
+	// Tokens are always issued with HS256; restricting accepted algorithms
+	// closes the door on algorithm-confusion attacks.
 	token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
 		return []byte(cfg.JWTSecret), nil
-	})
+	}, jwt.WithValidMethods([]string{"HS256"}))
 	if err != nil || !token.Valid {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 		return
@@ -62,11 +64,17 @@ func parseToken(c *gin.Context, tokenString string, cfg *config.Config) {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token claims"})
 		return
 	}
-	userID, err := uuid.Parse(claims["user_id"].(string))
+	userIDClaim, ok := claims["user_id"].(string)
+	if !ok {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token claims"})
+		return
+	}
+	userID, err := uuid.Parse(userIDClaim)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid user id in token"})
 		return
 	}
+	username, _ := claims["username"].(string)
 	c.Set("user_id", userID)
-	c.Set("username", claims["username"])
+	c.Set("username", username)
 }
