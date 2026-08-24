@@ -429,25 +429,11 @@ func (c *Collector) getClient(s *models.Server, fingerprint [32]byte) (*pooledCl
 		c.dropClient(s.ID, pc)
 	}
 
-	config, err := buildSSHClientConfig(s.SSHUsername, s.SSHPassword, s.SSHKey, s.SSHHostKey, sshDialTimeout)
+	client, conn, err := dialSSHClientConn(s.Host, s.Port, s.SSHUsername, s.SSHPassword, s.SSHKey, s.SSHHostKey, sshDialTimeout)
 	if err != nil {
 		return nil, err
 	}
-	addr := net.JoinHostPort(s.Host, strconv.Itoa(s.Port))
-	tcpConn, err := net.DialTimeout("tcp", addr, sshDialTimeout)
-	if err != nil {
-		return nil, fmt.Errorf("ssh dial: %w", err)
-	}
-	if err := tcpConn.SetDeadline(time.Now().Add(sshDialTimeout)); err != nil {
-		tcpConn.Close()
-		return nil, fmt.Errorf("ssh deadline: %w", err)
-	}
-	sshConn, chans, reqs, err := ssh.NewClientConn(tcpConn, addr, config)
-	if err != nil {
-		tcpConn.Close()
-		return nil, fmt.Errorf("ssh handshake: %w", err)
-	}
-	pc = &pooledClient{client: ssh.NewClient(sshConn, chans, reqs), conn: tcpConn, fingerprint: fingerprint}
+	pc = &pooledClient{client: client, conn: conn, fingerprint: fingerprint}
 	c.clientMu.Lock()
 	c.clients[s.ID] = pc
 	c.clientMu.Unlock()

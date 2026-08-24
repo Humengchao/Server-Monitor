@@ -11,14 +11,19 @@ import (
 	"unicode"
 
 	"server-monitor/internal/models"
+	"server-monitor/internal/services"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
 
-type ServerHandler struct{}
+type ServerHandler struct {
+	sshCache *services.SSHConnCache
+}
 
-func NewServerHandler() *ServerHandler { return &ServerHandler{} }
+func NewServerHandler(sshCache *services.SSHConnCache) *ServerHandler {
+	return &ServerHandler{sshCache: sshCache}
+}
 
 type CreateServerRequest struct {
 	Name            string     `json:"name" binding:"required"`
@@ -327,6 +332,9 @@ func (h *ServerHandler) Delete(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete server"})
 		return
 	}
+	// Close any cached Docker-API connection so nothing stays connected to a
+	// host that was just removed from the panel.
+	h.sshCache.Drop(id)
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
 }
 

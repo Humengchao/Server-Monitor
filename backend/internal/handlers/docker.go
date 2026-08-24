@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -21,19 +22,17 @@ import (
 // validDockerID matches Docker container IDs (hex, 12-64 chars)
 var validDockerID = regexp.MustCompile(`^[a-fA-F0-9]{1,64}$`)
 
-type DockerHandler struct{}
-
-// checkDockerCached uses the cached has_docker field from the servers table.
-// Returns (installed, version) without SSH.
-func (h *DockerHandler) checkDockerCached(db *models.DB, serverID uuid.UUID) (bool, string) {
-	s, err := models.GetServerByID(db.Raw, serverID)
-	if err != nil {
-		return false, ""
-	}
-	return s.HasDocker, s.DockerVersion
+// DockerHandler serves its short commands (list, action, logs) over cached
+// SSH connections so every click doesn't pay a full handshake. Interactive
+// exec sessions dial their own connection: they are long-lived and their
+// teardown closes the client.
+type DockerHandler struct {
+	sshCache *services.SSHConnCache
 }
 
-func NewDockerHandler() *DockerHandler { return &DockerHandler{} }
+func NewDockerHandler(sshCache *services.SSHConnCache) *DockerHandler {
+	return &DockerHandler{sshCache: sshCache}
+}
 
 type DockerContainer struct {
 	ID      string `json:"id"`
@@ -53,12 +52,15 @@ func (h *DockerHandler) CheckDocker(c *gin.Context) {
 		return
 	}
 	db := c.MustGet("db").(*models.DB)
-	if _, err := models.GetServerByIDAndUser(db, id, userID); err != nil {
+	installed, version, err := models.GetServerDockerInfo(db.Raw, id, userID)
+	if err == sql.ErrNoRows {
 		c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
 		return
 	}
-
-	installed, version := h.checkDockerCached(db, id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check docker"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"installed": installed,
 		"version":   version,
@@ -79,12 +81,11 @@ func (h *DockerHandler) ListContainers(c *gin.Context) {
 		return
 	}
 
-	client, err := services.DialSSH(server.Host, server.Port, server.SSHUsername, server.SSHPassword, server.SSHKey, server.SSHHostKey)
+	client, err := h.sshCache.Get(server)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "SSH connection failed"})
 		return
 	}
-	defer client.Close()
 
 	output, err := services.RunDockerCmd(client, `ps -a --format '{"id":"{{.ID}}","name":"{{.Names}}","image":"{{.Image}}","status":"{{.Status}}","state":"{{.State}}","ports":"{{.Ports}}","created":"{{.CreatedAt}}"}'`)
 	if err != nil {
@@ -136,12 +137,11 @@ func (h *DockerHandler) ContainerAction(c *gin.Context) {
 		return
 	}
 
-	client, err := services.DialSSH(server.Host, server.Port, server.SSHUsername, server.SSHPassword, server.SSHKey, server.SSHHostKey)
+	client, err := h.sshCache.Get(server)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "SSH connection failed"})
 		return
 	}
-	defer client.Close()
 
 	_, err = services.RunDockerCmd(client, action+" "+containerID)
 	if err != nil {
@@ -177,12 +177,11 @@ func (h *DockerHandler) ContainerLogs(c *gin.Context) {
 		return
 	}
 
-	client, err := services.DialSSH(server.Host, server.Port, server.SSHUsername, server.SSHPassword, server.SSHKey, server.SSHHostKey)
+	client, err := h.sshCache.Get(server)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "SSH connection failed"})
 		return
 	}
-	defer client.Close()
 
 	cmd := fmt.Sprintf("logs --tail %d %s", tailNum, containerID)
 	output, err := services.RunDockerCmd(client, cmd)
@@ -221,6 +220,9 @@ func (h *DockerHandler) ContainerExec(c *gin.Context) {
 	}
 	defer conn.Close()
 
+	// Exec sessions intentionally bypass the connection cache: they live as
+	// long as the websocket and TerminalSession.Close closes the whole client,
+	// which would kill a shared cached connection for everyone else.
 	client, err := services.DialSSH(server.Host, server.Port, server.SSHUsername, server.SSHPassword, server.SSHKey, server.SSHHostKey)
 	if err != nil {
 		conn.WriteMessage(websocket.TextMessage, []byte("SSH connection failed: "+err.Error()))

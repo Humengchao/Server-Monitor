@@ -2,7 +2,9 @@ package services
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
+	"log"
 	"net"
 	"strconv"
 	"sync"
@@ -143,4 +145,34 @@ func DialSSH(host string, port int, username, password, key, hostKey string) (*s
 		return nil, err
 	}
 	return ssh.Dial("tcp", net.JoinHostPort(host, strconv.Itoa(port)), config)
+}
+
+// dialSSHClientConn dials an SSH connection and returns both the client and
+// the underlying TCP connection, so callers keeping the connection pooled can
+// arm per-operation deadlines on the transport. The dial deadline is cleared
+// once the handshake completes.
+func dialSSHClientConn(host string, port int, username, password, key, hostKey string, timeout time.Duration) (*ssh.Client, net.Conn, error) {
+	config, err := buildSSHClientConfig(username, password, key, hostKey, timeout)
+	if err != nil {
+		return nil, nil, err
+	}
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	tcpConn, err := net.DialTimeout("tcp", addr, timeout)
+	if err != nil {
+		return nil, nil, fmt.Errorf("ssh dial: %w", err)
+	}
+	if err := tcpConn.SetDeadline(time.Now().Add(timeout)); err != nil {
+		tcpConn.Close()
+		return nil, nil, fmt.Errorf("ssh deadline: %w", err)
+	}
+	sshConn, chans, reqs, err := ssh.NewClientConn(tcpConn, addr, config)
+	if err != nil {
+		tcpConn.Close()
+		return nil, nil, fmt.Errorf("ssh handshake: %w", err)
+	}
+	if err := tcpConn.SetDeadline(time.Time{}); err != nil {
+		// The transport is live; a failed reset only risks a spurious timeout.
+		log.Printf("ssh: clear dial deadline for %s: %v", addr, err)
+	}
+	return ssh.NewClient(sshConn, chans, reqs), tcpConn, nil
 }

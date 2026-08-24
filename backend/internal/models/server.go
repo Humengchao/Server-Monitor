@@ -294,6 +294,19 @@ func (s *Server) ResolveCredentials(db *DB) error {
 	return nil
 }
 
+// GetServerDockerInfo returns the cached Docker availability for a server,
+// scoped to the owning user, without touching SSH credentials.
+func GetServerDockerInfo(db *sql.DB, id, userID uuid.UUID) (bool, string, error) {
+	var hasDocker bool
+	var version string
+	err := db.QueryRow(
+		`SELECT COALESCE(has_docker, FALSE), COALESCE(docker_version, '')
+		 FROM servers WHERE id=$1 AND user_id=$2`,
+		id, userID,
+	).Scan(&hasDocker, &version)
+	return hasDocker, version, err
+}
+
 func ServerHasDirectSSHAuth(db *sql.DB, id, userID uuid.UUID) (bool, error) {
 	var hasAuth bool
 	err := db.QueryRow(

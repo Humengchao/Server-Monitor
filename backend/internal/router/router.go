@@ -10,11 +10,12 @@ import (
 	"server-monitor/internal/handlers"
 	"server-monitor/internal/middleware"
 	"server-monitor/internal/models"
+	"server-monitor/internal/services"
 
 	"github.com/gin-gonic/gin"
 )
 
-func Setup(db *sql.DB, cfg *config.Config) (*gin.Engine, error) {
+func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache) (*gin.Engine, error) {
 	r := gin.New()
 	// Only honor X-Forwarded-For from the configured reverse proxies; gin's
 	// default trusts every client, which would let direct requests spoof their
@@ -62,11 +63,11 @@ func Setup(db *sql.DB, cfg *config.Config) (*gin.Engine, error) {
 	})
 
 	authH := handlers.NewAuthHandler(cfg)
-	serverH := handlers.NewServerHandler()
+	serverH := handlers.NewServerHandler(sshCache)
 	tagH := handlers.NewTagHandler()
 	metricsH := handlers.NewMetricsHandler()
 	sshH := handlers.NewSSHHandler()
-	dockerH := handlers.NewDockerHandler()
+	dockerH := handlers.NewDockerHandler(sshCache)
 	credH := handlers.NewCredentialHandler()
 	publicStatusH := handlers.NewPublicStatusHandler()
 

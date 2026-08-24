@@ -63,8 +63,11 @@ func main() {
 	collector := services.NewCollector(dbWrapper, time.Duration(cfg.PollInterval)*time.Second)
 	collector.Start()
 
+	// Shared SSH connection cache for interactive API calls (Docker management).
+	sshCache := services.NewSSHConnCache()
+
 	log.Printf("Server starting on :%s", cfg.ServerPort)
-	r, err := router.Setup(db, cfg)
+	r, err := router.Setup(db, cfg, sshCache)
 	if err != nil {
 		exitWithError(exitConfigError, "Router setup failed", err)
 	}
@@ -96,6 +99,7 @@ func main() {
 
 	log.Println("Shutting down server...")
 	collector.Stop()
+	sshCache.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
