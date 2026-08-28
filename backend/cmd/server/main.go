@@ -63,11 +63,17 @@ func main() {
 	collector := services.NewCollector(dbWrapper, time.Duration(cfg.PollInterval)*time.Second)
 	collector.Start()
 
+	// Evaluate threshold alert rules independently of the collector so a slow
+	// host cannot delay notifications for the rest of the fleet.
+	notifier := services.NewWebhookNotifier(cfg.AllowPrivateWebhooks)
+	alertEngine := services.NewAlertEngine(db, time.Duration(cfg.AlertInterval)*time.Second, notifier)
+	alertEngine.Start()
+
 	// Shared SSH connection cache for interactive API calls (Docker management).
 	sshCache := services.NewSSHConnCache()
 
 	log.Printf("Server starting on :%s", cfg.ServerPort)
-	r, err := router.Setup(db, cfg, sshCache)
+	r, err := router.Setup(db, cfg, sshCache, notifier)
 	if err != nil {
 		exitWithError(exitConfigError, "Router setup failed", err)
 	}
@@ -99,6 +105,7 @@ func main() {
 
 	log.Println("Shutting down server...")
 	collector.Stop()
+	alertEngine.Stop()
 	sshCache.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

@@ -16,6 +16,10 @@ services:
       SERVER_PORT: "19527"
       CORS_ORIGIN: http://${DOMAIN:-localhost:19080}
       POLL_INTERVAL: ${POLL_INTERVAL:-3}
+      ALERT_INTERVAL: ${ALERT_INTERVAL:-30}
+      # Alert webhooks may not target the host's private network unless this is
+      # explicitly enabled. See README security notes.
+      ALLOW_PRIVATE_WEBHOOKS: ${ALLOW_PRIVATE_WEBHOOKS:-false}
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"

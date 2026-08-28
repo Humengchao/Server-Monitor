@@ -32,6 +32,40 @@ The public probe refreshes every 15 seconds and exposes only anonymous node alia
 
 ---
 
+## Features
+
+| Area | Capabilities |
+|---|---|
+| Server dashboard | Card / list views (choice remembered), search, filter by tag and online state, sort by CPU / memory / disk / uptime / expiry |
+| Overview stats | Total, online / offline, average CPU and memory, monthly-normalized and currency-converted spend |
+| Server detail | Resource stat tiles; six charts (CPU / memory / network / disk I/O / load / latency) with adaptive units and theme-aware styling; range presets plus custom windows; CSV export of the charted window |
+| Alert center | Threshold rules and an alert timeline, with webhook delivery and a built-in connectivity test |
+| Batch operations | Multi-select servers to add/remove tags, delete, export an inventory CSV, or run one command across up to 50 hosts with per-host results |
+| Process management | Live process table on the detail page, sortable by PID / user / CPU / memory / RSS / uptime, with search, pausable auto-refresh, and terminate (SIGTERM / SIGKILL) |
+| Operations | Web SSH terminal, Docker container management (start / stop / logs / interactive shell), shared SSH credential store, per-server notes |
+| Account security | Change your password and sign every other device out at once |
+| Public status page | Anonymized probe page whose API excludes identity and connection details at the query level |
+
+### Alerting
+
+Rules are evaluated by a dedicated backend loop (every 30s by default, `ALERT_INTERVAL`) that reads only the latest samples already in the database -- it never opens extra connections to monitored hosts.
+
+- **Metrics**: CPU, memory and disk usage (%), 1-minute load, network latency (ms), and host offline.
+- **Sustained duration**: a threshold must hold for the configured window before an alert opens, so transient spikes don't page you. Offline rules never fire sooner than 2 minutes, matching the dashboard's online window.
+- **Scope**: target one server, or leave it empty to cover every server you own, including ones added later.
+- **Notifications**: a JSON payload is POSTed to the configured webhook on both firing and recovery (see [API.md](API.md)); "Send test" verifies the endpoint before you save.
+- **Durable state**: active alerts live in the database, so a restart neither re-notifies nor loses a pending recovery. If a host disappears for good, threshold alerts resolve instead of hanging open forever.
+
+### Batch operations
+
+Enter multi-select from the dashboard toolbar; both the card and list views become selectable and an action bar slides up.
+
+- **Bulk tags / delete / inventory export**: adding tags is idempotent; deleting cascades to metric history, alert events and tag links; the exported inventory contains no secrets (the API never returns them).
+- **Bulk command execution**: up to 50 hosts, 8 at a time, 60s and 64 KB per host. The confirmation dialog lists the exact command and every target; commands must be a single line, and patterns like `rm -rf`, `reboot` or writing to a block device raise an extra warning.
+- Each host reports its own exit status and combined output (stdout + stderr) — **one failure does not stop the rest**. Commands run as the configured SSH user with no privilege escalation.
+
+---
+
 ## Security Design
 
 ### Password Security
@@ -48,6 +82,7 @@ The public probe refreshes every 15 seconds and exposes only anonymous node alia
 ### Authentication & Authorization
 
 - Stateless authentication based on **JWT (HS256)** with a 72-hour token expiry
+- **Changing a password immediately revokes every token issued to that account beforehand**: the user row carries a cutoff timestamp and authentication rejects any token with an earlier `iat`. The session that made the change receives a freshly issued token, so it is not cut off by its own action
 - All API requests are authenticated via Bearer Token; WebSocket connections use Query Token
 - All protected management API queries are strictly filtered by `user_id` for tenant isolation; the public probe uses a separate minimal data model that returns anonymous health metrics only
 
@@ -56,6 +91,7 @@ The public probe refreshes every 15 seconds and exposes only anonymous node alia
 - Login and registration endpoints are protected by **token bucket rate limiting** (5 requests/min/IP) to prevent brute-force attacks and abuse
 - Request parameters are automatically validated via struct binding to prevent malformed input
 - Configurable CORS whitelist to restrict cross-origin request sources
+- Alert webhooks **reject private targets by default**: URLs resolving to loopback / RFC1918 / link-local / CGNAT addresses are refused at save time and redirects are never followed, so the alerting pipeline can't be used as an SSRF probe into the server's private network (opt out with `ALLOW_PRIVATE_WEBHOOKS=true`). The webhook self-test endpoint is additionally rate limited to 6 requests/min/IP
 
 ### Transport Security
 
@@ -140,9 +176,9 @@ Add the following secrets in **Settings -> Secrets and variables -> actions**:
 - [x] **Docker Management** -- View Docker container list and status on server detail page
 - [x] **SSH Key Management** -- Manage SSH keys independently (create, name, associate with servers)
 - [x] **SSH Credential Management** -- Manage reusable SSH usernames and passwords
-- [ ] **Account Settings** -- Allow users to change passwords and manage account security
-- [ ] **Server Groups** -- Create server groups, filter and batch-operate by group
-- [ ] **Process List** -- Show current processes on detail page, sortable by CPU / Memory / Name / PID
+- [x] **Account Settings** -- Change your password from Settings; other sessions are revoked immediately
+- [x] **Server Groups / Batch Operations** -- Tags already cover grouping, so this landed as batch actions: bulk tagging, bulk delete, bulk command execution, inventory export
+- [x] **Process List** -- Live process table on the detail page, sortable by CPU / memory / PID / uptime, with search and terminate
 - [x] **Disk Usage** -- Show current disk usage on detail page
-- [ ] **Alert Notifications** -- Push notifications via email or Bark when a server goes offline or CPU exceeds 80%
+- [x] **Alert Notifications** -- Threshold rules (CPU / memory / disk / load / latency / offline) with webhook delivery, see below
 - [x] **Public Probe** -- Anonymous public status page and minimal status API with server identity and connection details removed

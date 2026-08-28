@@ -17,6 +17,7 @@ const Settings = lazy(() => import('./pages/Settings'));
 const LoginHistory = lazy(() => import('./pages/LoginHistory'));
 const Docker = lazy(() => import('./pages/Docker'));
 const Credentials = lazy(() => import('./pages/Credentials'));
+const Alerts = lazy(() => import('./pages/Alerts'));
 const PublicStatus = lazy(() => import('./pages/PublicStatus'));
 
 const antdLocales: Record<string, typeof enUS> = { en: enUS, zh: zhCN };
@@ -101,6 +102,7 @@ export default function App() {
               <Route path="login-history" element={<LoginHistory />} />
               <Route path="docker" element={<Docker />} />
               <Route path="credentials" element={<Credentials />} />
+              <Route path="alerts" element={<Alerts />} />
             </Route>
             <Route path="*" element={<Navigate to="/dashboard" />} />
           </Routes>

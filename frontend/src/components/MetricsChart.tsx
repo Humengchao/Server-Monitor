@@ -1,88 +1,252 @@
-import React, { useMemo } from 'react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import React, { useContext, useMemo } from 'react';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { useTranslation } from 'react-i18next';
 import { MetricPoint } from '../api/servers';
+import { DarkModeContext } from '../App';
 
 interface Props {
   history: MetricPoint[];
 }
 
+interface SeriesSpec {
+  key: string;
+  label: string;
+  color: string;
+}
+
 // Downsample data to keep chart rendering performant.
-function downsample(data: any[], maxPoints: number): any[] {
+function downsample<T>(data: T[], maxPoints: number): T[] {
   if (data.length <= maxPoints) return data;
   const step = data.length / maxPoints;
   return Array.from({ length: maxPoints }, (_, i) => data[Math.floor(i * step)]);
 }
 
-function MetricsChart({ history }: Props) {
-  const { t } = useTranslation();
+/**
+ * Picks a byte unit that keeps the largest sample in a readable range, so a
+ * host doing 300 KB/s isn't drawn as a flat line of 0.00 MB/s.
+ */
+function pickRateUnit(peak: number): { divisor: number; suffix: string } {
+  if (peak >= 1024 ** 3) return { divisor: 1024 ** 3, suffix: 'GB/s' };
+  if (peak >= 1024 ** 2) return { divisor: 1024 ** 2, suffix: 'MB/s' };
+  if (peak >= 1024) return { divisor: 1024, suffix: 'KB/s' };
+  return { divisor: 1, suffix: 'B/s' };
+}
 
-  const data = useMemo(() => {
-    if (!history || history.length === 0) return [];
-    const raw = history.map((p) => ({
-      time: new Date(p.recorded_at).toLocaleString(),
-      CPU: Math.round(p.cpu_percent),
-      Memory: Math.round((p.memory_used / p.memory_total) * 100) || 0,
-      [t('metrics.networkRx')]: +(p.network_rx_bytes / 1024 / 1024).toFixed(2),
-      [t('metrics.networkTx')]: +(p.network_tx_bytes / 1024 / 1024).toFixed(2),
-      [t('metrics.diskRead')]: +(p.disk_rx_bytes / 1024 / 1024).toFixed(2),
-      [t('metrics.diskWrite')]: +(p.disk_tx_bytes / 1024 / 1024).toFixed(2),
-    }));
-    return downsample(raw, 300);
-  }, [history, t]);
+function formatAxisTime(iso: string, spansMultipleDays: boolean): string {
+  const date = new Date(iso);
+  const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (!spansMultipleDays) return time;
+  return `${date.toLocaleDateString([], { month: '2-digit', day: '2-digit' })} ${time}`;
+}
 
-  if (data.length === 0) {
-    return <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>{t('metrics.noData')}</div>;
-  }
+interface TooltipEntry {
+  dataKey: string;
+  name: string;
+  color: string;
+  value: number;
+}
 
-  const rxKey = t('metrics.networkRx');
-  const txKey = t('metrics.networkTx');
-  const readKey = t('metrics.diskRead');
-  const writeKey = t('metrics.diskWrite');
+interface ChartTooltipProps {
+  active?: boolean;
+  payload?: TooltipEntry[];
+  label?: string;
+  unit: string;
+  dark: boolean;
+}
+
+function ChartTooltip({ active, payload, label, unit, dark }: ChartTooltipProps) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className={`chart-tooltip${dark ? ' dark' : ''}`}>
+      <span className="chart-tooltip-time">{label}</span>
+      {payload.map((entry) => (
+        <span key={entry.dataKey} className="chart-tooltip-row">
+          <i style={{ background: entry.color }} />
+          <em>{entry.name}</em>
+          <strong>{typeof entry.value === 'number' ? entry.value.toFixed(2) : entry.value}{unit}</strong>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** One row of the chart dataset: a formatted timestamp plus numeric series. */
+type ChartRow = { time: string } & Record<string, string | number>;
+
+function MetricPanel({
+  title, data, series, unit, dark, domain,
+}: {
+  title: string;
+  data: ChartRow[];
+  series: SeriesSpec[];
+  unit: string;
+  dark: boolean;
+  domain?: [number, number];
+}) {
+  const grid = dark ? 'rgba(255,255,255,.08)' : 'rgba(24,32,51,.07)';
+  const axis = dark ? 'rgba(226,232,248,.5)' : 'rgba(85,95,120,.75)';
 
   return (
-    <div>
-      <h4>{t('metrics.cpuMemory')}</h4>
-      <div style={{ overflow: 'hidden', position: 'relative' }}>
-        <ResponsiveContainer width="100%" height={200}>
-          <AreaChart data={data}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="time" fontSize={12} />
-            <YAxis unit="%" />
-            <Tooltip wrapperStyle={{ position: 'absolute', pointerEvents: 'none' }} />
-            <Area type="monotone" dataKey="CPU" stroke="#ff4d4f" fill="#ff4d4f" fillOpacity={0.1} isAnimationActive={false} />
-            <Area type="monotone" dataKey="Memory" stroke="#1890ff" fill="#1890ff" fillOpacity={0.1} isAnimationActive={false} />
+    <section className="chart-panel">
+      <header className="chart-panel-head">
+        <h4>{title}</h4>
+        <div className="chart-legend">
+          {series.map((s) => (
+            <span key={s.key}><i style={{ background: s.color }} />{s.label}</span>
+          ))}
+        </div>
+      </header>
+      <div className="chart-canvas">
+        <ResponsiveContainer width="100%" height={210}>
+          {/* The top margin leaves room for the highest Y tick label, which
+              recharts otherwise clips against the container edge. */}
+          <AreaChart data={data} margin={{ top: 12, right: 10, left: 0, bottom: 0 }}>
+            <defs>
+              {series.map((s) => (
+                <linearGradient key={s.key} id={`grad-${s.key}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={s.color} stopOpacity={0.34} />
+                  <stop offset="100%" stopColor={s.color} stopOpacity={0.02} />
+                </linearGradient>
+              ))}
+            </defs>
+            <CartesianGrid stroke={grid} vertical={false} />
+            <XAxis
+              dataKey="time"
+              tick={{ fontSize: 11, fill: axis }}
+              tickLine={false}
+              axisLine={{ stroke: grid }}
+              minTickGap={44}
+            />
+            <YAxis
+              tick={{ fontSize: 11, fill: axis }}
+              tickLine={false}
+              axisLine={false}
+              // Wide enough for the longest label a byte-rate unit produces
+              // ("450 KB/s"), so ticks never wrap onto a clipped second line.
+              width={unit.length > 2 ? 74 : 46}
+              domain={domain}
+              tickFormatter={(value: number) => `${value}${unit}`}
+            />
+            <Tooltip
+              cursor={{ stroke: dark ? 'rgba(255,255,255,.22)' : 'rgba(24,32,51,.16)', strokeWidth: 1 }}
+              wrapperStyle={{ position: 'absolute', pointerEvents: 'none', outline: 'none' }}
+              content={<ChartTooltip unit={unit} dark={dark} />}
+            />
+            <Legend content={() => null} />
+            {series.map((s) => (
+              <Area
+                key={s.key}
+                type="monotone"
+                dataKey={s.key}
+                name={s.label}
+                stroke={s.color}
+                strokeWidth={1.8}
+                fill={`url(#grad-${s.key})`}
+                isAnimationActive={false}
+                dot={false}
+                activeDot={{ r: 3, strokeWidth: 0 }}
+              />
+            ))}
           </AreaChart>
         </ResponsiveContainer>
       </div>
+    </section>
+  );
+}
 
-      <h4 style={{ marginTop: 24 }}>{t('metrics.networkTraffic')}</h4>
-      <div style={{ overflow: 'hidden', position: 'relative' }}>
-        <ResponsiveContainer width="100%" height={200}>
-          <AreaChart data={data}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="time" fontSize={12} />
-            <YAxis unit=" MB/s" />
-            <Tooltip wrapperStyle={{ position: 'absolute', pointerEvents: 'none' }} />
-            <Area type="monotone" dataKey={rxKey} stroke="#52c41a" fill="#52c41a" fillOpacity={0.1} isAnimationActive={false} />
-            <Area type="monotone" dataKey={txKey} stroke="#722ed1" fill="#722ed1" fillOpacity={0.1} isAnimationActive={false} />
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
+function MetricsChart({ history }: Props) {
+  const { t } = useTranslation();
+  const dark = useContext(DarkModeContext);
 
-      <h4 style={{ marginTop: 24 }}>{t('metrics.diskIO')}</h4>
-      <div style={{ overflow: 'hidden', position: 'relative' }}>
-        <ResponsiveContainer width="100%" height={200}>
-          <AreaChart data={data}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="time" fontSize={12} />
-            <YAxis unit=" MB/s" />
-            <Tooltip wrapperStyle={{ position: 'absolute', pointerEvents: 'none' }} />
-            <Area type="monotone" dataKey={readKey} stroke="#fa8c16" fill="#fa8c16" fillOpacity={0.1} isAnimationActive={false} />
-            <Area type="monotone" dataKey={writeKey} stroke="#eb2f96" fill="#eb2f96" fillOpacity={0.1} isAnimationActive={false} />
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
+  const { rows, netUnit, diskUnit, hasLatency } = useMemo(() => {
+    if (!history || history.length === 0) {
+      return { rows: [], netUnit: { divisor: 1, suffix: 'B/s' }, diskUnit: { divisor: 1, suffix: 'B/s' }, hasLatency: false };
+    }
+    const sampled = downsample(history, 300);
+    const first = new Date(sampled[0].recorded_at);
+    const last = new Date(sampled[sampled.length - 1].recorded_at);
+    const spansMultipleDays = last.getTime() - first.getTime() > 24 * 3600 * 1000;
+
+    const netPeak = Math.max(...sampled.map((p) => Math.max(p.network_rx_bytes, p.network_tx_bytes)), 0);
+    const diskPeak = Math.max(...sampled.map((p) => Math.max(p.disk_rx_bytes, p.disk_tx_bytes)), 0);
+    const net = pickRateUnit(netPeak);
+    const disk = pickRateUnit(diskPeak);
+
+    return {
+      netUnit: net,
+      diskUnit: disk,
+      hasLatency: sampled.some((p) => p.latency_ms > 0),
+      rows: sampled.map((p) => ({
+        time: formatAxisTime(p.recorded_at, spansMultipleDays),
+        cpu: Math.round(p.cpu_percent * 10) / 10,
+        memory: p.memory_total ? Math.round((p.memory_used / p.memory_total) * 1000) / 10 : 0,
+        rx: Math.round((p.network_rx_bytes / net.divisor) * 100) / 100,
+        tx: Math.round((p.network_tx_bytes / net.divisor) * 100) / 100,
+        read: Math.round((p.disk_rx_bytes / disk.divisor) * 100) / 100,
+        write: Math.round((p.disk_tx_bytes / disk.divisor) * 100) / 100,
+        load1: Math.round(p.load_1 * 100) / 100,
+        load5: Math.round(p.load_5 * 100) / 100,
+        latency: p.latency_ms,
+      })),
+    };
+  }, [history]);
+
+  if (rows.length === 0) {
+    return <div className="chart-empty">{t('metrics.noData')}</div>;
+  }
+
+  return (
+    <div className="metrics-charts">
+      <MetricPanel
+        title={t('metrics.cpuMemory')}
+        data={rows}
+        dark={dark}
+        unit="%"
+        domain={[0, 100]}
+        series={[
+          { key: 'cpu', label: t('metrics.cpu'), color: '#5d7df7' },
+          { key: 'memory', label: t('metrics.memory'), color: '#18b690' },
+        ]}
+      />
+      <MetricPanel
+        title={t('metrics.networkTraffic')}
+        data={rows}
+        dark={dark}
+        unit={` ${netUnit.suffix}`}
+        series={[
+          { key: 'rx', label: t('metrics.download'), color: '#39b8a4' },
+          { key: 'tx', label: t('metrics.upload'), color: '#8d6dd7' },
+        ]}
+      />
+      <MetricPanel
+        title={t('metrics.diskIO')}
+        data={rows}
+        dark={dark}
+        unit={` ${diskUnit.suffix}`}
+        series={[
+          { key: 'read', label: t('metrics.read'), color: '#e8944a' },
+          { key: 'write', label: t('metrics.write'), color: '#d9639b' },
+        ]}
+      />
+      <MetricPanel
+        title={t('metrics.loadAverage')}
+        data={rows}
+        dark={dark}
+        unit=""
+        series={[
+          { key: 'load1', label: t('metrics.load1'), color: '#6f8cf5' },
+          { key: 'load5', label: t('metrics.load5'), color: '#c07ce0' },
+        ]}
+      />
+      {hasLatency && (
+        <MetricPanel
+          title={t('metrics.latency')}
+          data={rows}
+          dark={dark}
+          unit=" ms"
+          series={[{ key: 'latency', label: t('metrics.latency'), color: '#4bb3d6' }]}
+        />
+      )}
     </div>
   );
 }

@@ -1,29 +1,32 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Typography, Descriptions, Tag, Space, Button, Card, Tabs, Spin, Modal, Form, Input, InputNumber, Select, App, Row, Col, Empty } from 'antd';
-import { ArrowLeftOutlined, EditOutlined, DeleteOutlined, DockerOutlined, KeyOutlined, SaveOutlined, WindowsOutlined, AppleOutlined, CopyOutlined } from '@ant-design/icons';
+import {
+  Typography, Tag, Space, Button, Card, Tabs, Spin, Modal, Form, Input, InputNumber, Select,
+  App, Row, Col, Empty, Progress, Segmented, Tooltip,
+} from 'antd';
+import {
+  ArrowLeftOutlined, EditOutlined, DeleteOutlined, DockerOutlined, KeyOutlined, SaveOutlined,
+  WindowsOutlined, AppleOutlined, CopyOutlined, DownloadOutlined, CloudServerOutlined,
+  ClockCircleOutlined, ThunderboltOutlined, ArrowDownOutlined, ArrowUpOutlined, DashboardOutlined,
+  DatabaseOutlined, HddOutlined, LineChartOutlined,
+} from '@ant-design/icons';
 import { DatePicker } from 'antd';
 import dayjs, { Dayjs } from 'dayjs';
 import { useTranslation } from 'react-i18next';
-import { serversApi, Server } from '../api/servers';
+import { serversApi, Server, MetricPoint } from '../api/servers';
 import { useMetrics, TimeRange } from '../hooks/useMetrics';
 import MetricsChart from '../components/MetricsChart';
 import SshTerminal from '../components/SshTerminal';
 import TagSelect from '../components/TagSelect';
 import CredentialSelect from '../components/CredentialSelect';
 import { ServerDockerPanel } from './Docker';
+import { formatBytes, formatUptime, getExpirationInfo, percentOf, severityColor } from '../utils/format';
+import { downloadCSV, safeFilenamePart } from '../utils/csv';
 
 const { Title } = Typography;
 const { RangePicker } = DatePicker;
 
 type PresetKey = '1h' | 'today' | 'yesterday' | '7d' | '30d';
-
-function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
-  const unitIndex = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  return `${(bytes / 1024 ** unitIndex).toFixed(unitIndex > 2 ? 1 : 2)} ${units[unitIndex]}`;
-}
 
 function getPresetRange(key: PresetKey): TimeRange {
   const now = dayjs();
@@ -71,9 +74,38 @@ async function copyToClipboard(text: string): Promise<void> {
   }
 }
 
+const CSV_COLUMNS: (keyof MetricPoint)[] = [
+  'recorded_at', 'cpu_percent', 'memory_used', 'memory_total', 'disk_used',
+  'load_1', 'load_5', 'load_15', 'network_rx_bytes', 'network_tx_bytes',
+  'disk_rx_bytes', 'disk_tx_bytes', 'uptime_seconds', 'latency_ms',
+];
+
+function StatTile({ icon, label, value, hint, accent, percent }: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  hint?: string;
+  accent?: string;
+  percent?: number;
+}) {
+  return (
+    <div className="stat-tile">
+      <span className="stat-tile-icon" style={accent ? { color: accent, background: `${accent}1f` } : undefined}>{icon}</span>
+      <div className="stat-tile-body">
+        <small>{label}</small>
+        <strong>{value}</strong>
+        {typeof percent === 'number' ? (
+          <Progress percent={percent} showInfo={false} strokeColor={accent} railColor="rgba(128,140,170,.16)" />
+        ) : hint ? <span className="stat-tile-hint">{hint}</span> : null}
+      </div>
+    </div>
+  );
+}
+
 export default function ServerDetail() {
   const { t, i18n } = useTranslation();
-  const { message } = App.useApp();
+  // modal (not the static Modal.*) so confirm dialogs inherit the dark theme.
+  const { message, modal } = App.useApp();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [server, setServer] = useState<Server | null>(null);
@@ -89,7 +121,7 @@ export default function ServerDetail() {
   const [activePreset, setActivePreset] = useState<PresetKey | null>('1h');
   const [timeRange, setTimeRange] = useState<TimeRange>(() => getPresetRange('1h'));
 
-  const { metrics, history, loading: metricsLoading } = useMetrics(id!, timeRange);
+  const { metrics, history, loading: metricsLoading, observedAt } = useMetrics(id!, timeRange);
 
   // Presets whose window ends "now" keep sliding: recompute the range every
   // 30s so the chart stays live instead of freezing at the moment of the
@@ -167,7 +199,7 @@ export default function ServerDetail() {
       traffic_limit_gb: Number(((server.traffic_limit_bytes || 0) / 1024 / 1024 / 1024).toFixed(2)),
       public_location: server.public_location || '',
     });
-    setTagValues(server.tags?.map((t) => t.id) || []);
+    setTagValues(server.tags?.map((tag) => tag.id) || []);
     setModalOpen(true);
   };
 
@@ -197,7 +229,7 @@ export default function ServerDetail() {
 
   const handleDelete = () => {
     if (!server) return;
-    Modal.confirm({
+    modal.confirm({
       title: t('server.delete'),
       content: t('server.deleteConfirm', { name: server.name }),
       okText: t('common.delete'),
@@ -251,122 +283,165 @@ export default function ServerDetail() {
     }
   };
 
+  // Exports exactly the window currently charted, so what you see is what you
+  // get in the spreadsheet.
+  const handleExportCSV = () => {
+    if (!server || history.length === 0) {
+      message.warning(t('metrics.noData'));
+      return;
+    }
+    const rows: string[][] = [[...CSV_COLUMNS]];
+    for (const point of history) {
+      rows.push(CSV_COLUMNS.map((column) => String(point[column] ?? '')));
+    }
+    const stamp = dayjs(timeRange.since).format('YYYYMMDD-HHmm');
+    downloadCSV(`${safeFilenamePart(server.name)}-metrics-${stamp}.csv`, rows);
+    message.success(t('metrics.exported', { count: history.length }));
+  };
+
+  const lang = i18n.language?.startsWith('zh') ? 'zh' : 'en';
+  const expInfo = useMemo(() => getExpirationInfo(server?.expires_at, lang), [server?.expires_at, lang]);
+  const isOnline = observedAt > 0 && !!metrics?.recorded_at
+    && observedAt - new Date(metrics.recorded_at).getTime() < 120000;
+  const cpuPercent = Math.round(metrics?.cpu_percent || 0);
+  const memPercent = metrics ? percentOf(metrics.memory_used, metrics.memory_total) : 0;
+  const diskPercent = metrics && server ? percentOf(metrics.disk_used, server.disk_total) : 0;
+
   if (loading) return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}><Spin size="large" /></div>;
-  if (!server) return <div>{t('server.notFound')}</div>;
+  if (!server) return <div className="empty-state"><Empty description={t('server.notFound')} /></div>;
 
   return (
     <div className={`server-detail-page${activeTab === 'terminal' ? ' server-detail-page--terminal' : ''}`}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <Space>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/dashboard')}>{t('common.back')}</Button>
-          <Title level={4} style={{ margin: 0 }}>{server.name}</Title>
-          {server.tags?.map((t) => (
-            <Tag key={t.id} color={t.color}>{t.name}</Tag>
-          ))}
-        </Space>
-        <Space>
-          <Button
-            icon={<DockerOutlined />}
-            disabled={dockerInstalled !== true}
-            onClick={() => navigate(`/docker?server=${id}&expand=true`)}
-          >
-            {t('server.docker')}
+      <div className="detail-hero">
+        <div className="detail-hero-main">
+          <Button className="detail-back" icon={<ArrowLeftOutlined />} onClick={() => navigate('/dashboard')}>
+            {t('common.back')}
           </Button>
+          <div className={`detail-avatar ${server.server_type === 'windows' ? 'windows' : 'linux'}`}>
+            {server.server_type === 'windows' ? <WindowsOutlined /> : <CloudServerOutlined />}
+          </div>
+          <div className="detail-identity">
+            <div className="detail-identity-line">
+              <Title level={3}>{server.name}</Title>
+              <span className={`status-pill ${isOnline ? 'online' : 'offline'}`}>
+                <span />{isOnline ? t('dashboard.online') : t('dashboard.offline')}
+              </span>
+            </div>
+            <div className="detail-meta">
+              <button type="button" className="copyable-host" title={t('server.copyHost')} onClick={handleCopyHost}>
+                {server.host}:{server.port}<CopyOutlined aria-hidden="true" />
+              </button>
+              <span className="detail-meta-sep" />
+              <span><KeyOutlined /> {server.credential_name || server.ssh_username}</span>
+              {server.public_location && (<><span className="detail-meta-sep" /><span>{server.public_location}</span></>)}
+              {expInfo && (<><span className="detail-meta-sep" /><span style={{ color: expInfo.color }}>{expInfo.text}</span></>)}
+            </div>
+            {!!server.tags?.length && (
+              <div className="detail-tags">
+                {server.tags.map((tag) => <Tag key={tag.id} color={tag.color}>{tag.name}</Tag>)}
+              </div>
+            )}
+          </div>
+        </div>
+        <Space wrap className="detail-actions">
+          <Tooltip title={dockerInstalled === true ? '' : t('docker.noServers')}>
+            <Button
+              icon={<DockerOutlined />}
+              disabled={dockerInstalled !== true}
+              onClick={() => navigate(`/docker?server=${id}&expand=true`)}
+            >
+              {t('server.docker')}
+            </Button>
+          </Tooltip>
           <Button icon={<EditOutlined />} onClick={handleEdit}>{t('common.edit')}</Button>
           <Button danger icon={<DeleteOutlined />} onClick={handleDelete}>{t('common.delete')}</Button>
         </Space>
       </div>
 
-      <Descriptions bordered size="small" column={2} style={{ marginBottom: 24 }}>
-        <Descriptions.Item label={t('server.hostLabel')}>
-          <button
-            type="button"
-            className="copyable-host"
-            title={t('server.copyHost')}
-            aria-label={t('server.copyHost')}
-            onClick={handleCopyHost}
-          >
-            {server.host}<CopyOutlined aria-hidden="true" />
-          </button>
-        </Descriptions.Item>
-        <Descriptions.Item label={t('server.sshPortLabel')}>{server.port}</Descriptions.Item>
-        <Descriptions.Item label={t('server.type')}>{server.server_type === 'windows' ? <><WindowsOutlined /> Windows</> : <><AppleOutlined /> Linux</>}</Descriptions.Item>
-        <Descriptions.Item label={t('server.sshUserLabel')}>{server.ssh_username}</Descriptions.Item>
-        {server.credential_name && (
-          <Descriptions.Item label={t('server.credentialLabel')}>
-            <Space><KeyOutlined />{server.credential_name}</Space>
-          </Descriptions.Item>
-        )}
-        <Descriptions.Item label={t('server.addedLabel')}>{new Date(server.created_at).toLocaleString()}</Descriptions.Item>
-        {server.expires_at && (
-          <Descriptions.Item label={t('server.expiresAt')}>
-            {(() => {
-              const now = new Date();
-              const exp = new Date(server.expires_at!);
-              const isExpired = exp.getTime() < now.getTime();
-              const from = isExpired ? exp : now;
-              const to = isExpired ? now : exp;
-              let years = to.getFullYear() - from.getFullYear();
-              let months = to.getMonth() - from.getMonth();
-              let days = to.getDate() - from.getDate();
-              if (days < 0) { months--; days += new Date(to.getFullYear(), to.getMonth(), 0).getDate(); }
-              if (months < 0) { years--; months += 12; }
-              const parts: string[] = [];
-              const lang = i18n.language?.startsWith('zh') ? 'zh' : 'en';
-              if (years > 0) parts.push(lang === 'zh' ? `${years}年` : `${years}y`);
-              if (months > 0) parts.push(lang === 'zh' ? `${months}月` : `${months}m`);
-              if (days > 0 || parts.length === 0) parts.push(lang === 'zh' ? `${days}天` : `${days}d`);
-              const diffStr = parts.join('');
-              if (isExpired) return `${exp.toLocaleString()} (${lang === 'zh' ? `已过期${diffStr}` : `Expired ${diffStr}`})`;
-              return `${exp.toLocaleString()} (${lang === 'zh' ? `${diffStr}后到期` : `${diffStr} left`})`;
-            })()}
-          </Descriptions.Item>
-        )}
-      </Descriptions>
+      <div className="stat-tile-grid">
+        <StatTile
+          icon={<DashboardOutlined />}
+          label={t('metrics.cpu')}
+          value={`${cpuPercent}%`}
+          accent={severityColor(cpuPercent, 'blue')}
+          percent={cpuPercent}
+        />
+        <StatTile
+          icon={<DatabaseOutlined />}
+          label={t('metrics.memory')}
+          value={metrics ? `${formatBytes(metrics.memory_used)} / ${formatBytes(metrics.memory_total)}` : '—'}
+          accent={severityColor(memPercent, 'green')}
+          percent={memPercent}
+        />
+        <StatTile
+          icon={<HddOutlined />}
+          label={t('metrics.disk')}
+          value={metrics ? `${formatBytes(metrics.disk_used)} / ${formatBytes(server.disk_total)}` : '—'}
+          accent={severityColor(diskPercent, 'violet')}
+          percent={diskPercent}
+        />
+        <StatTile
+          icon={<ClockCircleOutlined />}
+          label={t('metrics.uptime')}
+          value={formatUptime(metrics?.uptime_seconds || 0)}
+          hint={t('detail.cores', { count: server.cpu_cores || 0 })}
+          accent="#4bb3d6"
+        />
+        <StatTile
+          icon={<ThunderboltOutlined />}
+          label={t('metrics.latency')}
+          value={metrics?.latency_ms ? `${metrics.latency_ms} ms` : '—'}
+          hint={metrics ? t('detail.load', { load: `${metrics.load_1.toFixed(2)} / ${metrics.load_5.toFixed(2)} / ${metrics.load_15.toFixed(2)}` }) : undefined}
+          accent="#e8944a"
+        />
+        <StatTile
+          icon={<ArrowDownOutlined />}
+          label={t('metrics.totalDownload')}
+          value={formatBytes(metrics?.network_rx_total_bytes || 0)}
+          hint={`${formatBytes(metrics?.network_rx_bytes || 0)}/s`}
+          accent="#39b8a4"
+        />
+        <StatTile
+          icon={<ArrowUpOutlined />}
+          label={t('metrics.totalUpload')}
+          value={formatBytes(metrics?.network_tx_total_bytes || 0)}
+          hint={`${formatBytes(metrics?.network_tx_bytes || 0)}/s`}
+          accent="#8d6dd7"
+        />
+        <StatTile
+          icon={<LineChartOutlined />}
+          label={t('detail.sampledAt')}
+          value={metrics?.recorded_at ? new Date(metrics.recorded_at).toLocaleTimeString() : '—'}
+          hint={t('detail.addedOn', { date: new Date(server.created_at).toLocaleDateString() })}
+          accent="#6f8cf5"
+        />
+      </div>
 
       <Tabs className="server-detail-tabs" activeKey={activeTab} onChange={setActiveTab} items={[
         {
           key: 'metrics',
           label: t('metrics.title'),
           children: (
-            <Card loading={metricsLoading}>
-              {metrics && (
-                <Descriptions bordered size="small" column={{ xs: 1, sm: 2, lg: 3 }} style={{ marginBottom: 16 }}>
-                  <Descriptions.Item label={t('metrics.cpu')}>{(metrics.cpu_percent || 0).toFixed(1)}%</Descriptions.Item>
-                  <Descriptions.Item label={t('metrics.memoryUsed')}>{((metrics.memory_used || 0) / 1024 / 1024).toFixed(0)} MB</Descriptions.Item>
-                  <Descriptions.Item label={t('metrics.memoryTotal')}>{((metrics.memory_total || 0) / 1024 / 1024).toFixed(0)} MB</Descriptions.Item>
-                  <Descriptions.Item label={t('metrics.uptime')}>{(() => {
-  const s = metrics?.uptime_seconds || 0;
-  if (!s) return '0d';
-  const td = Math.floor(s / 86400);
-  const y = Math.floor(td / 365);
-  const r = td % 365;
-  const mo = Math.floor(r / 30);
-  const d = r % 30;
-  const p: string[] = [];
-  if (y > 0) p.push(y + 'y');
-  if (mo > 0) p.push(mo + 'm');
-  if (d > 0 || p.length === 0) p.push(d + 'd');
-  return p.join(' ');
-})()}</Descriptions.Item>
-                  <Descriptions.Item label={t('metrics.totalUpload')}>{formatBytes(metrics.network_tx_total_bytes || 0)}</Descriptions.Item>
-                  <Descriptions.Item label={t('metrics.totalDownload')}>{formatBytes(metrics.network_rx_total_bytes || 0)}</Descriptions.Item>
-                </Descriptions>
-              )}
-
-              <Space style={{ marginBottom: 16 }} wrap>
-                {presets.map((p) => (
-                  <Button
-                    key={p.key}
-                    type={activePreset === p.key ? 'primary' : 'default'}
-                    onClick={() => handlePreset(p.key)}
-                  >
-                    {p.label}
-                  </Button>
-                ))}
-                <RangePicker showTime disabledDate={(current) => current && current.isAfter(dayjs(), 'day')} onChange={handleRangeChange} />
-              </Space>
-
+            <Card className="panel-card" loading={metricsLoading}>
+              <div className="chart-toolbar">
+                <Segmented
+                  value={activePreset ?? ''}
+                  onChange={(value) => handlePreset(value as PresetKey)}
+                  options={presets.map((p) => ({ label: p.label, value: p.key }))}
+                />
+                <Space wrap>
+                  <RangePicker
+                    showTime
+                    disabledDate={(current) => current && current.isAfter(dayjs(), 'day')}
+                    onChange={handleRangeChange}
+                  />
+                  <Tooltip title={t('metrics.exportHint')}>
+                    <Button icon={<DownloadOutlined />} onClick={handleExportCSV} disabled={history.length === 0}>
+                      {t('metrics.export')}
+                    </Button>
+                  </Tooltip>
+                </Space>
+              </div>
               <MetricsChart history={history} />
             </Card>
           ),
@@ -386,14 +461,14 @@ export default function ServerDetail() {
           children: dockerInstalled === true ? (
             <ServerDockerPanel serverId={id!} version={server.docker_version} />
           ) : (
-            <Empty description={t('docker.noServers')} />
+            <div className="empty-state"><Empty description={t('docker.noServers')} /></div>
           ),
         },
         {
           key: 'notes',
           label: t('server.notes'),
           children: (
-            <Card>
+            <Card className="panel-card">
               <Input.TextArea
                 rows={12}
                 value={notes}
@@ -486,7 +561,7 @@ export default function ServerDetail() {
             </Col>
           </Row>
           <Form.Item name="traffic_limit_gb" label={t('server.trafficLimit')}>
-            <InputNumber min={0} precision={2} addonAfter="GB" style={{ width: '100%' }} />
+            <InputNumber min={0} precision={2} suffix="GB" style={{ width: '100%' }} />
           </Form.Item>
           <Form.Item label={t('server.tags')}>
             <TagSelect value={tagValues} onChange={setTagValues} />

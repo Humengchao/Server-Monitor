@@ -32,6 +32,10 @@ export function useMetrics(serverId: string, timeRange: TimeRange, interval = 30
   const [metrics, setMetrics] = useState<MetricPoint | null>(null);
   const [history, setHistory] = useState<MetricPoint[]>([]);
   const [loading, setLoading] = useState(true);
+  // The API's Date header, used to judge liveness against the server's clock
+  // rather than the browser's: local skew beyond the online window would
+  // otherwise mislabel a healthy host.
+  const [observedAt, setObservedAt] = useState(0);
   const timeRangeRef = useRef(timeRange);
   timeRangeRef.current = timeRange;
 
@@ -40,6 +44,9 @@ export function useMetrics(serverId: string, timeRange: TimeRange, interval = 30
       const res = await serversApi.getLatestMetrics(serverId);
       const newMetrics = res.data ?? null;
       setMetrics((prev) => (metricsChanged(prev, newMetrics) ? newMetrics : prev));
+      const dateHeader = res.headers?.date;
+      const serverNow = typeof dateHeader === 'string' ? Date.parse(dateHeader) : NaN;
+      setObservedAt(Number.isNaN(serverNow) ? Date.now() : serverNow);
     } catch {
       // ignore
     } finally {
@@ -67,5 +74,5 @@ export function useMetrics(serverId: string, timeRange: TimeRange, interval = 30
     fetchHistory();
   }, [fetchHistory, timeRange.since, timeRange.until]);
 
-  return { metrics, history, loading, refetchLatest: fetchLatest, refetchHistory: fetchHistory };
+  return { metrics, history, loading, observedAt, refetchLatest: fetchLatest, refetchHistory: fetchHistory };
 }

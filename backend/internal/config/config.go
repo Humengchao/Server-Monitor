@@ -18,7 +18,12 @@ type Config struct {
 	TLSKeyFile     string
 	CORSOrigin     string
 	PollInterval   int // seconds between metrics polls
+	AlertInterval  int // seconds between alert rule evaluations
 	TrustedProxies []string
+	// AllowPrivateWebhooks permits alert webhooks that resolve to loopback or
+	// RFC1918 addresses. Off by default so an authenticated user cannot use the
+	// alerting pipeline to reach the server's private network.
+	AllowPrivateWebhooks bool
 }
 
 // defaultTrustedProxies covers loopback and RFC1918 ranges, matching the
@@ -46,7 +51,11 @@ func Load() (*Config, error) {
 	if len(encKey) != 32 {
 		return nil, errors.New("ENCRYPTION_KEY must be exactly 32 bytes")
 	}
-	pollInterval, err := loadPollInterval()
+	pollInterval, err := loadInterval("POLL_INTERVAL", 3)
+	if err != nil {
+		return nil, err
+	}
+	alertInterval, err := loadInterval("ALERT_INTERVAL", 30)
 	if err != nil {
 		return nil, err
 	}
@@ -55,26 +64,28 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	return &Config{
-		DatabaseURL:    dbURL,
-		JWTSecret:      jwtSecret,
-		EncryptionKey:  encKey,
-		ServerPort:     getEnv("SERVER_PORT", "8080"),
-		TLSCertFile:    os.Getenv("TLS_CERT_FILE"),
-		TLSKeyFile:     os.Getenv("TLS_KEY_FILE"),
-		CORSOrigin:     getEnv("CORS_ORIGIN", "http://localhost:5173"),
-		PollInterval:   pollInterval,
-		TrustedProxies: trustedProxies,
+		DatabaseURL:          dbURL,
+		JWTSecret:            jwtSecret,
+		EncryptionKey:        encKey,
+		ServerPort:           getEnv("SERVER_PORT", "8080"),
+		TLSCertFile:          os.Getenv("TLS_CERT_FILE"),
+		TLSKeyFile:           os.Getenv("TLS_KEY_FILE"),
+		CORSOrigin:           getEnv("CORS_ORIGIN", "http://localhost:5173"),
+		PollInterval:         pollInterval,
+		AlertInterval:        alertInterval,
+		TrustedProxies:       trustedProxies,
+		AllowPrivateWebhooks: strings.EqualFold(strings.TrimSpace(os.Getenv("ALLOW_PRIVATE_WEBHOOKS")), "true"),
 	}, nil
 }
 
-func loadPollInterval() (int, error) {
-	v := os.Getenv("POLL_INTERVAL")
+func loadInterval(key string, fallback int) (int, error) {
+	v := os.Getenv(key)
 	if v == "" {
-		return 3, nil
+		return fallback, nil
 	}
 	n, err := strconv.Atoi(v)
 	if err != nil || n < 1 {
-		return 0, fmt.Errorf("POLL_INTERVAL must be a positive number of seconds, got %q", v)
+		return 0, fmt.Errorf("%s must be a positive number of seconds, got %q", key, v)
 	}
 	return n, nil
 }

@@ -15,7 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache) (*gin.Engine, error) {
+func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, notifier *services.WebhookNotifier) (*gin.Engine, error) {
 	r := gin.New()
 	// Only honor X-Forwarded-For from the configured reverse proxies; gin's
 	// default trusts every client, which would let direct requests spoof their
@@ -40,7 +40,11 @@ func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache) (*gi
 			c.Header("Access-Control-Allow-Origin", origin)
 		}
 		c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Authorization,Content-Type")
+		// The API client sends Cache-Control and Pragma on every request; if
+		// they are missing here, a cross-origin deployment fails preflight on
+		// every call. Same-origin setups behind nginx never send a preflight,
+		// which is why this only bites when CORS_ORIGIN is actually used.
+		c.Header("Access-Control-Allow-Headers", "Authorization,Content-Type,Cache-Control,Pragma")
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
 			return
@@ -70,6 +74,7 @@ func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache) (*gi
 	dockerH := handlers.NewDockerHandler(sshCache)
 	credH := handlers.NewCredentialHandler()
 	publicStatusH := handlers.NewPublicStatusHandler()
+	alertH := handlers.NewAlertHandler(notifier)
 
 	rateLimit := middleware.RateLimit(5, 1*time.Minute)
 
@@ -127,6 +132,19 @@ func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache) (*gi
 			credentials.POST("", credH.Create)
 			credentials.PUT("/:id", credH.Update)
 			credentials.DELETE("/:id", credH.Delete)
+		}
+
+		alerts := api.Group("/alerts", middleware.AuthRequired(cfg))
+		{
+			alerts.GET("/rules", alertH.ListRules)
+			alerts.POST("/rules", alertH.CreateRule)
+			alerts.PUT("/rules/:id", alertH.UpdateRule)
+			alerts.DELETE("/rules/:id", alertH.DeleteRule)
+			alerts.GET("/events", alertH.ListEvents)
+			alerts.GET("/summary", alertH.Summary)
+			// Outbound probe: rate-limited so the endpoint can't be used to
+			// hammer a third-party host through the panel.
+			alerts.POST("/test", middleware.RateLimit(6, 1*time.Minute), alertH.TestWebhook)
 		}
 
 		api.GET("/ssh/:id", middleware.WSAuthRequired(cfg), sshH.Handle)

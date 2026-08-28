@@ -221,10 +221,12 @@ button, input, textarea, select { font: inherit; }
 .metric-progress .ant-progress { margin: 0; line-height: 1; }
 .metric-progress .ant-progress-inner { height: 5px !important; }
 .throughput-grid { margin-top: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.throughput-grid > div { padding: 8px 9px; display: grid; grid-template-columns: 1fr 1fr; gap: 3px 5px; border-radius: 9px; background: var(--surface-soft); }
-.throughput-grid > div > .ant-typography { grid-column: 1 / -1; font-size: 10px; font-weight: 650; }
+/* One rate per row: side-by-side columns clipped values like "742.38 KB/s". */
+.throughput-grid > div { min-width: 0; padding: 8px 9px; display: grid; gap: 3px; border-radius: 9px; background: var(--surface-soft); }
+.throughput-grid > div > .ant-typography { font-size: 10px; font-weight: 650; }
 .throughput-grid .ant-space { min-width: 0; }
-.throughput-grid .ant-space .ant-typography { max-width: 70px; overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.throughput-grid .ant-space .ant-space-item:last-child { min-width: 0; }
+.throughput-grid .ant-space .ant-typography { display: block; overflow: hidden; font-size: 10px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
 .throughput-grid .rx { color: #18b690; }
 .throughput-grid .tx { color: #5d7df7; }
 .metrics-unavailable { height: 116px; display: flex; align-items: center; justify-content: center; gap: 8px; }
@@ -331,8 +333,264 @@ button, input, textarea, select { font: inherit; }
   box-shadow: var(--shadow-sm);
 }
 
+/* Sidebar / header badges. The menu item label is a nowrap/ellipsis container,
+   so the counter needs explicit metrics rather than grid centering. */
+.nav-label-with-badge { display: inline-flex; align-items: center; gap: 8px; vertical-align: middle; }
+.nav-label-with-badge em {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  color: #fff;
+  background: #ef5b6b;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+.sidebar-status-dot.alerting { background: #ef5b6b; box-shadow: 0 0 0 4px rgba(239, 91, 107, .12), 0 0 14px rgba(239, 91, 107, .55); }
+.header-actions .ant-badge { display: inline-flex; }
+
+/* Overview stat cards */
+.overview-card-danger .overview-icon { color: #e2545f; background: rgba(226, 84, 95, .11); }
+.overview-card-accent .overview-icon { color: #5d7df7; background: rgba(93, 125, 247, .11); }
+.overview-card-teal .overview-icon { color: #17a394; background: rgba(23, 163, 148, .11); }
+.overview-card-amber .overview-icon { color: #cf8f2c; background: rgba(207, 143, 44, .12); }
+.overview-card .ant-typography { font-size: 12px; }
+.overview-card strong { font-variant-numeric: tabular-nums; }
+
+/* Fleet toolbar */
+.fleet-toolbar {
+  margin-bottom: 20px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+.fleet-toolbar-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fleet-search.ant-input-affix-wrapper { width: 250px; }
+.sort-select { min-width: 150px; }
+.fleet-toolbar .ant-segmented { background: var(--surface-soft); }
+
+/* Card hover actions */
+.server-card { position: relative; }
+.server-card-actions {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  box-shadow: var(--shadow-sm);
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity .16s ease, transform .16s ease;
+  backdrop-filter: blur(8px);
+}
+.server-card:hover .server-card-actions,
+.server-card:focus-within .server-card-actions { opacity: 1; transform: none; }
+.server-card.is-offline { opacity: .84; }
+.server-card.is-offline .server-platform { filter: grayscale(.5); }
+.location-tag.ant-tag { color: var(--muted); background: var(--surface-soft); }
+
+/* Dense list view */
+.server-table .ant-table { background: transparent; }
+.server-table .ant-table-thead > tr > th {
+  color: var(--muted);
+  background: var(--surface-soft);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: .3px;
+  text-transform: uppercase;
+}
+.server-table .ant-table-tbody > tr > td { padding: 11px 12px; }
+/* antd paints a sticky column with its own container colour so scrolled content
+   cannot show through. The table body above is transparent, so in dark mode the
+   two differ and a seam runs down the sticky actions column. Match the surfaces
+   instead — hover included, or the sticky cell stops following its own row.
+   Note the v6 class names: fix-start/fix-end, not the v5 fix-left/fix-right. */
+.server-table .ant-table-cell-fix-start,
+.server-table .ant-table-thead > tr > th.ant-table-cell-fix-start,
+.server-table .ant-table-tbody > tr:hover > td.ant-table-cell-fix-start,
+.server-table .status-pill { width: fit-content; }
+.table-identity { display: flex; align-items: center; gap: 10px; }
+.table-identity > div { min-width: 0; display: flex; flex-direction: column; }
+.table-identity strong { color: var(--text); font-size: 13px; }
+.table-identity .ant-typography { font-size: 11px; }
+.table-platform { width: 32px; height: 32px; flex: 0 0 32px; display: grid; place-items: center; border-radius: 10px; font-size: 15px; }
+.table-platform.linux { color: #526ff0; background: rgba(82, 111, 240, .11); }
+.table-platform.windows { color: #168bd2; background: rgba(22, 139, 210, .11); }
+.mini-bar { display: flex; align-items: center; gap: 8px; }
+.mini-bar .ant-progress { flex: 1; margin: 0; line-height: 1; }
+.mini-bar .ant-progress-inner { height: 5px !important; }
+.mini-bar > span { min-width: 32px; color: var(--text); font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; }
+.table-throughput { font-size: 11px; font-variant-numeric: tabular-nums; }
+.table-throughput .anticon { margin-right: 4px; }
+.table-throughput .rx { color: #18b690; }
+.table-throughput .tx { color: #5d7df7; }
+
+/* Shared panel surface */
+.panel-card.ant-card { border: 1px solid var(--border); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow-sm); }
+
+/* Server detail hero */
+.detail-hero {
+  margin-bottom: 20px;
+  padding: 20px 22px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, #5d7df7 9%, transparent), transparent 42%),
+    var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+.detail-hero-main { min-width: 0; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.detail-back.ant-btn { box-shadow: none; }
+.detail-avatar { width: 52px; height: 52px; flex: 0 0 52px; display: grid; place-items: center; border-radius: 16px; font-size: 23px; }
+.detail-avatar.linux { color: #526ff0; background: rgba(82, 111, 240, .12); }
+.detail-avatar.windows { color: #168bd2; background: rgba(22, 139, 210, .12); }
+.detail-identity { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.detail-identity-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.detail-identity-line h3.ant-typography { margin: 0; color: var(--text); letter-spacing: -.5px; }
+.detail-meta { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; color: var(--muted); font-size: 12px; }
+.detail-meta .anticon { margin-right: 5px; }
+.detail-meta-sep { width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: .45; }
+.detail-tags { display: flex; gap: 5px; flex-wrap: wrap; }
+.detail-tags .ant-tag { margin: 0; border-radius: 6px; font-size: 10px; }
+.detail-actions .ant-btn { box-shadow: none; }
+
+/* Stat tiles */
+.stat-tile-grid {
+  margin-bottom: 22px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(212px, 1fr));
+  gap: 12px;
+}
+.stat-tile {
+  min-width: 0;
+  padding: 15px 16px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+.stat-tile-icon { width: 38px; height: 38px; flex: 0 0 38px; display: grid; place-items: center; border-radius: 11px; font-size: 17px; }
+.stat-tile-body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.stat-tile-body small { color: var(--muted); font-size: 11px; letter-spacing: .2px; }
+.stat-tile-body strong { overflow: hidden; color: var(--text); font-size: 15px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.stat-tile-hint { color: var(--muted); font-size: 11px; }
+.stat-tile .ant-progress { margin: 3px 0 0; line-height: 1; }
+.stat-tile .ant-progress-inner { height: 4px !important; }
+
+/* Charts */
+.chart-toolbar { margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.metrics-charts { display: grid; gap: 22px; }
+.chart-panel-head { margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.chart-panel-head h4 { margin: 0; color: var(--text); font-size: 13px; font-weight: 650; }
+.chart-legend { display: flex; gap: 14px; color: var(--muted); font-size: 11px; }
+.chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.chart-legend i, .chart-tooltip-row i { width: 8px; height: 8px; border-radius: 3px; }
+.chart-canvas { position: relative; overflow: hidden; }
+.chart-empty { padding: 56px 24px; color: var(--muted); font-size: 13px; text-align: center; }
+.chart-tooltip {
+  min-width: 150px;
+  padding: 9px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  box-shadow: var(--shadow-md);
+  font-size: 11px;
+}
+.chart-tooltip-time { color: var(--muted); font-size: 10px; }
+.chart-tooltip-row { display: grid; grid-template-columns: 8px 1fr auto; align-items: center; gap: 8px; }
+.chart-tooltip-row em { color: var(--muted); font-style: normal; }
+.chart-tooltip-row strong { color: var(--text); font-variant-numeric: tabular-nums; }
+
+/* Alerts */
+.alert-state { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; }
+.alert-state i { width: 7px; height: 7px; border-radius: 50%; }
+.alert-state.ok { color: #17a082; }
+.alert-state.ok i { background: #24c894; }
+.alert-state.firing { color: #e2545f; }
+.alert-state.firing i { background: #ef5b6b; box-shadow: 0 0 0 3px rgba(239, 91, 107, .16); animation: alertPulse 1.8s ease-in-out infinite; }
+.metric-chip.ant-tag { margin: 0; border-radius: 6px; color: var(--muted); background: var(--surface-soft); font-size: 10px; }
+.alert-rule-cell { display: flex; flex-direction: column; }
+.alert-rule-cell strong { color: var(--text); font-size: 13px; }
+.alert-rule-cell .ant-typography { font-size: 11px; }
+.alert-form-footer { width: 100%; justify-content: space-between; }
+
+.alert-timeline { display: flex; flex-direction: column; gap: 10px; }
+.alert-entry {
+  width: 100%;
+  padding: 14px 16px;
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease;
+}
+.alert-entry:hover { transform: translateX(2px); box-shadow: var(--shadow-md); }
+.alert-entry.firing { border-left-color: #ef5b6b; }
+.alert-entry.resolved { border-left-color: #24c894; }
+.alert-entry.resolved .alert-entry-message { color: var(--muted); }
+.alert-entry-icon { width: 34px; height: 34px; flex: 0 0 34px; display: grid; place-items: center; border-radius: 11px; font-size: 15px; }
+.alert-entry.firing .alert-entry-icon { color: #e2545f; background: rgba(239, 91, 107, .12); }
+.alert-entry.resolved .alert-entry-icon { color: #17a082; background: rgba(36, 200, 148, .12); }
+.alert-entry-body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.alert-entry-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.alert-entry-title strong { color: var(--text); font-size: 13px; }
+.alert-entry-title .ant-typography { font-size: 11px; }
+.alert-entry-message { color: var(--muted); font-size: 12px; }
+.alert-entry-meta { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.alert-entry-meta strong { color: var(--text); font-size: 14px; font-variant-numeric: tabular-nums; }
+.alert-entry-meta small { color: var(--muted); font-size: 10px; white-space: nowrap; }
+
+@keyframes alertPulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+
+/* The sub-state rides along inside the state tag, dimmed, because it qualifies
+   the state rather than standing beside it as a separate fact. */
+
+
+.color-dot { width: 12px; height: 12px; display: inline-block; border-radius: 4px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
+
 @media (max-width: 991px) {
   .app-sidebar.ant-layout-sider { position: fixed; }
+  /* Collapsed to zero width, the brand lockup and the absolutely positioned
+     footer still paint over the page content; clip them instead. */
+  .app-sidebar.ant-layout-sider-zero-width > * { display: none; }
+  .app-sidebar.ant-layout-sider-zero-width .ant-layout-sider-zero-width-trigger { display: flex; }
+  /* Sit the drawer trigger inside the header strip rather than on top of the
+     page title below it. */
+  .app-sidebar .ant-layout-sider-zero-width-trigger { top: 14px; align-items: center; justify-content: center; }
   .content-inner { padding: 24px 20px 32px; }
   .app-header.ant-layout-header { padding: 0 20px 0 64px; }
   .auth-page { grid-template-columns: 1fr; background: var(--app-bg); }
@@ -363,6 +621,25 @@ button, input, textarea, select { font: inherit; }
   .section-heading .ant-typography-secondary { display: block; margin-top: 3px; }
   .auth-form-side { padding: 18px; }
   .auth-card.ant-card { padding: 26px 22px; }
+  .fleet-toolbar { align-items: stretch; flex-direction: column; }
+  .fleet-toolbar > .ant-segmented { overflow-x: auto; }
+  .fleet-toolbar-tools { display: grid; grid-template-columns: 1fr auto; }
+  .fleet-search.ant-input-affix-wrapper, .fleet-toolbar-tools .tag-filter, .sort-select { width: 100%; grid-column: 1 / -1; }
+  .detail-hero { padding: 16px; }
+  .detail-hero-main { width: 100%; }
+  .detail-actions { width: 100%; }
+  .detail-actions .ant-space-item { flex: 1; }
+  .detail-actions .ant-btn { width: 100%; }
+  .stat-tile-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .stat-tile { padding: 12px; gap: 9px; }
+  .stat-tile-icon { width: 32px; height: 32px; flex-basis: 32px; font-size: 14px; }
+  .stat-tile-body strong { font-size: 13px; }
+  .chart-toolbar { align-items: stretch; flex-direction: column; }
+  .chart-toolbar .ant-segmented { overflow-x: auto; }
+  .alert-entry { flex-wrap: wrap; }
+  .alert-entry-meta { align-items: flex-start; flex-direction: row; gap: 10px; width: 100%; padding-left: 47px; }
+  /* Keep the search, the live toggle and refresh on one row instead of letting
+     the button wrap onto a line of its own. */
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -737,3 +1014,25 @@ button, input, textarea, select { font: inherit; }
   .glass-footer { grid-template-columns: 1fr auto; }
   .glass-footer > span:nth-child(2) { display: none; }
 }
+
+
+/* Batch selection */
+.server-card.is-selectable { cursor: pointer; }
+.server-card.is-selectable:hover { transform: none; }
+.server-card.is-selected {
+  border-color: #5d7df7;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #5d7df7 34%, transparent), var(--shadow-sm);
+}
+.server-card-select { position: absolute; top: 12px; right: 12px; z-index: 2; }
+.server-card-select .ant-checkbox { pointer-events: none; }
+
+
+
+
+
+
+
+
+/* One bar per day. A fully-down day still needs to be visible, so bars have a
+   fixed height and encode availability as colour rather than length. */
+

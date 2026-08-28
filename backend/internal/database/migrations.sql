@@ -218,6 +218,44 @@ CREATE TABLE IF NOT EXISTS metric_maintenance_state (
 -- Credential type (linux / windows)
 ALTER TABLE credentials ADD COLUMN IF NOT EXISTS credential_type VARCHAR(16) DEFAULT 'linux';
 
+-- Cutoff for JWT revocation: a token whose "iat" predates this value is
+-- rejected, which is how changing a password signs other devices out. The epoch
+-- default keeps sessions issued before this migration working.
+
+-- Threshold alerting. A rule with server_id IS NULL applies to every server the
+-- user owns, including hosts added after the rule was written.
+CREATE TABLE IF NOT EXISTS alert_rules (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name VARCHAR(128) NOT NULL,
+    server_id UUID REFERENCES servers(id) ON DELETE CASCADE,
+    metric VARCHAR(24) NOT NULL,
+    comparator VARCHAR(2) NOT NULL DEFAULT '>',
+    threshold DOUBLE PRECISION NOT NULL DEFAULT 0,
+    duration_seconds INT NOT NULL DEFAULT 300,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    webhook_url TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_alert_rules_user ON alert_rules(user_id);
+
+-- One row per firing episode. resolved_at IS NULL means the alert is still
+-- active, which is also how the engine recovers its state after a restart.
+CREATE TABLE IF NOT EXISTS alert_events (
+    id BIGSERIAL PRIMARY KEY,
+    rule_id UUID NOT NULL REFERENCES alert_rules(id) ON DELETE CASCADE,
+    server_id UUID NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    value DOUBLE PRECISION NOT NULL DEFAULT 0,
+    message TEXT NOT NULL DEFAULT '',
+    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    resolved_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_alert_events_user_time ON alert_events(user_id, started_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_alert_events_open ON alert_events(rule_id, server_id) WHERE resolved_at IS NULL;
+
 -- last_seen_at was never written; liveness comes from
 -- server_latest_metrics.recorded_at instead.
 ALTER TABLE servers DROP COLUMN IF EXISTS last_seen_at;

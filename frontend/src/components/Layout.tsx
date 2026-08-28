@@ -1,5 +1,5 @@
-import React from 'react';
-import { Layout as AntLayout, Menu, Button, Avatar, Space, Tooltip, Typography } from 'antd';
+import React, { useEffect, useState } from 'react';
+import { Layout as AntLayout, Menu, Button, Avatar, Badge, Space, Tooltip, Typography } from 'antd';
 import {
   DashboardOutlined,
   SunOutlined,
@@ -10,11 +10,13 @@ import {
   DockerOutlined,
   HistoryOutlined,
   KeyOutlined,
+  BellOutlined,
   TranslationOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '../store/authStore';
+import { alertsApi } from '../api/alerts';
 
 const { Header, Sider, Content } = AntLayout;
 const { Text } = Typography;
@@ -29,9 +31,34 @@ export default function AppLayout({ darkMode, onToggleTheme }: Props) {
   const location = useLocation();
   const { user, logout } = useAuthStore();
   const { t, i18n } = useTranslation();
+  const [activeAlerts, setActiveAlerts] = useState(0);
+
+  // The alert engine evaluates on its own cadence, so a 30s poll is enough to
+  // keep the badge honest without adding noticeable request load.
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      alertsApi.summary()
+        .then((res) => { if (!cancelled) setActiveAlerts(res.data?.active || 0); })
+        .catch(() => undefined);
+    };
+    refresh();
+    const timer = setInterval(refresh, 30000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [location.pathname]);
 
   const menuItems = [
     { key: '/dashboard', icon: <DashboardOutlined />, label: t('nav.servers') },
+    {
+      key: '/alerts',
+      icon: <BellOutlined />,
+      label: (
+        <span className="nav-label-with-badge">
+          {t('nav.alerts')}
+          {activeAlerts > 0 && <em>{activeAlerts > 99 ? '99+' : activeAlerts}</em>}
+        </span>
+      ),
+    },
     { key: '/docker', icon: <DockerOutlined />, label: t('nav.docker') },
     { key: '/credentials', icon: <KeyOutlined />, label: t('nav.credentials') },
     { key: '/login-history', icon: <HistoryOutlined />, label: t('nav.loginHistory') },
@@ -51,6 +78,7 @@ export default function AppLayout({ darkMode, onToggleTheme }: Props) {
 
   const selectedKey = location.pathname.startsWith('/servers/') ? '/dashboard' : location.pathname;
   const currentItem = menuItems.find((item) => item.key === selectedKey);
+  const currentLabel = selectedKey === '/alerts' ? t('nav.alerts') : currentItem?.label;
   const userInitial = user?.username?.trim().charAt(0).toUpperCase() || 'U';
 
   return (
@@ -72,17 +100,27 @@ export default function AppLayout({ darkMode, onToggleTheme }: Props) {
           onClick={({ key }) => navigate(key)}
         />
         <div className="sidebar-footer">
-          <span className="sidebar-status-dot" />
-          <span>{t('nav.systemOnline')}</span>
+          <span className={`sidebar-status-dot${activeAlerts > 0 ? ' alerting' : ''}`} />
+          <span>{activeAlerts > 0 ? t('nav.systemAlerting', { count: activeAlerts }) : t('nav.systemOnline')}</span>
         </div>
       </Sider>
       <AntLayout className="app-main">
         <Header className="app-header">
           <div className="page-context">
             <Text type="secondary" className="page-context-label">{t('nav.workspace')}</Text>
-            <strong>{currentItem?.label || t('server.serverDetail')}</strong>
+            <strong>{currentLabel || t('server.serverDetail')}</strong>
           </div>
           <Space size={6} className="header-actions">
+            <Tooltip title={t('nav.alerts')}>
+              <Badge count={activeAlerts} size="small" offset={[-4, 4]}>
+                <Button
+                  className="header-icon-button"
+                  type="text"
+                  icon={<BellOutlined />}
+                  onClick={() => navigate('/alerts')}
+                />
+              </Badge>
+            </Tooltip>
             <Tooltip title={i18n.language === 'en' ? '切换到中文' : 'Switch to English'}>
               <Button className="header-icon-button" type="text" icon={<TranslationOutlined />} onClick={toggleLang}>
                 <span className="header-action-text">{i18n.language === 'en' ? '中文' : 'EN'}</span>
