@@ -712,6 +712,8 @@ button, input, textarea, select { font: inherit; }
   .batch-bar-actions { display: grid !important; grid-template-columns: 1fr 1fr; }
   .batch-bar-actions .ant-space-item { min-width: 0; }
   .batch-bar-actions .ant-btn { width: 100%; }
+  .availability-windows { grid-template-columns: 1fr; }
+  .availability-strip { height: 38px; gap: 2px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1182,9 +1184,58 @@ button, input, textarea, select { font: inherit; }
   overflow-wrap: anywhere;
 }
 
+/* Availability */
+.overview-card-uptime .overview-icon { color: #17a082; background: rgba(23, 160, 130, .11); }
 
+.availability-panel { display: flex; flex-direction: column; gap: 22px; }
+.availability-basis.ant-alert { border-radius: 10px; font-size: 12px; }
+.availability-label { display: block; margin-bottom: 9px; font-size: 11px; font-weight: 650; letter-spacing: .3px; text-transform: uppercase; }
+.availability-footnote { display: block; margin-top: 8px; font-size: 11px; }
 
+.availability-windows { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.availability-window {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--surface-soft);
+}
+.availability-window small { color: var(--muted); font-size: 11px; }
+.availability-window strong { font-size: 24px; font-variant-numeric: tabular-nums; letter-spacing: -.5px; }
+/* A window too new to score: muted, so an em dash does not read as a value. */
+.availability-window strong.availability-pending { color: var(--muted); font-weight: 500; }
+.availability-window > span { color: var(--muted); font-size: 10px; }
 
 /* One bar per day. A fully-down day still needs to be visible, so bars have a
    fixed height and encode availability as colour rather than length. */
+.availability-strip { display: flex; gap: 3px; align-items: stretch; height: 46px; }
+.availability-strip i {
+  flex: 1 1 0;
+  min-width: 4px;
+  border-radius: 3px;
+  background: #24c894;
+  transition: transform .12s ease;
+}
+.availability-strip i:hover { transform: scaleY(1.08); }
+.availability-strip i.no-data {
+  background: repeating-linear-gradient(45deg, var(--surface-soft), var(--surface-soft) 3px, var(--border) 3px, var(--border) 5px);
+}
 
+.availability-clean { display: flex; align-items: center; gap: 9px; color: #17a082; font-size: 13px; }
+.outage-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; max-height: 260px; overflow-y: auto; }
+.outage-list li {
+  padding: 9px 12px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border-radius: 9px;
+  background: var(--surface-soft);
+  font-size: 12px;
+}
+.outage-list li.ongoing { background: color-mix(in srgb, #e2545f 10%, var(--surface-soft)); }
+.outage-dot { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: #cf8f2c; }
+.outage-list li.ongoing .outage-dot { background: #e2545f; box-shadow: 0 0 0 3px rgba(226, 84, 95, .16); }
+.outage-when { color: var(--text); font-variant-numeric: tabular-nums; }
+.outage-length { margin-left: auto; color: var(--muted); font-size: 11px; white-space: nowrap; }

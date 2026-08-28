@@ -17,6 +17,7 @@ import {
   LockOutlined,
   MoonOutlined,
   ReloadOutlined,
+  RiseOutlined,
   SearchOutlined,
   SwapOutlined,
   TranslationOutlined,
@@ -25,6 +26,8 @@ import {
   WindowsOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import { convertCurrency, currencySymbol, useExchangeRates } from '../hooks/useExchangeRates';
+import { availabilityColor } from '../api/uptime';
 
 type NodeStatus = 'online' | 'degraded' | 'offline';
 type OverallStatus = 'operational' | 'degraded' | 'outage';
@@ -63,6 +66,8 @@ interface PublicNode {
   remaining_value: number;
   latency_ms: number;
   packet_loss_percent: number;
+  /** Observed 30-day availability; null when the node is too new to score. */
+  availability_30d: number | null;
 }
 
 interface PublicStatusResponse {
@@ -87,15 +92,6 @@ interface PublicStatusResponse {
 }
 
 const apiURL = `${window.location.origin}/api/public/status`;
-const exchangeRatesURL = 'https://api.frankfurter.dev/v2/rates?base=EUR&quotes=CNY,USD';
-const fallbackRatesPerEUR: Record<string, number> = { EUR: 1, CNY: 7.8, USD: 1.1 };
-
-interface ExchangeRateResponse {
-  date: string;
-  base: string;
-  quote: string;
-  rate: number;
-}
 
 const formatBytes = (value: number, digits = 1) => {
   if (!Number.isFinite(value) || value <= 0) return '0 B';
@@ -114,14 +110,6 @@ const formatUptime = (seconds: number, zh: boolean) => {
   return `${days}d ${hours}h`;
 };
 
-const currencySymbol = (currency: string) => ({ CNY: '¥', USD: '$', EUR: '€' }[currency] || currency || '¥');
-
-const convertCurrency = (amount: number, from: string, to: string, ratesPerEUR: Record<string, number>) => {
-  const sourceRate = ratesPerEUR[from] || ratesPerEUR.CNY;
-  const targetRate = ratesPerEUR[to] || ratesPerEUR.CNY;
-  return amount / sourceRate * targetRate;
-};
-
 export default function PublicStatus() {
   const { t, i18n } = useTranslation();
   const [data, setData] = useState<PublicStatusResponse | null>(null);
@@ -131,7 +119,7 @@ export default function PublicStatus() {
   const [query, setQuery] = useState('');
   const [view, setView] = useState<'card' | 'list'>('card');
   const [light, setLight] = useState(false);
-  const [ratesPerEUR, setRatesPerEUR] = useState<Record<string, number>>(fallbackRatesPerEUR);
+  const ratesPerEUR = useExchangeRates();
 
   const loadStatus = useCallback(async (showLoading = false) => {
     if (showLoading) setLoading(true);
@@ -157,33 +145,6 @@ export default function PublicStatus() {
       window.clearInterval(timer);
     };
   }, [loadStatus]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-
-    const loadExchangeRates = async () => {
-      try {
-        const response = await fetch(exchangeRatesURL, {
-          headers: { Accept: 'application/json' },
-          signal: controller.signal,
-        });
-        if (!response.ok) throw new Error('exchange rate request failed');
-        const rates = await response.json() as ExchangeRateResponse[];
-        const nextRates = { ...fallbackRatesPerEUR };
-        for (const item of rates) {
-          if (item.base === 'EUR' && Number.isFinite(item.rate) && item.rate > 0) {
-            nextRates[item.quote] = item.rate;
-          }
-        }
-        setRatesPerEUR(nextRates);
-      } catch {
-        // Keep approximate fallback rates when the daily rate service is unavailable.
-      }
-    };
-
-    void loadExchangeRates();
-    return () => controller.abort();
-  }, []);
 
   const zh = i18n.language.startsWith('zh');
   const displayCurrency = zh ? 'CNY' : 'USD';
@@ -371,6 +332,7 @@ function ProbeNodeCard({
         {node.billing_price > 0 && <div><DollarOutlined /><span>{t('probe.remainingValue')}<strong>{node.remaining_value > 0 ? `≈ ${displaySymbol}${convertedRemainingValue.toFixed(2)}` : '—'}</strong></span></div>}
         <div><WifiOutlined /><span>{t('probe.latency')}<strong>{node.status === 'offline' || node.latency_ms <= 0 ? '—' : `${node.latency_ms} ms`}</strong></span></div>
         <div><SwapOutlined /><span>{t('probe.packetLoss')}<strong>{node.packet_loss_percent}%</strong></span></div>
+        <div><RiseOutlined /><span>{t('probe.availability')}<strong style={node.availability_30d === null ? undefined : { color: availabilityColor(node.availability_30d) }}>{node.availability_30d === null ? '—' : `${node.availability_30d.toFixed(2)}%`}</strong></span></div>
       </div>
 
       {(node.tags || []).length > 0 && <footer className="node-tag-row">{node.tags.map((tag) => <span key={tag.name} style={{ color: tag.color, borderColor: `${tag.color}66`, backgroundColor: `${tag.color}18` }}>{tag.name}</span>)}</footer>}

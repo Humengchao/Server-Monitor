@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"server-monitor/internal/models"
+	"server-monitor/internal/services"
 
 	"github.com/gin-gonic/gin"
 )
@@ -16,6 +17,10 @@ import (
 // publicStatusCacheTTL bounds how often the status query runs regardless of
 // visitor count. Metrics only change once per poll interval anyway.
 const publicStatusCacheTTL = 2 * time.Second
+
+// minPublicAvailabilityBuckets is four hours of fifteen-minute buckets. Under
+// that, an availability percentage is noise.
+const minPublicAvailabilityBuckets = 16
 
 type PublicStatusHandler struct {
 	mu      sync.Mutex
@@ -58,6 +63,9 @@ type publicNode struct {
 	RemainingValue    float64            `json:"remaining_value"`
 	LatencyMS         int                `json:"latency_ms"`
 	PacketLossPercent int                `json:"packet_loss_percent"`
+	// Observed availability over the last 30 days, clamped to how long the node
+	// has existed. Null when the node is too new to have a meaningful figure.
+	Availability30d *float64 `json:"availability_30d"`
 }
 
 type publicSummary struct {
@@ -85,15 +93,18 @@ func (h *PublicStatusHandler) Get(c *gin.Context) {
 	}
 	h.mu.Unlock()
 
+	now := time.Now().UTC()
+	// Snapped to the fifteen-minute tier the SLA figure is counted from, so the
+	// still-open bucket is excluded from both the count and the expectation.
+	availabilityEnd := services.TierEnd(now, models.DailyStripBucketSeconds)
 	db := c.MustGet("db").(*models.DB)
-	metrics, err := models.GetPublicServerMetrics(db.Raw)
+	metrics, err := models.GetPublicServerMetrics(db.Raw, availabilityEnd.Add(-30*24*time.Hour), availabilityEnd)
 	if err != nil {
 		log.Printf("public status error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "status temporarily unavailable"})
 		return
 	}
 
-	now := time.Now().UTC()
 	nodes := make([]publicNode, 0, len(metrics))
 	summary := publicSummary{Total: len(metrics)}
 
@@ -126,6 +137,14 @@ func (h *PublicStatusHandler) Get(c *gin.Context) {
 			packetLoss = 100
 		}
 
+		// Below a few hours of history the number says more about how recently
+		// the node was added than about its reliability, so publish nothing.
+		var availability *float64
+		if metric.Availability30dExpected >= minPublicAvailabilityBuckets {
+			value := services.AvailabilityPercent(metric.Availability30dObserved, metric.Availability30dExpected)
+			availability = &value
+		}
+
 		nodes = append(nodes, publicNode{
 			Alias: fmt.Sprintf("NODE %02d", index+1), Name: metric.Name, Location: metric.PublicLocation, Tags: metric.Tags,
 			ServerType: metric.ServerType, Status: status,
@@ -140,6 +159,7 @@ func (h *PublicStatusHandler) Get(c *gin.Context) {
 			BillingPrice: metric.BillingPrice, BillingCurrency: metric.BillingCurrency,
 			BillingCycle: metric.BillingCycle, RemainingValue: remainingValue,
 			LatencyMS: metric.LatencyMS, PacketLossPercent: packetLoss,
+			Availability30d: availability,
 		})
 
 		summary.MemoryUsed += metric.MemoryUsed

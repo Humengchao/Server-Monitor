@@ -42,6 +42,7 @@ The public probe refreshes every 15 seconds and exposes only anonymous node alia
 | Alert center | Threshold rules and an alert timeline, with webhook delivery and a built-in connectivity test |
 | Batch operations | Multi-select servers to add/remove tags, delete, export an inventory CSV, or run one command across up to 50 hosts with per-host results |
 | Process management | Live process table on the detail page, sortable by PID / user / CPU / memory / RSS / uptime, with search, pausable auto-refresh, and terminate (SIGTERM / SIGKILL) |
+| Availability | Observed availability over 24h / 7d / 30d, a 30-day daily strip and outage log, a fleet-wide mean on the overview, and a 30-day SLA figure on the public status page |
 | Operations | Web SSH terminal, Docker container management (start / stop / logs / interactive shell), shared SSH credential store, per-server notes |
 | Account security | Change your password and sign every other device out at once |
 | Public status page | Anonymized probe page whose API excludes identity and connection details at the query level |
@@ -55,6 +56,18 @@ Rules are evaluated by a dedicated backend loop (every 30s by default, `ALERT_IN
 - **Scope**: target one server, or leave it empty to cover every server you own, including ones added later.
 - **Notifications**: a JSON payload is POSTed to the configured webhook on both firing and recovery (see [API.md](API.md)); "Send test" verifies the endpoint before you save.
 - **Durable state**: active alerts live in the database, so a restart neither re-notifies nor loses a pending recovery. If a host disappears for good, threshold alerts resolve instead of hanging open forever.
+
+### Availability
+
+Availability is **observed**: the share of expected metric samples that actually landed in the database. It measures "could we see this host", not the host's own uptime counter -- if the panel or its database was down, that stretch counts against every server. The UI states this basis rather than implying otherwise.
+
+- **Three windows**: 24h and 7d read the one-minute rollup; 30d reads the fifteen-minute one (the minute tier only retains 30 days, and scanning it per server is roughly 20x the index work for precision that is invisible at a month's scale).
+- **New hosts are not blamed for their own absence**: each window's start is clamped to the server's creation time, and the UI says the measured span is shorter than the label. A window that has not yet covered a whole bucket shows an em dash rather than 0%.
+- **No permanent one-bucket deficit**: each window ends on its tier's bucket boundary. The bucket still being filled has not been rolled up yet, and counting it as expected would keep every healthy host just below 100% forever.
+- **Daily strip**: 30 days, colour-coded, counted from the same tier as the 30-day figure beside it so the two agree. A fully-down day produces no rows at all and is filled in explicitly instead of vanishing from the chart. Bars are fixed height and carry their value in colour alone -- scaling by availability would make a 0% day a zero-height, i.e. invisible, bar. Days before the server existed are hatched, which must not look like "down all day".
+- **Outage log**: derived from gaps of more than two minutes between consecutive buckets, capped at the 50 most recent, with an unrecovered one flagged as ongoing. A host that has never reported shows "no history yet" rather than "no outages" -- there is no sample to anchor an outage to.
+
+---
 
 ### Batch operations
 
@@ -178,6 +191,7 @@ Add the following secrets in **Settings -> Secrets and variables -> actions**:
 - [x] **SSH Credential Management** -- Manage reusable SSH usernames and passwords
 - [x] **Account Settings** -- Change your password from Settings; other sessions are revoked immediately
 - [x] **Server Groups / Batch Operations** -- Tags already cover grouping, so this landed as batch actions: bulk tagging, bulk delete, bulk command execution, inventory export
+- [x] **Availability Stats** -- Observed 24h / 7d / 30d availability, daily strip and outage log, see below
 - [x] **Process List** -- Live process table on the detail page, sortable by CPU / memory / PID / uptime, with search and terminate
 - [x] **Disk Usage** -- Show current disk usage on detail page
 - [x] **Alert Notifications** -- Threshold rules (CPU / memory / disk / load / latency / offline) with webhook delivery, see below

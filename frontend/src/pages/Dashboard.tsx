@@ -19,6 +19,8 @@ import TagSelect from '../components/TagSelect';
 import CredentialSelect from '../components/CredentialSelect';
 import { serversApi, Server, Tag } from '../api/servers';
 import { convertCurrency, currencySymbol, useExchangeRates } from '../hooks/useExchangeRates';
+import { useFleetUptime, windowPercent } from '../hooks/useFleetUptime';
+import { availabilityColor } from '../api/uptime';
 import { monthlyCost, percentOf } from '../utils/format';
 
 const { Title, Text } = Typography;
@@ -74,6 +76,7 @@ export default function Dashboard() {
   const [selecting, setSelecting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const ratesPerEUR = useExchangeRates();
+  const uptime = useFleetUptime();
 
   useEffect(() => { localStorage.setItem('dashboard_view', view); }, [view]);
   useEffect(() => { localStorage.setItem('dashboard_sort', sortKey); }, [sortKey]);
@@ -273,7 +276,20 @@ export default function Dashboard() {
     };
   }, [servers, refreshTimestamp, ratesPerEUR, i18n.language]);
 
+  // 24h availability per server, plus the fleet mean for the overview tile.
+  const availability = useMemo(() => {
+    const map = new Map<string, number | undefined>();
+    for (const server of servers) {
+      map.set(server.id, windowPercent(uptime.byServer.get(server.id), '24h'));
+    }
+    return map;
+  }, [servers, uptime.byServer]);
 
+  const fleetAvailability = useMemo(() => {
+    const values = [...availability.values()].filter((v): v is number => typeof v === 'number');
+    if (values.length === 0) return null;
+    return values.reduce((sum, v) => sum + v, 0) / values.length;
+  }, [availability]);
 
   // Stable identities: ServerCard is memoized and holds onto these callbacks
   // across renders it deliberately skips.
@@ -409,6 +425,17 @@ export default function Dashboard() {
         </Col>
         <Col xs={12} sm={8} xl={3}>
           <Tooltip title={t('uptime.badgeHint')}>
+            <Card className="overview-card overview-card-uptime" variant="borderless">
+              <div className="overview-icon"><RiseOutlined /></div>
+              <div>
+                <Text type="secondary">{t('uptime.overviewLabel')}</Text>
+                <strong style={fleetAvailability === null ? undefined : { color: availabilityColor(fleetAvailability) }}>
+                  {fleetAvailability === null ? '—' : `${fleetAvailability.toFixed(2)}%`}
+                </strong>
+              </div>
+            </Card>
+          </Tooltip>
+        </Col>
         <Col xs={12} sm={8} xl={3}>
           <Tooltip title={t('dashboard.monthlySpendHint')}>
             <Card className="overview-card overview-card-amber" variant="borderless">
@@ -501,6 +528,7 @@ export default function Dashboard() {
           onDelete={handleDelete}
           selectedIds={selecting ? selectedIds : undefined}
           onSelectionChange={setSelectedIds}
+          availability={availability}
         />
       ) : (
         <Row gutter={[18, 18]}>
@@ -514,6 +542,7 @@ export default function Dashboard() {
                 selectable={selecting}
                 selected={selectedIds.includes(s.id)}
                 onToggleSelect={toggleSelect}
+                availability={availability.get(s.id)}
               />
             </Col>
           ))}

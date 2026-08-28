@@ -1,5 +1,5 @@
 import React from 'react';
-import { Card, Tag, Progress, Typography, Space } from 'antd';
+import { Button, Card, Checkbox, Tag, Progress, Typography, Space, Tooltip } from 'antd';
 import {
   WindowsOutlined,
   CloudServerOutlined,
@@ -10,104 +10,74 @@ import {
   HddOutlined,
   ClockCircleOutlined,
   CalendarOutlined,
+  ThunderboltOutlined,
+  EnvironmentOutlined,
+  EditOutlined,
+  DeleteOutlined,
+  RiseOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { Server } from '../api/servers';
+import { availabilityColor } from '../api/uptime';
 import { useNavigate } from 'react-router-dom';
+import { formatBytes, formatGB, formatUptime, getExpirationInfo, percentOf, severityColor } from '../utils/format';
 
 const { Text } = Typography;
-
-function formatBytes(bytes: number): string {
-  if (!bytes || bytes < 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
-  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1);
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
-
-function formatGB(bytes: number): string {
-  if (!bytes) return '0 GB';
-  return (bytes / 1024 / 1024 / 1024).toFixed(1) + ' GB';
-}
-
-function formatUptime(seconds: number): string {
-  if (!seconds) return '0d';
-  const totalDays = Math.floor(seconds / 86400);
-  const years = Math.floor(totalDays / 365);
-  const remDays = totalDays % 365;
-  const months = Math.floor(remDays / 30);
-  const days = remDays % 30;
-  const parts: string[] = [];
-  if (years > 0) parts.push(years + 'y');
-  if (months > 0) parts.push(months + 'm');
-  if (days > 0 || parts.length === 0) parts.push(days + 'd');
-  return parts.join(' ');
-}
-
-function diffYMD(from: Date, to: Date): { years: number; months: number; days: number } {
-  let years = to.getFullYear() - from.getFullYear();
-  let months = to.getMonth() - from.getMonth();
-  let days = to.getDate() - from.getDate();
-  if (days < 0) {
-    months--;
-    const prevMonth = new Date(to.getFullYear(), to.getMonth(), 0);
-    days += prevMonth.getDate();
-  }
-  if (months < 0) {
-    years--;
-    months += 12;
-  }
-  return { years, months, days };
-}
-
-function getExpirationInfo(expiresAt?: string | null, lang?: string): { text: string; color: string } | null {
-  if (!expiresAt) return null;
-  const now = new Date();
-  const exp = new Date(expiresAt);
-  const isExpired = exp.getTime() < now.getTime();
-  const from = isExpired ? exp : now;
-  const to = isExpired ? now : exp;
-  const { years, months, days } = diffYMD(from, to);
-
-  const parts: string[] = [];
-  if (years > 0) parts.push(lang === 'zh' ? `${years}年` : `${years}y`);
-  if (months > 0) parts.push(lang === 'zh' ? `${months}月` : `${months}m`);
-  if (days > 0 || parts.length === 0) parts.push(lang === 'zh' ? `${days}天` : `${days}d`);
-  const diffStr = parts.join('');
-
-  if (isExpired) return { text: lang === 'zh' ? `已过期${diffStr}` : `Expired ${diffStr}`, color: '#ff4d4f' };
-  if (years > 0) return { text: lang === 'zh' ? `${diffStr}后到期` : `${diffStr} left`, color: '#52c41a' };
-  if (months > 0) return { text: lang === 'zh' ? `${diffStr}后到期` : `${diffStr} left`, color: months <= 1 ? '#ff4d4f' : '#faad14' };
-  return { text: lang === 'zh' ? `${diffStr}后到期` : `${diffStr} left`, color: '#ff4d4f' };
-}
 
 interface Props {
   server: Server;
   observedAt: number;
+  onEdit?: (server: Server) => void;
+  onDelete?: (server: Server) => void;
+  /** While selecting, a click toggles selection instead of opening the host. */
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (server: Server) => void;
+  /** Observed 24h availability; undefined until the census loads. */
+  availability?: number;
 }
 
-function ServerCard({ server, observedAt }: Props) {
+function ServerCard({
+  server, observedAt, onEdit, onDelete, selectable, selected, onToggleSelect, availability,
+}: Props) {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const m = server.latest_metrics;
   const cpuPercent = m ? Math.round(m.cpu_percent) : 0;
-  const memPercent = m && m.memory_total ? Math.round((m.memory_used / m.memory_total) * 100) : 0;
-  const diskPercent = m && server.disk_total
-    ? Math.min(100, Math.max(0, Math.round((m.disk_used / server.disk_total) * 100)))
-    : 0;
+  const memPercent = m ? percentOf(m.memory_used, m.memory_total) : 0;
+  const diskPercent = m ? percentOf(m.disk_used, server.disk_total) : 0;
 
   const isOnline = observedAt > 0 && !!m?.recorded_at && observedAt - new Date(m.recorded_at).getTime() < 120000;
   const lang = i18n.language?.startsWith('zh') ? 'zh' : 'en';
   const expInfo = getExpirationInfo(server.expires_at, lang);
+  const activate = () => {
+    if (selectable) {
+      onToggleSelect?.(server);
+      return;
+    }
+    navigate(`/servers/${server.id}`);
+  };
 
   return (
     <Card
       hoverable
-      className="server-card"
-      onClick={() => navigate(`/servers/${server.id}`)}
+      className={`server-card${isOnline ? '' : ' is-offline'}${selectable ? ' is-selectable' : ''}${selected ? ' is-selected' : ''}`}
+      onClick={activate}
       tabIndex={0}
-      onKeyDown={(event) => { if (event.key === 'Enter') navigate(`/servers/${server.id}`); }}
+      role={selectable ? 'checkbox' : undefined}
+      aria-checked={selectable ? !!selected : undefined}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || (selectable && event.key === ' ')) {
+          event.preventDefault();
+          activate();
+        }
+      }}
     >
+      {selectable && (
+        <div className="server-card-select">
+          <Checkbox checked={!!selected} />
+        </div>
+      )}
       <div className="server-card-header">
         <div className={`server-platform ${server.server_type === 'windows' ? 'windows' : 'linux'}`}>
           {server.server_type === 'windows' ? <WindowsOutlined /> : <CloudServerOutlined />}
@@ -121,11 +91,29 @@ function ServerCard({ server, observedAt }: Props) {
         </div>
       </div>
 
+      {!selectable && (onEdit || onDelete) && (
+        // Revealed on hover/focus so the resting card stays uncluttered. The
+        // click must not bubble, or it would also open the detail page.
+        <div className="server-card-actions" onClick={(event) => event.stopPropagation()}>
+          {onEdit && (
+            <Tooltip title={t('common.edit')}>
+              <Button size="small" type="text" icon={<EditOutlined />} onClick={() => onEdit(server)} />
+            </Tooltip>
+          )}
+          {onDelete && (
+            <Tooltip title={t('common.delete')}>
+              <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => onDelete(server)} />
+            </Tooltip>
+          )}
+        </div>
+      )}
+
       <div className="server-tags">
+        {server.public_location && (
+          <Tag variant="filled" className="location-tag" icon={<EnvironmentOutlined />}>{server.public_location}</Tag>
+        )}
         {server.tags?.map((tag) => (
-          <Tag key={tag.id} color={tag.color}>
-            {tag.name}
-          </Tag>
+          <Tag key={tag.id} color={tag.color}>{tag.name}</Tag>
         ))}
       </div>
 
@@ -134,6 +122,19 @@ function ServerCard({ server, observedAt }: Props) {
         <Space size={5}><DatabaseOutlined /><Text type="secondary">{formatGB(server.memory_total)}</Text></Space>
         <Space size={5}><HddOutlined /><Text type="secondary">{formatGB(server.disk_total)}</Text></Space>
         <Space size={5}><ClockCircleOutlined /><Text type="secondary">{formatUptime(m?.uptime_seconds || 0)}</Text></Space>
+        {isOnline && !!m?.latency_ms && (
+          <Tooltip title={t('card.latencyHint')}>
+            <Space size={5}><ThunderboltOutlined /><Text type="secondary">{m.latency_ms} ms</Text></Space>
+          </Tooltip>
+        )}
+        {typeof availability === 'number' && (
+          <Tooltip title={t('uptime.badgeHint')}>
+            <Space size={5}>
+              <RiseOutlined style={{ color: availabilityColor(availability) }} />
+              <Text style={{ color: availabilityColor(availability) }}>{availability.toFixed(2)}%</Text>
+            </Space>
+          </Tooltip>
+        )}
         {expInfo && (
           <Space size={5}><CalendarOutlined style={{ color: expInfo.color }} /><Text style={{ color: expInfo.color }}>{expInfo.text}</Text></Space>
         )}
@@ -143,15 +144,15 @@ function ServerCard({ server, observedAt }: Props) {
         <div className="server-metrics">
           <div className="metric-progress">
             <div><Text type="secondary">{t('card.cpu')}</Text><strong>{cpuPercent}%</strong></div>
-            <Progress percent={cpuPercent} showInfo={false} strokeColor={cpuPercent > 80 ? '#ff5d6c' : '#5d7df7'} trailColor="rgba(128, 140, 170, .14)" />
+            <Progress percent={cpuPercent} showInfo={false} strokeColor={severityColor(cpuPercent, 'blue')} railColor="rgba(128, 140, 170, .14)" />
           </div>
           <div className="metric-progress">
             <div><Text type="secondary">{t('card.memory')}</Text><strong>{memPercent}%</strong></div>
-            <Progress percent={memPercent} showInfo={false} strokeColor="#18b690" trailColor="rgba(128, 140, 170, .14)" />
+            <Progress percent={memPercent} showInfo={false} strokeColor={severityColor(memPercent, 'green')} railColor="rgba(128, 140, 170, .14)" />
           </div>
           <div className="metric-progress">
             <div><Text type="secondary">{t('card.disk')}</Text><strong>{diskPercent}%</strong></div>
-            <Progress percent={diskPercent} showInfo={false} strokeColor={diskPercent > 80 ? '#ff5d6c' : '#8d6dd7'} trailColor="rgba(128, 140, 170, .14)" />
+            <Progress percent={diskPercent} showInfo={false} strokeColor={severityColor(diskPercent, 'violet')} railColor="rgba(128, 140, 170, .14)" />
           </div>
           <div className="throughput-grid">
             <div>
@@ -202,6 +203,10 @@ export default React.memo(ServerCard, (prev, next) => {
     a.cpu_cores === b.cpu_cores &&
     a.memory_total === b.memory_total &&
     a.disk_total === b.disk_total &&
+    a.public_location === b.public_location &&
+    prev.selectable === next.selectable &&
+    prev.selected === next.selected &&
+    prev.availability === next.availability &&
     isOnlineAt(a, prev.observedAt) === isOnlineAt(b, next.observedAt) &&
     JSON.stringify(a.tags || []) === JSON.stringify(b.tags || []) &&
     JSON.stringify(a.latest_metrics) === JSON.stringify(b.latest_metrics)

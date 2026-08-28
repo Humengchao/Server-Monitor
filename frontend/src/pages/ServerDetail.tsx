@@ -15,6 +15,7 @@ import dayjs, { Dayjs } from 'dayjs';
 import { useTranslation } from 'react-i18next';
 import { serversApi, Server, MetricPoint } from '../api/servers';
 import { useMetrics, TimeRange } from '../hooks/useMetrics';
+import AvailabilityPanel from '../components/AvailabilityPanel';
 import MetricsChart from '../components/MetricsChart';
 import ProcessTable from '../components/ProcessTable';
 import SshTerminal from '../components/SshTerminal';
@@ -446,6 +447,17 @@ export default function ServerDetail() {
               <MetricsChart history={history} />
             </Card>
           ),
+        },
+        {
+          key: 'availability',
+          label: t('uptime.title'),
+          // Only mounted while selected, so its census requests don't fire for
+          // visitors who never open the tab.
+          children: activeTab === 'availability' ? (
+            <Card className="panel-card">
+              <AvailabilityPanel serverId={id!} />
+            </Card>
+          ) : null,
         },
         {
           key: 'processes',

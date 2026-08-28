@@ -40,9 +40,18 @@ type PublicServerMetric struct {
 	UptimeSeconds   int64
 	LatencyMS       int
 	RecordedAt      *time.Time
+	// Observed 30-day availability, derived from the fifteen-minute rollup.
+	// Availability30dObserved/Expected are bucket counts; the handler turns them
+	// into a percentage so the arithmetic lives in one place.
+	Availability30dObserved int
+	Availability30dExpected int
 }
 
-func GetPublicServerMetrics(db *sql.DB) ([]PublicServerMetric, error) {
+// GetPublicServerMetrics also censuses the fifteen-minute rollup so the status
+// page can publish a 30-day availability figure. The window start is clamped to
+// each server's creation time, otherwise a host added yesterday would advertise
+// a 3% SLA.
+func GetPublicServerMetrics(db *sql.DB, since30d, until time.Time) ([]PublicServerMetric, error) {
 	rows, err := db.Query(`
 		SELECT s.name, COALESCE(s.public_location, ''),
 			COALESCE((
@@ -56,10 +65,21 @@ func GetPublicServerMetrics(db *sql.DB) ([]PublicServerMetric, error) {
 			COALESCE(sm.memory_used, 0), COALESCE(sm.memory_total, 0), COALESCE(sm.disk_used_bytes, 0),
 			COALESCE(sm.network_rx_bytes, 0), COALESCE(sm.network_tx_bytes, 0),
 			COALESCE(sm.network_rx_total_bytes, 0), COALESCE(sm.network_tx_total_bytes, 0),
-			COALESCE(sm.uptime_seconds, 0), COALESCE(sm.latency_ms, 0), sm.recorded_at
+			COALESCE(sm.uptime_seconds, 0), COALESCE(sm.latency_ms, 0), sm.recorded_at,
+			COALESCE((
+				SELECT COUNT(*) FROM server_metrics_15m q
+				WHERE q.server_id = s.id AND q.recorded_at >= GREATEST($1, s.created_at) AND q.recorded_at < $2
+			), 0),
+			-- Counts quarter-hour boundaries in the range, mirroring
+			-- services.ExpectedBuckets: the rollup floors recorded_at onto those
+			-- boundaries, so dividing the raw duration would undercount by one
+			-- whenever created_at is not itself aligned, and the count above
+			-- would then exceed it.
+			GREATEST(0, (CEIL(EXTRACT(EPOCH FROM $2) / 900)
+				- CEIL(EXTRACT(EPOCH FROM GREATEST($1, s.created_at)) / 900))::INT)
 		FROM servers s
 		LEFT JOIN server_latest_metrics sm ON sm.server_id = s.id
-		ORDER BY s.created_at ASC, s.id ASC`)
+		ORDER BY s.created_at ASC, s.id ASC`, since30d, until)
 	if err != nil {
 		return nil, err
 	}
@@ -78,6 +98,7 @@ func GetPublicServerMetrics(db *sql.DB) ([]PublicServerMetric, error) {
 			&item.MemoryUsed, &item.MemoryTotal, &item.DiskUsed,
 			&item.NetworkRxBytes, &item.NetworkTxBytes, &item.NetworkRxTotal, &item.NetworkTxTotal,
 			&item.UptimeSeconds, &item.LatencyMS, &recordedAt,
+			&item.Availability30dObserved, &item.Availability30dExpected,
 		); err != nil {
 			return nil, err
 		}

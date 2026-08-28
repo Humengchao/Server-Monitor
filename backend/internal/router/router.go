@@ -74,6 +74,7 @@ func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, noti
 	dockerH := handlers.NewDockerHandler(sshCache)
 	processH := handlers.NewProcessHandler(sshCache)
 	batchH := handlers.NewBatchHandler(sshCache)
+	uptimeH := handlers.NewUptimeHandler()
 	credH := handlers.NewCredentialHandler()
 	publicStatusH := handlers.NewPublicStatusHandler()
 	alertH := handlers.NewAlertHandler(notifier)
@@ -114,7 +115,9 @@ func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, noti
 			// Fanning a command out over SSH is the heaviest thing the panel
 			// does; limit how often it can be triggered.
 			servers.POST("/bulk/exec", middleware.RateLimit(10, 1*time.Minute), batchH.BulkExec)
+			servers.GET("/uptime", uptimeH.Fleet)
 			servers.GET("/:id", serverH.Get)
+			servers.GET("/:id/uptime", uptimeH.Detail)
 			servers.POST("", serverH.Create)
 			servers.PUT("/:id", serverH.Update)
 			servers.DELETE("/:id", serverH.Delete)

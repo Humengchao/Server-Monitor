@@ -453,7 +453,133 @@ GET /api/servers/:id/metrics?since=2024-01-01T00:00:00Z
 
 ---
 
-## 六、进程接口
+## 六、可用性接口
+
+> 需认证。可用率按 **观测口径**（observed）计算：窗口内实际落库的指标样本数 ÷ 应落库的样本数。
+> 面板自身或其数据库不可用的时段会同时计入所有服务器的不可用时间——它衡量的是"我们是否看得到这台主机"，
+> 而不是主机自身的 uptime 计数器。响应里固定带上 `basis` 字段，方便调用方如实标注 SLA 徽章的口径。
+
+**窗口与汇总层**
+
+| 窗口 | 读取的汇总层 | 单桶时长 | 满窗桶数 |
+|------|--------------|----------|----------|
+| `24h` | `server_metrics_1m` | 60 秒 | 1440 |
+| `7d` | `server_metrics_1m` | 60 秒 | 10080 |
+| `30d` | `server_metrics_15m` | 900 秒 | 2880 |
+
+30 天窗口刻意读取粗粒度层：一分钟层只保留 30 天，且逐台扫描它的索引开销约为 15 分钟层的 20 倍，
+而在一个月的时间尺度上这点精度差异并不可见。
+
+**三条计算约定**
+
+1. **窗口起点夹到 `servers.created_at`**：刚加入的主机不会因为"加入之前没有数据"而被算作不可用，此时该窗口返回 `partial: true`。
+2. **窗口终点对齐到该层的桶边界**：正在填充中的桶还没有被汇总写入，如果把它算进应采集数，任何健康主机都会永远差一个桶、到不了 100%。
+3. **`expected_buckets` 数的是区间内的对齐边界个数**，而不是"时长 ÷ 桶宽"。汇总写入的时间戳是 `FLOOR(EXTRACT(EPOCH FROM recorded_at) / 桶宽) * 桶宽`，
+   在非对齐的边界上（例如按天切分出的半天、夹到创建时刻的窗口）两种算法会差 1，导致 `observed_buckets > expected_buckets`。
+
+### 全部服务器可用率
+
+```
+GET /api/servers/uptime
+```
+
+每个用户的结果在服务端缓存 60 秒——一次调用要扫一个月的汇总桶，而这个数字在一分钟内不会有实质变化。
+
+**响应**:
+
+```json
+{
+  "servers": [
+    {
+      "server_id": "uuid",
+      "windows": [
+        { "window": "24h", "percent": 95.21, "observed_buckets": 1371, "expected_buckets": 1440, "partial": false, "no_data": false },
+        { "window": "7d",  "percent": 99.32, "observed_buckets": 10011, "expected_buckets": 10080, "partial": false, "no_data": false },
+        { "window": "30d", "percent": 99.86, "observed_buckets": 2876, "expected_buckets": 2880, "partial": false, "no_data": false }
+      ]
+    }
+  ],
+  "basis": "observed",
+  "basis_note": "Share of expected metric samples that were collected. Panel downtime counts against every server.",
+  "generated_at": "2026-08-27T20:49:31Z"
+}
+```
+
+**字段说明**:
+
+| 字段 | 说明 |
+|------|------|
+| percent | 保留两位小数，取值夹在 0–100 |
+| observed_buckets | 窗口内实际存在的汇总桶数 |
+| expected_buckets | 窗口内应存在的汇总桶数 |
+| partial | 窗口长度超过该服务器的存在时长，实际统计区间比标签更短 |
+| no_data | 该窗口尚无任何应采集量（新加入的主机还没跨过一个完整的桶）。此时 `percent` 为 0，**不应**按 0% 展示 |
+
+### 单台服务器可用率明细
+
+```
+GET /api/servers/:id/uptime?days=30
+```
+
+**查询参数**:
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| days | 统计天数, 取值 1–30, 超出范围则忽略 | 30 |
+
+**响应**:
+
+```json
+{
+  "server_id": "uuid",
+  "since": "2026-07-28T20:45:00Z",
+  "until": "2026-08-27T20:45:00Z",
+  "days": [
+    { "day": "2026-07-28", "percent": 100, "observed_buckets": 13, "expected_buckets": 13, "no_data": false },
+    { "day": "2026-07-29", "percent": 100, "observed_buckets": 96, "expected_buckets": 96, "no_data": false }
+  ],
+  "outages": [
+    { "started_at": "2026-08-27T13:52:00Z", "ended_at": "2026-08-27T14:23:00Z", "seconds": 1860, "ongoing": false },
+    { "started_at": "2026-08-24T18:22:00Z", "ended_at": "2026-08-24T20:23:00Z", "seconds": 7260, "ongoing": false }
+  ],
+  "basis": "observed",
+  "generated_at": "2026-08-27T20:50:20Z"
+}
+```
+
+**`days` 每日条带**
+
+按 15 分钟层统计（与 30 天数字同层），因此条带各天之和与 `GET /api/servers/uptime` 的 30 天百分比一致。
+区间内**每一个日历日都会出现**，包括查询结果里根本没有行的整天——全天中断的那一天恰好没有行，
+若不补齐就会从图上凭空消失。首尾两天以及创建当天会按实际覆盖时长折算 `expected_buckets`。
+
+`no_data: true` 表示这一天服务器尚不存在，与"整天 0%"必须区分开：前者应画成留白/斜纹，后者应画成红色。
+
+**`outages` 中断记录**
+
+由相邻汇总桶之间的间隔推导：间隔超过 `2 分钟`（`services.UptimeOutageGap`）即算一次中断，最多返回 50 条
+（`services.UptimeMaxOutages`，倒序取最近的）。若返回正好 50 条，说明可能被截断。
+
+`ongoing: true` 表示窗口结束时仍未恢复：最后一个样本距窗口终点已超过阈值，且没有更晚的桶可以给这段间隔"收尾"。
+从未上报过任何样本的服务器不会产生中断记录——没有样本可以作为起点，此时应当展示"暂无历史"而不是"无中断"。
+
+---
+
+### 公开状态页的 SLA 字段
+
+公开状态页（`GET /api/public/status`，无需认证）的每个节点会带上 `availability_30d`：
+
+```json
+{ "name": "web-01", "availability_30d": 99.86 }
+```
+
+口径与上面的 30 天窗口完全一致（15 分钟层、终点对齐、起点夹到创建时刻）。
+当该服务器的应采集桶数少于 16 个（即不足四小时）时，字段为 `null` 而不是一个百分比——
+样本太少时给出的数字只是噪声，不如不给。
+
+---
+
+## 七、进程接口
 
 > 需认证。请求通过共享的 SSH 连接缓存执行，轮询列表不会每次都重新握手。
 
@@ -524,7 +650,7 @@ DELETE /api/servers/:id/processes/:pid?force=1
 
 ---
 
-## 七、告警接口
+## 八、告警接口
 
 > 所有接口均需认证。规则按用户隔离；`server_id` 为 `null` 时该规则作用于该用户的全部服务器（包括之后新增的）。
 
@@ -688,7 +814,7 @@ POST /api/alerts/test
 
 ---
 
-## 八、SSH WebSocket 终端
+## 九、SSH WebSocket 终端
 
 ```
 WS /api/ssh/:id
@@ -714,7 +840,7 @@ ws.send('ls -la\n');
 
 ---
 
-## 九、通用说明
+## 十、通用说明
 
 ### 认证错误
 
