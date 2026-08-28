@@ -14,6 +14,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import ServerCard from '../components/ServerCard';
 import ServerTable from '../components/ServerTable';
+import BatchActionBar from '../components/BatchActionBar';
 import TagSelect from '../components/TagSelect';
 import CredentialSelect from '../components/CredentialSelect';
 import { serversApi, Server, Tag } from '../api/servers';
@@ -520,6 +521,13 @@ export default function Dashboard() {
       )}
 
       {selecting && selectedServers.length > 0 && (
+        <BatchActionBar
+          selected={selectedServers}
+          total={filteredServers.length}
+          onSelectAll={() => setSelectedIds(filteredServers.map((s) => s.id))}
+          onClear={exitSelection}
+          onChanged={() => loadServers(false)}
+        />
       )}
 
       <Modal

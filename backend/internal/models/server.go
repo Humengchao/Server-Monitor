@@ -345,6 +345,85 @@ func SetServerTags(db *sql.DB, serverID, userID uuid.UUID, tagIDs []uuid.UUID) e
 	return tx.Commit()
 }
 
+// AddTagsToServers attaches every tag to every server in one statement. Both
+// sides are filtered by owner, so IDs belonging to another user are silently
+// skipped rather than granting cross-tenant access. Already-present pairs are
+// left alone, which makes the operation idempotent.
+func AddTagsToServers(db *sql.DB, serverIDs, tagIDs []uuid.UUID, userID uuid.UUID) error {
+	if len(serverIDs) == 0 || len(tagIDs) == 0 {
+		return nil
+	}
+	_, err := db.Exec(
+		`INSERT INTO server_tags (server_id, tag_id)
+		 SELECT s.id, t.id FROM servers s CROSS JOIN tags t
+		 WHERE s.id = ANY($1) AND s.user_id = $3
+		   AND t.id = ANY($2) AND t.user_id = $3
+		 ON CONFLICT (server_id, tag_id) DO NOTHING`,
+		pq.Array(serverIDs), pq.Array(tagIDs), userID)
+	return err
+}
+
+func RemoveTagsFromServers(db *sql.DB, serverIDs, tagIDs []uuid.UUID, userID uuid.UUID) error {
+	if len(serverIDs) == 0 || len(tagIDs) == 0 {
+		return nil
+	}
+	_, err := db.Exec(
+		`DELETE FROM server_tags st
+		 USING servers s
+		 WHERE st.server_id = s.id AND s.user_id = $3
+		   AND st.server_id = ANY($1) AND st.tag_id = ANY($2)`,
+		pq.Array(serverIDs), pq.Array(tagIDs), userID)
+	return err
+}
+
+// DeleteServers removes several servers at once and reports how many rows the
+// owner actually had, so the caller can tell the user if some IDs were ignored.
+func DeleteServers(db *sql.DB, serverIDs []uuid.UUID, userID uuid.UUID) (int64, error) {
+	if len(serverIDs) == 0 {
+		return 0, nil
+	}
+	result, err := db.Exec(
+		`DELETE FROM servers WHERE id = ANY($1) AND user_id = $2`,
+		pq.Array(serverIDs), userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+// CountOwnedServers reports how many of the given IDs the user actually owns.
+// Bulk tag statements silently skip rows belonging to someone else, so this is
+// what lets the API report the number it really touched instead of the number
+// it was asked about.
+func CountOwnedServers(db *sql.DB, serverIDs []uuid.UUID, userID uuid.UUID) (int, error) {
+	if len(serverIDs) == 0 {
+		return 0, nil
+	}
+	var count int
+	err := db.QueryRow(
+		`SELECT COUNT(*) FROM servers WHERE id = ANY($1) AND user_id = $2`,
+		pq.Array(serverIDs), userID).Scan(&count)
+	return count, err
+}
+
+// GetServersByIDsAndUser returns servers with decrypted, credential-resolved
+// SSH settings, in the order the IDs were given. IDs the user does not own are
+// omitted, so callers must compare lengths if that matters.
+func GetServersByIDsAndUser(db *DB, ids []uuid.UUID, userID uuid.UUID) ([]*Server, error) {
+	servers := make([]*Server, 0, len(ids))
+	for _, id := range ids {
+		s, err := GetServerByIDAndUser(db, id, userID)
+		if err == sql.ErrNoRows {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		servers = append(servers, s)
+	}
+	return servers, nil
+}
+
 func GetServerTags(db *sql.DB, serverID uuid.UUID) ([]Tag, error) {
 	rows, err := db.Query(
 		`SELECT t.id, t.user_id, t.name, t.color FROM tags t

@@ -73,6 +73,7 @@ func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, noti
 	sshH := handlers.NewSSHHandler()
 	dockerH := handlers.NewDockerHandler(sshCache)
 	processH := handlers.NewProcessHandler(sshCache)
+	batchH := handlers.NewBatchHandler(sshCache)
 	credH := handlers.NewCredentialHandler()
 	publicStatusH := handlers.NewPublicStatusHandler()
 	alertH := handlers.NewAlertHandler(notifier)
@@ -106,6 +107,13 @@ func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, noti
 		servers := api.Group("/servers", middleware.AuthRequired(cfg))
 		{
 			servers.GET("", serverH.List)
+			// Registered before "/:id" so gin routes the literal segment rather
+			// than treating "bulk" as a server ID.
+			servers.POST("/bulk/tags", batchH.BulkTags)
+			servers.POST("/bulk/delete", batchH.BulkDelete)
+			// Fanning a command out over SSH is the heaviest thing the panel
+			// does; limit how often it can be triggered.
+			servers.POST("/bulk/exec", middleware.RateLimit(10, 1*time.Minute), batchH.BulkExec)
 			servers.GET("/:id", serverH.Get)
 			servers.POST("", serverH.Create)
 			servers.PUT("/:id", serverH.Update)
