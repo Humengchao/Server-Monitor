@@ -73,6 +73,7 @@ func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, noti
 	sshH := handlers.NewSSHHandler()
 	dockerH := handlers.NewDockerHandler(sshCache)
 	processH := handlers.NewProcessHandler(sshCache)
+	hostOpsH := handlers.NewHostOpsHandler(sshCache)
 	batchH := handlers.NewBatchHandler(sshCache)
 	uptimeH := handlers.NewUptimeHandler()
 	credH := handlers.NewCredentialHandler()
@@ -126,6 +127,12 @@ func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, noti
 			servers.GET("/:id/metrics", metricsH.GetHistory)
 			servers.GET("/:id/processes", processH.List)
 			servers.DELETE("/:id/processes/:pid", processH.Kill)
+			servers.GET("/:id/services", hostOpsH.ListServices)
+			// Starting and stopping units is a privileged, side-effecting action;
+			// it gets its own bucket rather than sharing the read-only routes'.
+			servers.POST("/:id/services/control",
+				middleware.RateLimit(30, 1*time.Minute), hostOpsH.ControlService)
+			servers.GET("/:id/ports", hostOpsH.ListPorts)
 			servers.GET("/:id/docker/check", dockerH.CheckDocker)
 			servers.GET("/:id/docker/containers", dockerH.ListContainers)
 			servers.POST("/:id/docker/containers/:containerId/:action", dockerH.ContainerAction)

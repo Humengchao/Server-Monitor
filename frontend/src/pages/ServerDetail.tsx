@@ -18,6 +18,8 @@ import { useMetrics, TimeRange } from '../hooks/useMetrics';
 import AvailabilityPanel from '../components/AvailabilityPanel';
 import MetricsChart from '../components/MetricsChart';
 import ProcessTable from '../components/ProcessTable';
+import ServiceTable from '../components/ServiceTable';
+import PortTable from '../components/PortTable';
 import SshTerminal from '../components/SshTerminal';
 import TagSelect from '../components/TagSelect';
 import CredentialSelect from '../components/CredentialSelect';
@@ -470,6 +472,26 @@ export default function ServerDetail() {
           children: activeTab === 'processes' ? (
             <Card className="panel-card">
               <ProcessTable serverId={id!} serverType={server.server_type || 'linux'} />
+            </Card>
+          ) : null,
+        },
+        {
+          key: 'services',
+          label: t('service.title'),
+          // Same reasoning as the process pane: mounted only while selected, so
+          // its polling stops when the operator switches away.
+          children: activeTab === 'services' ? (
+            <Card className="panel-card">
+              <ServiceTable serverId={id!} serverType={server.server_type || 'linux'} />
+            </Card>
+          ) : null,
+        },
+        {
+          key: 'ports',
+          label: t('port.title'),
+          children: activeTab === 'ports' ? (
+            <Card className="panel-card">
+              <PortTable serverId={id!} />
             </Card>
           ) : null,
         },

@@ -43,6 +43,7 @@ The public probe refreshes every 15 seconds and exposes only anonymous node alia
 | Batch operations | Multi-select servers to add/remove tags, delete, export an inventory CSV, or run one command across up to 50 hosts with per-host results |
 | Process management | Live process table on the detail page, sortable by PID / user / CPU / memory / RSS / uptime, with search, pausable auto-refresh, and terminate (SIGTERM / SIGKILL) |
 | Availability | Observed availability over 24h / 7d / 30d, a 30-day daily strip and outage log, a fleet-wide mean on the overview, and a 30-day SLA figure on the public status page |
+| Services & ports | systemd unit list (failures first) with start/stop/restart/reload, plus a listening-port table that classifies each bind by who can reach it |
 | Operations | Web SSH terminal, Docker container management (start / stop / logs / interactive shell), shared SSH credential store, per-server notes |
 | Account security | Change your password and sign every other device out at once |
 | Public status page | Anonymized probe page whose API excludes identity and connection details at the query level |
@@ -66,6 +67,27 @@ Availability is **observed**: the share of expected metric samples that actually
 - **No permanent one-bucket deficit**: each window ends on its tier's bucket boundary. The bucket still being filled has not been rolled up yet, and counting it as expected would keep every healthy host just below 100% forever.
 - **Daily strip**: 30 days, colour-coded, counted from the same tier as the 30-day figure beside it so the two agree. A fully-down day produces no rows at all and is filled in explicitly instead of vanishing from the chart. Bars are fixed height and carry their value in colour alone -- scaling by availability would make a 0% day a zero-height, i.e. invisible, bar. Days before the server existed are hatched, which must not look like "down all day".
 - **Outage log**: derived from gaps of more than two minutes between consecutive buckets, capped at the 50 most recent, with an unrecovered one flagged as ongoing. A host that has never reported shows "no history yet" rather than "no outages" -- there is no sample to anchor an outage to.
+
+---
+
+### Services and ports
+
+Two new tabs on the detail page. Both reuse the existing SSH connection cache, so polling costs a session rather than a handshake.
+
+**Services**
+
+- **Reading**: `systemctl list-units` first, then a second `list-unit-files` call for the boot disposition. Hosts without systemd — most containers, anything still on sysvinit — fall back to `service --status-all`.
+- **Three distinct "cannot ask" cases**: no systemd installed, systemd installed but unreachable by this SSH user, and no service manager at all. Each says something different. Notably, on a systemd host the init scripts are **not** used as a fallback: read without privilege they report a serving nginx as stopped, and confidently wrong data is worse than admitting we could not ask.
+- **Ordering**: failed → running → activating → the rest, alphabetical within each group. Capped at 500, so whatever gets truncated is the least interesting.
+- **State**: the `sub` state rides alongside `active` (running / exited / dead) — it is the field that separates a one-shot that finished from a daemon that died. An empty boot disposition renders as `—`, never as "disabled".
+- **Control**: start / stop / restart / reload, spelled out as words rather than icons. Restart and reload are both "circular arrow" glyphs at that size, and picking the wrong one is not harmless: a restart drops every connection the service is holding. `reload` earns its own verb precisely because it does not; Windows has no equivalent, so it is refused there rather than quietly downgraded to a restart.
+- **No privilege escalation**: commands run as the configured SSH user with no sudo attempt, and the host's own refusal is shown verbatim. Unit names are checked against a strict allow-list — before a connection is opened — and any shell metacharacter is rejected.
+
+**Ports**
+
+- **Reading**: `ss -tulnp`, falling back to `netstat -tulnp`. The formats differ enough to need separate parsers: UDP sockets are `UNCONN` rather than `LISTEN` under ss, so filtering on the literal word drops every UDP listener, and netstat's program column holds a process title truncated to the column width (sshd shows up as `sshd: /usr/sbin`).
+- **Exposure**: derived from the bind address and colour-coded — a wildcard bind (`0.0.0.0` / `::`) is flagged public with its own notice, RFC1918 and link-local are private, `127.0.0.0/8` and `::1` are loopback. This is the point of the page: it answers who can actually reach the port.
+- Well-known ports show a service name (22 → ssh, 5432 → postgres). Blank process attribution means the SSH user may not see the owner, not that the socket has none.
 
 ---
 
@@ -192,6 +214,7 @@ Add the following secrets in **Settings -> Secrets and variables -> actions**:
 - [x] **Account Settings** -- Change your password from Settings; other sessions are revoked immediately
 - [x] **Server Groups / Batch Operations** -- Tags already cover grouping, so this landed as batch actions: bulk tagging, bulk delete, bulk command execution, inventory export
 - [x] **Availability Stats** -- Observed 24h / 7d / 30d availability, daily strip and outage log, see below
+- [x] **Service Management / Port Audit** -- systemd unit listing and control, listening ports with exposure classification, see below
 - [x] **Process List** -- Live process table on the detail page, sortable by CPU / memory / PID / uptime, with search and terminate
 - [x] **Disk Usage** -- Show current disk usage on detail page
 - [x] **Alert Notifications** -- Threshold rules (CPU / memory / disk / load / latency / offline) with webhook delivery, see below

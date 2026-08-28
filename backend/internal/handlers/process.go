@@ -4,11 +4,9 @@ import (
 	"net/http"
 	"strconv"
 
-	"server-monitor/internal/models"
 	"server-monitor/internal/services"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
 // ProcessHandler reads the remote process table over the shared SSH connection
@@ -21,26 +19,8 @@ func NewProcessHandler(sshCache *services.SSHConnCache) *ProcessHandler {
 	return &ProcessHandler{sshCache: sshCache}
 }
 
-// resolveServer loads a server the caller owns and opens a pooled SSH client.
-// It writes the error response itself and returns ok=false when either fails.
-func (h *ProcessHandler) resolveServer(c *gin.Context) (*models.Server, bool) {
-	userID := c.MustGet("user_id").(uuid.UUID)
-	id, err := uuid.Parse(c.Param("id"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
-		return nil, false
-	}
-	db := c.MustGet("db").(*models.DB)
-	server, err := models.GetServerByIDAndUser(db, id, userID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
-		return nil, false
-	}
-	return server, true
-}
-
 func (h *ProcessHandler) List(c *gin.Context) {
-	server, ok := h.resolveServer(c)
+	server, ok := resolveOwnedServer(c)
 	if !ok {
 		return
 	}
@@ -81,7 +61,7 @@ func (h *ProcessHandler) Kill(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid pid"})
 		return
 	}
-	server, ok := h.resolveServer(c)
+	server, ok := resolveOwnedServer(c)
 	if !ok {
 		return
 	}

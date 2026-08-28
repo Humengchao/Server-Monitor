@@ -422,8 +422,11 @@ button, input, textarea, select { font: inherit; }
    instead — hover included, or the sticky cell stops following its own row.
    Note the v6 class names: fix-start/fix-end, not the v5 fix-left/fix-right. */
 .server-table .ant-table-cell-fix-start,
+.server-table .ant-table-cell-fix-end { background: var(--surface); }
 .server-table .ant-table-thead > tr > th.ant-table-cell-fix-start,
+.server-table .ant-table-thead > tr > th.ant-table-cell-fix-end { background: var(--surface-soft); }
 .server-table .ant-table-tbody > tr:hover > td.ant-table-cell-fix-start,
+.server-table .ant-table-tbody > tr:hover > td.ant-table-cell-fix-end { background: var(--surface-soft); }
 .server-table .status-pill { width: fit-content; }
 .table-identity { display: flex; align-items: center; gap: 10px; }
 .table-identity > div { min-width: 0; display: flex; flex-direction: column; }
@@ -608,8 +611,15 @@ button, input, textarea, select { font: inherit; }
   font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
   font-size: 10px;
 }
+/* Services and ports — same table shell as the process list */
+.service-privilege-note.ant-alert { margin-bottom: 12px; border-radius: 11px; }
+.service-state-tag { display: inline-flex; align-items: baseline; gap: 6px; margin: 0; }
 /* The sub-state rides along inside the state tag, dimmed, because it qualifies
    the state rather than standing beside it as a separate fact. */
+.service-substate { opacity: .72; font-size: 10px; font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace; }
+.service-actions .ant-btn { padding: 0 5px; font-size: 12px; }
+.port-cell { display: inline-flex; align-items: baseline; gap: 7px; }
+.port-cell small { color: var(--muted); font-size: 10px; letter-spacing: .2px; }
 
 .kill-confirm { display: flex; flex-direction: column; gap: 10px; }
 .kill-confirm code {

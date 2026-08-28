@@ -579,7 +579,141 @@ GET /api/servers/:id/uptime?days=30
 
 ---
 
-## 七、进程接口
+## 七、服务与端口接口
+
+> 需认证。两者都通过共享的 SSH 连接缓存执行，轮询只花一个 session，不会每次重新握手。
+
+### 服务列表
+
+```
+GET /api/servers/:id/services
+```
+
+**读取方式**（Linux）：先执行 `systemctl list-units --type=service --all --plain --no-legend`；
+若拿到行，再补一次 `systemctl list-unit-files` 取开机启动状态（该状态失败不影响主列表返回）。
+若第一步没有可用输出，则用 `command -v` 探测主机到底有什么，据此区分三种情况 —— 这一步很关键，
+因为「没有 systemd」和「有 systemd 但当前用户问不到」需要给出完全不同的提示。
+
+**响应**:
+
+```json
+{
+  "services": [
+    {
+      "name": "nginx.service",
+      "load": "loaded",
+      "active": "active",
+      "sub": "running",
+      "enabled": "enabled",
+      "description": "A high performance web server and a reverse proxy server"
+    }
+  ],
+  "manager": "systemd",
+  "total": 72,
+  "returned": 72,
+  "supported": true
+}
+```
+
+**字段说明**:
+
+| 字段 | 说明 |
+|------|------|
+| load | 单元文件本身是否解析成功：`loaded` / `not-found` / `masked` |
+| active | 高层状态：`active` / `inactive` / `failed` / `activating` |
+| sub | 类型相关的细节：`running` / `exited` / `dead`。**它才是区分「一次性任务已完成」和「守护进程已死」的字段** —— 两者的 active 都可能是 inactive |
+| enabled | 开机启动状态：`enabled` / `disabled` / `static` / `masked`。为空表示主机没报告，**不等于 disabled**（模板实例如 `getty@tty1.service` 就没有对应的 unit file 条目） |
+| manager | 实际应答的机制：`systemd` / `sysv` / `windows`。`sysv` 只能给出名字和运行与否，界面据此隐藏另外两列，而不是把它们显示为空 |
+| total / returned | 截断前后的数量。排序为「失败 → 运行中 → 启动中 → 其余」，各组内按名称字典序，因此截断掉的一定是最不需要关注的那些（上限 500） |
+
+**主机无法查询时**（HTTP 仍为 200，因为这是主机的状态，不是请求的错误）:
+
+```json
+{
+  "services": [], "total": 0, "returned": 0,
+  "supported": false,
+  "reason_code": "unreachable",
+  "reason": "systemd is installed but did not respond; this SSH user may not be permitted to query it"
+}
+```
+
+| reason_code | 含义 |
+|-------------|------|
+| `absent` | 当前 SSH 用户的 PATH 里既没有 `systemctl` 也没有 `service`。容器通常本身就没有 init 系统 |
+| `unreachable` | 装了 systemd 但没有应答，通常是非 root 登录缺少会话总线。**此时不会回退到 init 脚本** —— 在 systemd 主机上无特权读取 init 脚本会把正在服务的 nginx 报成已停止，给出确定错误的数据比承认问不到更糟 |
+
+`reason` 只有英文，供 API 调用方与日志使用；界面渲染的是 `reason_code` 对应的本地化文案。
+
+### 服务控制
+
+```
+POST /api/servers/:id/services/control
+```
+
+限流 30 次/分钟。
+
+**请求体**:
+
+```json
+{ "name": "nginx.service", "action": "restart" }
+```
+
+| 参数 | 说明 |
+|------|------|
+| name | 单元名。必须匹配 `^[A-Za-z0-9][A-Za-z0-9@._:-]{0,127}$` |
+| action | `start` / `stop` / `restart` / `reload` 之一，其他一律拒绝 |
+
+两个安全约定：
+
+1. **name 会被严格校验后直接拼进命令行**。允许的字符集里没有任何一个对 shell 有特殊含义，这正是不加引号也安全的原因；
+   systemd 自身的转义语法用反斜杠，因此被排除在外 —— 需要反斜杠的单元无法从这里控制，这个取舍优于把 shell 元字符交给远端 root shell。
+   校验发生在建立 SSH 连接之前：被拒绝的名字不该消耗一个 session，返回信息也不该随主机是否在线而变化。
+2. **不做任何提权**。命令以服务器配置的 SSH 用户执行，不会尝试 sudo。若该用户无权管理单元，会把主机自身的拒绝信息原样返回（HTTP 502），
+   例如 `Failed to connect to bus: No such file or directory` 或 `Access denied`。
+
+`reload` 之所以单列一个动词而不是映射到 restart：reload 重新读取配置且**不断开连接**，restart 会。
+Windows 没有对应语义，因此在 Windows 主机上直接拒绝 `reload`，而不是悄悄降级为重启。
+
+**响应**: `200 { "message": "command sent" }`。名称或动作不合法为 `400`，主机拒绝为 `502`（错误信息即主机原话）。
+
+### 监听端口
+
+```
+GET /api/servers/:id/ports
+```
+
+**读取方式**（Linux）：`ss -tulnp`，失败则回退 `netstat -tulnp`。两者格式差异不小，各有独立解析：
+UDP 在 ss 里的状态是 `UNCONN` 而非 `LISTEN`（按字面过滤 LISTEN 会丢掉全部 UDP 监听）；
+netstat 的 `PID/Program name` 列装的是被列宽截断的**进程标题**（sshd 显示为 `sshd: /usr/sbin`），需要还原成程序名。
+
+**响应**:
+
+```json
+{
+  "ports": [
+    { "protocol": "tcp", "address": "0.0.0.0", "port": 22, "process": "sshd", "pid": 61, "exposure": "public" },
+    { "protocol": "tcp", "address": "127.0.0.1", "port": 9001, "process": "nginx", "pid": 385, "exposure": "loopback" }
+  ],
+  "total": 7,
+  "returned": 7
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| address | 监听地址，IPv6 的方括号已去掉 |
+| process / pid | 归属进程。**为空表示当前 SSH 用户无权查看该套接字的归属，不代表没有归属进程**。一个套接字被多进程共享时（如 nginx 的多个 worker）只返回第一个 |
+| exposure | 由监听地址推导的可达范围：`public`（通配监听或公网地址）、`private`（RFC1918 / link-local）、`loopback`（127.0.0.0/8 与 ::1）、`unknown`（地址无法解析） |
+
+`exposure` 是这个接口的主要价值：它直接回答「谁能连上这个端口」。
+通配监听（`0.0.0.0` / `::`）会接受主机所有网卡上的流量，包括云厂商挂上来的公网网卡，界面会单独提示。
+注意 100.64.0.0/10（运营商级 NAT）被归为 `public`：Go 的 `IsPrivate` 不覆盖它，而在这个判断上偏保守是更安全的方向。
+
+上限 300 条，按端口升序、再按协议与地址排序。
+
+---
+
+## 八、进程接口
 
 > 需认证。请求通过共享的 SSH 连接缓存执行，轮询列表不会每次都重新握手。
 
@@ -650,7 +784,7 @@ DELETE /api/servers/:id/processes/:pid?force=1
 
 ---
 
-## 八、告警接口
+## 九、告警接口
 
 > 所有接口均需认证。规则按用户隔离；`server_id` 为 `null` 时该规则作用于该用户的全部服务器（包括之后新增的）。
 
@@ -814,7 +948,7 @@ POST /api/alerts/test
 
 ---
 
-## 九、SSH WebSocket 终端
+## 十、SSH WebSocket 终端
 
 ```
 WS /api/ssh/:id
@@ -840,7 +974,7 @@ ws.send('ls -la\n');
 
 ---
 
-## 十、通用说明
+## 十一、通用说明
 
 ### 认证错误
 
