@@ -1,10 +1,12 @@
 package middleware
 
 import (
+	"log"
 	"net/http"
 	"strings"
 
 	"server-monitor/internal/config"
+	"server-monitor/internal/models"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -93,7 +95,46 @@ func parseToken(c *gin.Context, tokenString string, cfg *config.Config) {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid user id in token"})
 		return
 	}
+	if !tokenIssuedAfterCutoff(c, userID, claims) {
+		return
+	}
 	username, _ := claims["username"].(string)
 	c.Set("user_id", userID)
 	c.Set("username", username)
+}
+
+// tokenIssuedAfterCutoff rejects tokens minted before the user's last password
+// change. This is the one piece of server-side state in an otherwise stateless
+// scheme, and it costs a primary-key lookup per request — the price of being
+// able to sign other devices out at all.
+func tokenIssuedAfterCutoff(c *gin.Context, userID uuid.UUID, claims jwt.MapClaims) bool {
+	raw, exists := c.Get("db")
+	db, ok := raw.(*models.DB)
+	if !exists || !ok {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "database unavailable"})
+		return false
+	}
+	validAfter, err := models.GetTokensValidAfter(db.Raw, userID)
+	if err != nil {
+		// Fail closed on identity, but not with 401: the client treats that as
+		// "log out", and a database blip must not sign everyone out.
+		log.Printf("auth: read token cutoff for %s: %v", userID, err)
+		c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "authentication temporarily unavailable"})
+		return false
+	}
+	if validAfter.IsZero() {
+		return true
+	}
+	issuedAt, err := claims.GetIssuedAt()
+	if err != nil || issuedAt == nil {
+		// Tokens minted before "iat" was added carry no issue time. They expire
+		// within the normal 72-hour window, so accept them until then rather
+		// than forcing every user to log in again on upgrade.
+		return true
+	}
+	if issuedAt.Time.Before(validAfter) {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "session expired, please sign in again"})
+		return false
+	}
+	return true
 }

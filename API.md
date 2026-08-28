@@ -349,7 +349,78 @@ GET /api/servers/:id/metrics?since=2024-01-01T00:00:00Z
 
 ---
 
-## 五、告警接口
+## 五、进程接口
+
+> 需认证。请求通过共享的 SSH 连接缓存执行，轮询列表不会每次都重新握手。
+
+### 进程列表
+
+```
+GET /api/servers/:id/processes
+```
+
+**响应**:
+
+```json
+{
+  "processes": [
+    {
+      "pid": 1748,
+      "user": "root",
+      "cpu_percent": 64.2,
+      "mem_percent": 0.1,
+      "rss_bytes": 52633600,
+      "state": "Rl",
+      "elapsed_seconds": 32,
+      "command": "node -e let x=0;setInterval(...)"
+    }
+  ],
+  "total": 137,
+  "returned": 137
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| cpu_percent | 来自 `ps` 的 `pcpu`，是进程**整个生命周期的平均值**，不是瞬时占用 |
+| mem_percent | 常驻内存占物理内存的比例 |
+| rss_bytes | 常驻内存字节数（`ps` 报的是 kB，此处已换算） |
+| state | Linux 进程状态码（`R`/`S`/`D`/`Z`/`T` 等）；Windows 恒为 `running` |
+| elapsed_seconds | 已运行秒数；主机的 `ps` 不支持该列时为 `0` |
+| total | 主机上的进程总数（截断前） |
+| returned | 实际返回条数，按 CPU 降序保留前 300 条 |
+
+采集方式：Linux 优先 `ps -eo pid=,user=,pcpu=,pmem=,rss=,stat=,etimes=,args=`，主机的 `ps` 不支持该列表时回退到通用的 `ps aux`（此时无 `elapsed_seconds`）。Windows 使用 `Win32_PerfFormattedData_PerfProc_Process`，CPU 已按逻辑核数归一到 0-100，不采集进程所有者（每个进程一次 `GetOwner` 调用代价过高）。
+
+| 状态码 | 说明 |
+|--------|------|
+| 200 | 成功 |
+| 404 | 服务器不存在或不属于当前用户 |
+| 502 | SSH 连接失败，或进程列表读取失败 |
+
+---
+
+### 结束进程
+
+```
+DELETE /api/servers/:id/processes/:pid?force=1
+```
+
+`force=1` 时发送 `SIGKILL`，否则发送 `SIGTERM`；Windows 使用 `Stop-Process -Force`。PID 以整数格式化后拼接，用户输入不会进入远程 shell。
+
+| 状态码 | 说明 |
+|--------|------|
+| 200 | `{"message": "signal sent"}` |
+| 400 | PID 不是正整数 |
+| 502 | 拒绝或失败，`error` 为远端原始信息（如 `kill: (10) - Operation not permitted`） |
+
+> `pid <= 1` 一律拒绝：PID 1 是 init（或容器入口进程），杀掉它会带走整台主机或整个容器。
+>
+> 该操作受 SSH 登录用户自身权限约束，不会尝试 `sudo` 提权。
+
+---
+
+## 六、告警接口
 
 > 所有接口均需认证。规则按用户隔离；`server_id` 为 `null` 时该规则作用于该用户的全部服务器（包括之后新增的）。
 
@@ -513,7 +584,7 @@ POST /api/alerts/test
 
 ---
 
-## 六、SSH WebSocket 终端
+## 七、SSH WebSocket 终端
 
 ```
 WS /api/ssh/:id
@@ -539,7 +610,7 @@ ws.send('ls -la\n');
 
 ---
 
-## 七、通用说明
+## 八、通用说明
 
 ### 认证错误
 

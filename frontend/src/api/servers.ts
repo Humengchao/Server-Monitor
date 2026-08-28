@@ -64,6 +64,45 @@ export interface DockerContainer {
   created: string;
 }
 
+export interface ProcessInfo {
+  pid: number;
+  user: string;
+  cpu_percent: number;
+  mem_percent: number;
+  rss_bytes: number;
+  state: string;
+  /** 0 when the host's ps could not report an elapsed time. */
+  elapsed_seconds: number;
+  command: string;
+}
+
+export interface ProcessListResponse {
+  processes: ProcessInfo[];
+  /** Processes on the host, before the response cap. */
+  total: number;
+  returned: number;
+}
+
+export interface BatchResult {
+  server_id: string;
+  server_name: string;
+  ok: boolean;
+  /** Combined stdout+stderr, capped server-side. */
+  output: string;
+  error: string;
+  truncated: boolean;
+  duration_ms: number;
+}
+
+export interface BatchExecResponse {
+  results: BatchResult[];
+  succeeded: number;
+  failed: number;
+}
+
+/** Mirrors services.BatchMaxTargets on the backend. */
+export const BATCH_MAX_TARGETS = 50;
+
 export interface MetricPoint {
   cpu_percent: number;
   load_1: number;
@@ -136,6 +175,23 @@ export const serversApi = {
 
   getMetricsHistory: (id: string, since?: string, until?: string) =>
     client.get<MetricPoint[]>(`/servers/${id}/metrics`, { params: { since, until } }),
+
+  bulkTags: (server_ids: string[], tag_ids: string[], action: 'add' | 'remove') =>
+    client.post<{ message: string; servers: number }>('/servers/bulk/tags', { server_ids, tag_ids, action }),
+
+  bulkDelete: (server_ids: string[]) =>
+    client.post<{ message: string; deleted: number }>('/servers/bulk/delete', { server_ids }),
+
+  // Fans a command out over SSH; allow well past the default axios timeout
+  // because the backend waits up to 60s per host.
+  bulkExec: (server_ids: string[], command: string) =>
+    client.post<BatchExecResponse>('/servers/bulk/exec', { server_ids, command }, { timeout: 120000 }),
+
+  getProcesses: (id: string, signal?: AbortSignal) =>
+    client.get<ProcessListResponse>(`/servers/${id}/processes`, { signal, timeout: 20000 }),
+
+  killProcess: (id: string, pid: number, force = false) =>
+    client.delete(`/servers/${id}/processes/${pid}`, { params: force ? { force: 1 } : undefined }),
 
   checkDocker: (id: string) =>
     client.get<{ installed: boolean; version?: string }>(`/servers/${id}/docker/check`),

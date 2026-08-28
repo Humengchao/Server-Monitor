@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -34,6 +35,18 @@ type LoginRequest struct {
 	Username string `json:"username" binding:"required"`
 	Password string `json:"password" binding:"required"`
 }
+
+type ChangePasswordRequest struct {
+	CurrentPassword string `json:"current_password" binding:"required"`
+	NewPassword     string `json:"new_password" binding:"required"`
+}
+
+// minPasswordLength matches the registration rule, so an account can't weaken
+// its password below what signup would have accepted.
+const minPasswordLength = 6
+
+// tokenTTL bounds how long a single sign-in stays usable.
+const tokenTTL = 72 * time.Hour
 
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req RegisterRequest
@@ -100,7 +113,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	models.InsertLoginRecord(db.Raw, user.ID, ip, ua, true)
 
-	token, err := h.generateToken(user)
+	token, err := h.generateToken(user, time.Now())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate token"})
 		return
@@ -165,11 +178,69 @@ func (h *AuthHandler) LoginHistory(c *gin.Context) {
 	})
 }
 
-func (h *AuthHandler) generateToken(user *models.User) (string, error) {
+// ChangePassword rotates the caller's password and signs every other session
+// out. The caller keeps working: the replacement token is minted with exactly
+// the revocation cutoff as its issue time.
+func (h *AuthHandler) ChangePassword(c *gin.Context) {
+	userID := c.MustGet("user_id").(uuid.UUID)
+	var req ChangePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if len(req.NewPassword) < minPasswordLength {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": fmt.Sprintf("the new password must be at least %d characters", minPasswordLength)})
+		return
+	}
+	if req.NewPassword == req.CurrentPassword {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "the new password must differ from the current one"})
+		return
+	}
+
+	db := c.MustGet("db").(*models.DB)
+	user, err := models.GetUserByID(db.Raw, userID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.CurrentPassword)) != nil {
+		// 403, not 401: the session itself is perfectly valid, only the supplied
+		// password is wrong. A 401 here would tell the client its token is dead
+		// and sign the user out for a single typo.
+		c.JSON(http.StatusForbidden, gin.H{"error": "current password is incorrect"})
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), 12)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to hash password"})
+		return
+	}
+	validAfter, err := models.UpdateUserPassword(db.Raw, userID, string(hash))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update password"})
+		return
+	}
+
+	user.PasswordHash = string(hash)
+	token, err := h.generateToken(user, validAfter)
+	if err != nil {
+		// The password did change; the caller just has to sign in again.
+		c.JSON(http.StatusOK, gin.H{"message": "password updated", "reauth_required": true})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "password updated", "token": token})
+}
+
+// generateToken mints a JWT. issuedAt is explicit so ChangePassword can align
+// it with the revocation cutoff it just wrote.
+func (h *AuthHandler) generateToken(user *models.User, issuedAt time.Time) (string, error) {
 	claims := jwt.MapClaims{
 		"user_id":  user.ID.String(),
 		"username": user.Username,
-		"exp":      time.Now().Add(72 * time.Hour).Unix(),
+		"iat":      issuedAt.Unix(),
+		"exp":      issuedAt.Add(tokenTTL).Unix(),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(h.cfg.JWTSecret))

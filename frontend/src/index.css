@@ -576,11 +576,74 @@ button, input, textarea, select { font: inherit; }
 
 @keyframes alertPulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
 
+/* Process list */
+.process-toolbar { margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.process-summary span { display: inline-flex; align-items: baseline; gap: 7px; }
+.process-summary .ant-typography { font-size: 11px; }
+.process-summary strong { color: var(--text); font-size: 15px; font-variant-numeric: tabular-nums; }
+.process-search.ant-input-affix-wrapper { width: 240px; }
+.process-truncated { display: block; margin-bottom: 10px; font-size: 11px; }
+.process-table .ant-table-tbody > tr > td { padding: 7px 12px; }
+.process-table .mini-bar > span { min-width: 38px; }
+.mono-cell {
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.command-cell {
+  display: block;
+  max-width: 460px;
+  overflow: hidden;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.state-chip {
+  padding: 2px 7px;
+  border-radius: 6px;
+  color: var(--muted);
+  background: var(--surface-soft);
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 10px;
+}
 /* The sub-state rides along inside the state tag, dimmed, because it qualifies
    the state rather than standing beside it as a separate fact. */
 
+.kill-confirm { display: flex; flex-direction: column; gap: 10px; }
+.kill-confirm code {
+  padding: 9px 11px;
+  display: block;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-soft);
+  font-size: 11px;
+}
 
+/* Settings */
+.settings-page .panel-card { height: 100%; }
+.settings-page .card-hint { display: block; margin-bottom: 14px; font-size: 12px; }
+.settings-alert.ant-alert { margin-bottom: 18px; border-radius: 10px; font-size: 12px; }
 .color-dot { width: 12px; height: 12px; display: inline-block; border-radius: 4px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
+.account-identity { margin-bottom: 16px; padding-bottom: 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border); }
+.account-identity > span {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  color: #fff;
+  background: linear-gradient(135deg, #6e92ff, #665be5);
+  box-shadow: 0 6px 16px rgba(79, 124, 255, .24);
+  font-size: 17px;
+  font-weight: 700;
+}
+.account-identity > div { display: flex; flex-direction: column; }
+.account-identity strong { color: var(--text); font-size: 14px; }
+.account-identity .ant-typography { font-size: 11px; }
 
 @media (max-width: 991px) {
   .app-sidebar.ant-layout-sider { position: fixed; }
@@ -638,8 +701,13 @@ button, input, textarea, select { font: inherit; }
   .chart-toolbar .ant-segmented { overflow-x: auto; }
   .alert-entry { flex-wrap: wrap; }
   .alert-entry-meta { align-items: flex-start; flex-direction: row; gap: 10px; width: 100%; padding-left: 47px; }
+  .process-toolbar { align-items: stretch; flex-direction: column; }
   /* Keep the search, the live toggle and refresh on one row instead of letting
      the button wrap onto a line of its own. */
+  .process-toolbar > .ant-space:last-child { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; }
+  .process-toolbar > .ant-space:last-child > .ant-space-item { min-width: 0; margin: 0 !important; }
+  .process-search.ant-input-affix-wrapper { width: 100%; }
+  .command-cell { max-width: 220px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1015,6 +1083,7 @@ button, input, textarea, select { font: inherit; }
   .glass-footer > span:nth-child(2) { display: none; }
 }
 
+.col-hint { border-bottom: 1px dotted currentColor; cursor: help; }
 
 /* Batch selection */
 .server-card.is-selectable { cursor: pointer; }

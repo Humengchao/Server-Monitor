@@ -221,6 +221,7 @@ ALTER TABLE credentials ADD COLUMN IF NOT EXISTS credential_type VARCHAR(16) DEF
 -- Cutoff for JWT revocation: a token whose "iat" predates this value is
 -- rejected, which is how changing a password signs other devices out. The epoch
 -- default keeps sessions issued before this migration working.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS tokens_valid_after TIMESTAMPTZ NOT NULL DEFAULT TIMESTAMPTZ 'epoch';
 
 -- Threshold alerting. A rule with server_id IS NULL applies to every server the
 -- user owns, including hosts added after the rule was written.

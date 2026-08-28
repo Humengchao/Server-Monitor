@@ -72,6 +72,7 @@ func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, noti
 	metricsH := handlers.NewMetricsHandler()
 	sshH := handlers.NewSSHHandler()
 	dockerH := handlers.NewDockerHandler(sshCache)
+	processH := handlers.NewProcessHandler(sshCache)
 	credH := handlers.NewCredentialHandler()
 	publicStatusH := handlers.NewPublicStatusHandler()
 	alertH := handlers.NewAlertHandler(notifier)
@@ -95,6 +96,11 @@ func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, noti
 			auth.POST("/login", rateLimit, authH.Login)
 			auth.GET("/me", middleware.AuthRequired(cfg), authH.Me)
 			auth.GET("/login-history", middleware.AuthRequired(cfg), authH.LoginHistory)
+			// Rate limited because it verifies the current password, but on its
+			// own bucket: sharing login's would mean a few mistyped current
+			// passwords also lock the user out of signing in.
+			auth.POST("/password", middleware.AuthRequired(cfg),
+				middleware.RateLimit(10, 1*time.Minute), authH.ChangePassword)
 		}
 
 		servers := api.Group("/servers", middleware.AuthRequired(cfg))
@@ -107,6 +113,8 @@ func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, noti
 			servers.PUT("/:id/tags", serverH.SetTags)
 			servers.GET("/:id/metrics/latest", metricsH.GetLatest)
 			servers.GET("/:id/metrics", metricsH.GetHistory)
+			servers.GET("/:id/processes", processH.List)
+			servers.DELETE("/:id/processes/:pid", processH.Kill)
 			servers.GET("/:id/docker/check", dockerH.CheckDocker)
 			servers.GET("/:id/docker/containers", dockerH.ListContainers)
 			servers.POST("/:id/docker/containers/:containerId/:action", dockerH.ContainerAction)

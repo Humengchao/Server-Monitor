@@ -16,6 +16,7 @@ import { useTranslation } from 'react-i18next';
 import { serversApi, Server, MetricPoint } from '../api/servers';
 import { useMetrics, TimeRange } from '../hooks/useMetrics';
 import MetricsChart from '../components/MetricsChart';
+import ProcessTable from '../components/ProcessTable';
 import SshTerminal from '../components/SshTerminal';
 import TagSelect from '../components/TagSelect';
 import CredentialSelect from '../components/CredentialSelect';
@@ -445,6 +446,20 @@ export default function ServerDetail() {
               <MetricsChart history={history} />
             </Card>
           ),
+        },
+        {
+          key: 'processes',
+          label: t('process.title'),
+          // Rendered only while selected. Tabs keeps a visited pane mounted, so
+          // otherwise the 5-second SSH poll would keep running in the
+          // background after switching away. The terminal pane deliberately
+          // stays mounted, which is why this is per-pane and not
+          // destroyOnHidden on the whole Tabs.
+          children: activeTab === 'processes' ? (
+            <Card className="panel-card">
+              <ProcessTable serverId={id!} serverType={server.server_type || 'linux'} />
+            </Card>
+          ) : null,
         },
         {
           key: 'terminal',

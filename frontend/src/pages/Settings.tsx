@@ -1,18 +1,36 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Table, Button, Modal, Form, Input, Popconfirm, Space, Typography, ColorPicker, App } from 'antd';
-import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
+import {
+  App, Alert, Button, Card, ColorPicker, Col, Form, Input, Modal, Popconfirm, Row, Space, Table, Tag as AntTag, Typography,
+} from 'antd';
+import { DeleteOutlined, LockOutlined, PlusOutlined, SafetyCertificateOutlined, TagsOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { tagsApi, Tag } from '../api/servers';
+import { authApi } from '../api/auth';
+import { useAuthStore } from '../store/authStore';
 
-const { Title } = Typography;
+const { Title, Text } = Typography;
+
+interface PasswordFormValues {
+  current_password: string;
+  new_password: string;
+  confirm_password: string;
+}
+
+function apiError(err: unknown, fallback: string): string {
+  const detail = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+  return detail || fallback;
+}
 
 export default function Settings() {
   const { t } = useTranslation();
   const { message } = App.useApp();
+  const { user, token, setAuth, logout } = useAuthStore();
   const [tags, setTags] = useState<Tag[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [form] = Form.useForm();
+  const [passwordForm] = Form.useForm<PasswordFormValues>();
+  const [savingPassword, setSavingPassword] = useState(false);
 
   const loadTags = async () => {
     setLoading(true);
@@ -26,7 +44,9 @@ export default function Settings() {
   };
 
   useEffect(() => {
-    loadTags();
+    // Deferred so the first fetch doesn't set state synchronously in the effect.
+    const initial = window.setTimeout(() => loadTags(), 0);
+    return () => window.clearTimeout(initial);
   }, []);
 
   // antd's ColorPicker hands the form an AggregationColor object (not a hex
@@ -62,23 +82,50 @@ export default function Settings() {
     }
   };
 
+  const handleChangePassword = async (values: PasswordFormValues) => {
+    setSavingPassword(true);
+    try {
+      const res = await authApi.changePassword(values.current_password, values.new_password);
+      passwordForm.resetFields();
+      // The server revoked every token issued before this moment. It hands back
+      // a replacement so this tab stays signed in; without one we have to bounce
+      // the user to the login page rather than leave them with a dead token.
+      if (res.data.token && user) {
+        setAuth(res.data.token, user);
+        message.success(t('settings.passwordChanged'));
+      } else {
+        message.success(t('settings.passwordChangedReauth'));
+        window.setTimeout(() => { logout(); window.location.href = '/login'; }, 1500);
+      }
+    } catch (err: unknown) {
+      message.error(apiError(err, t('settings.passwordChangeFailed')));
+    }
+    setSavingPassword(false);
+  };
+
   const columns = [
-    { title: t('common.name'), dataIndex: 'name', key: 'name' },
+    {
+      title: t('common.name'),
+      dataIndex: 'name',
+      key: 'name',
+      render: (name: string, record: Tag) => <AntTag color={record.color}>{name}</AntTag>,
+    },
     {
       title: t('common.color'),
       dataIndex: 'color',
       key: 'color',
       render: (color: string) => (
         <Space>
-          <span style={{ color, fontSize: 18 }}>●</span>
-          {color}
+          <span className="color-dot" style={{ background: color }} />
+          <Text className="mono-cell">{color}</Text>
         </Space>
       ),
     },
     {
       title: t('common.actions'),
       key: 'actions',
-      render: (_: any, record: Tag) => (
+      width: 90,
+      render: (_: unknown, record: Tag) => (
         <Popconfirm title={t('settings.deleteTagConfirm')} onConfirm={() => handleDelete(record.id)}>
           <Button type="text" danger icon={<DeleteOutlined />} />
         </Popconfirm>
@@ -87,23 +134,110 @@ export default function Settings() {
   ];
 
   return (
-    <div>
-      <Space style={{ marginBottom: 24, width: '100%', justifyContent: 'space-between' }}>
-        <Title level={4} style={{ margin: 0 }}>{t('settings.tagManagement')}</Title>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
-          {t('settings.createTag')}
-        </Button>
-      </Space>
+    <div className="settings-page">
+      <div className="page-heading">
+        <div>
+          <Text className="eyebrow">{t('settings.eyebrow')}</Text>
+          <Title level={2}>{t('nav.settings')}</Title>
+          <Text type="secondary">{t('settings.subtitle')}</Text>
+        </div>
+      </div>
 
-      <Card>
-        <Table dataSource={tags} columns={columns} rowKey="id" loading={loading} pagination={false} />
-      </Card>
+      <Row gutter={[18, 18]}>
+        <Col xs={24} xl={13}>
+          <Card
+            className="panel-card"
+            title={<Space><TagsOutlined />{t('settings.tagManagement')}</Space>}
+            extra={
+              <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
+                {t('settings.createTag')}
+              </Button>
+            }
+          >
+            <Text type="secondary" className="card-hint">{t('settings.tagHint')}</Text>
+            <Table
+              className="server-table"
+              dataSource={tags}
+              columns={columns}
+              rowKey="id"
+              size="small"
+              loading={loading}
+              pagination={false}
+            />
+          </Card>
+        </Col>
+
+        <Col xs={24} xl={11}>
+          <Card className="panel-card" title={<Space><SafetyCertificateOutlined />{t('settings.accountSecurity')}</Space>}>
+            <div className="account-identity">
+              <span>{user?.username?.trim().charAt(0).toUpperCase() || 'U'}</span>
+              <div>
+                <strong>{user?.username}</strong>
+                <Text type="secondary">{t('settings.signedIn')}</Text>
+              </div>
+            </div>
+
+            <Alert
+              className="settings-alert"
+              type="info"
+              showIcon
+              title={t('settings.revokeNotice')}
+            />
+
+            <Form
+              form={passwordForm}
+              layout="vertical"
+              onFinish={handleChangePassword}
+              requiredMark={false}
+              disabled={!token}
+            >
+              <Form.Item
+                name="current_password"
+                label={t('settings.currentPassword')}
+                rules={[{ required: true, message: t('settings.currentPasswordRequired') }]}
+              >
+                <Input.Password prefix={<LockOutlined />} autoComplete="current-password" />
+              </Form.Item>
+              <Form.Item
+                name="new_password"
+                label={t('settings.newPassword')}
+                rules={[
+                  { required: true, message: t('settings.newPasswordRequired') },
+                  { min: 6, message: t('register.passwordMin') },
+                ]}
+              >
+                <Input.Password prefix={<LockOutlined />} autoComplete="new-password" />
+              </Form.Item>
+              <Form.Item
+                name="confirm_password"
+                label={t('settings.confirmPassword')}
+                dependencies={['new_password']}
+                rules={[
+                  { required: true, message: t('settings.confirmPasswordRequired') },
+                  ({ getFieldValue }) => ({
+                    validator: (_, value) =>
+                      !value || getFieldValue('new_password') === value
+                        ? Promise.resolve()
+                        : Promise.reject(new Error(t('settings.passwordMismatch'))),
+                  }),
+                ]}
+              >
+                <Input.Password prefix={<LockOutlined />} autoComplete="new-password" />
+              </Form.Item>
+              <Button type="primary" htmlType="submit" loading={savingPassword} block>
+                {t('settings.updatePassword')}
+              </Button>
+            </Form>
+          </Card>
+        </Col>
+      </Row>
 
       <Modal
         title={t('settings.createTag')}
         open={modalOpen}
         onCancel={() => setModalOpen(false)}
         onOk={() => form.submit()}
+        destroyOnHidden
       >
         <Form form={form} layout="vertical" onFinish={handleCreate}>
           <Form.Item name="name" label={t('settings.tagName')} rules={[{ required: true }]}>

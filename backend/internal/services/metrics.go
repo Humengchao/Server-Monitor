@@ -684,6 +684,29 @@ func RunCmd(client *ssh.Client, cmd string) (string, error) {
 	return buf.String(), err
 }
 
+// RunCmdCombined is RunCmd but keeps stderr, for commands whose failure message
+// is worth showing the user (e.g. "kill: Operation not permitted").
+//
+// The two streams get their own buffers: x/crypto/ssh copies stdout and stderr
+// on separate goroutines, so pointing both at one bytes.Buffer is a data race
+// that can drop exactly the message this function exists to capture.
+func RunCmdCombined(client *ssh.Client, cmd string) (string, error) {
+	sess, err := client.NewSession()
+	if err != nil {
+		return "", err
+	}
+	defer sess.Close()
+	var stdout, stderr bytes.Buffer
+	sess.Stdout = &stdout
+	sess.Stderr = &stderr
+	err = sess.Run(cmd)
+	combined := strings.TrimSpace(stderr.String())
+	if combined == "" {
+		combined = strings.TrimSpace(stdout.String())
+	}
+	return combined, err
+}
+
 // cpuPercentFromSamples derives CPU usage from two /proc/stat snapshots taken
 // half a second apart.
 func cpuPercentFromSamples(first, second string) float64 {
