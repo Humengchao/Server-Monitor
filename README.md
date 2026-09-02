@@ -142,6 +142,12 @@
 
 ---
 
+## macOS 原生客户端
+
+`macos/` 下是一个纯本地的 SwiftUI 菜单栏应用，不依赖本项目的服务端：它直接用系统 `ssh` 连接各台主机采集指标（Linux 与 Windows），历史存在本机 SQLite，界面对标 SwiftServer——仪表板、机器详情卡片、Docker、SFTP、终端、代码片段、vnStat 流量统计，并常驻菜单栏在后台持续轮询与告警。
+
+构建、测试与打包见 [`macos/README.md`](macos/README.md)。
+
 ## 快速开始
 
 ```bash

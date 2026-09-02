@@ -3,6 +3,10 @@ name: Build and Deploy
 on:
   push:
     branches: [main]
+    # The macOS app under macos/ has its own build and never ships in
+    # the Docker image; a change there must not redeploy the web app.
+    paths-ignore:
+      - 'macos/**'
   workflow_dispatch:
 
 env:
