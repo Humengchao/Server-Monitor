@@ -69,4 +69,26 @@ struct VnstatInstallerTests {
         }
         #expect(VnstatInstaller.outcome(from: "") == .failed("no output"))
     }
+
+    /// Verbatim probe output from four real hosts, so the parser is checked
+    /// against what servers actually print rather than what I imagined.
+    @Test func realHostsParseIntoTheRightPlan() throws {
+        // Debian/Ubuntu as root — the common case.
+        let asRoot = VnstatInstaller.plan(fromProbe: "apt-get\nSM_PROBE_END\n0\n")
+        #expect(asRoot == VnstatInstaller.Plan(manager: .apt, asRoot: true))
+
+        // An Oracle Cloud image logs in as a non-root user with passwordless
+        // sudo; the uid line is what distinguishes it, and getting it wrong
+        // means the install runs without sudo and fails on permissions.
+        let asUser = VnstatInstaller.plan(fromProbe: "apt-get\nSM_PROBE_END\n1001\n")
+        #expect(asUser == VnstatInstaller.Plan(manager: .apt, asRoot: false))
+        #expect(try VnstatInstaller.remoteScript(for: #require(asUser)).contains("sudo -n env "))
+    }
+
+    @Test func aTrailingCarriageReturnStillParses() {
+        // `lines()` exists because CRLF is one grapheme cluster in Swift; the
+        // probe is one of the places a host can hand it back.
+        let plan = VnstatInstaller.plan(fromProbe: "apt-get\r\nSM_PROBE_END\r\n0\r\n")
+        #expect(plan == VnstatInstaller.Plan(manager: .apt, asRoot: true))
+    }
 }
