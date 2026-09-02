@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import {
   hostOpsApi, ServiceAction, ServiceManager, ServiceUnit, serviceStateColor,
 } from '../api/hostops';
+import { usePolling } from '../hooks/usePolling';
 
 const { Text } = Typography;
 
@@ -64,12 +65,8 @@ export default function ServiceTable({ serverId, serverType }: Props) {
     return () => { window.clearTimeout(initial); abortRef.current?.abort(); };
   }, [load]);
 
-  useEffect(() => {
-    // Nothing to poll for on a host with no service manager.
-    if (!live || unsupported) return;
-    const timer = window.setInterval(() => load(false), REFRESH_MS);
-    return () => window.clearInterval(timer);
-  }, [live, unsupported, load]);
+  // Nothing to poll for on a host with no service manager.
+  usePolling(() => load(false), REFRESH_MS, { leading: false, enabled: live && !unsupported });
 
   const counts = useMemo(() => ({
     failed: units.filter((u) => u.active === 'failed' || u.sub === 'failed').length,

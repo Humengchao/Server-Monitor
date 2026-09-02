@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { uptimeApi, UptimeWindow, UptimeWindowKey } from '../api/uptime';
+import { usePolling } from './usePolling';
 
 const REFRESH_MS = 60000;
 
@@ -35,11 +36,7 @@ export function useFleetUptime(): FleetUptimeState {
     }
   }, []);
 
-  useEffect(() => {
-    const initial = window.setTimeout(() => load(), 0);
-    const timer = window.setInterval(() => load(), REFRESH_MS);
-    return () => { window.clearTimeout(initial); window.clearInterval(timer); };
-  }, [load]);
+  usePolling(() => load(), REFRESH_MS);
 
   return { byServer, loading };
 }

@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { alertsApi, AlertEvent, AlertMetric, AlertRule, METRIC_UNITS, PERCENT_METRICS } from '../api/alerts';
 import { serversApi, Server } from '../api/servers';
+import { usePolling } from '../hooks/usePolling';
 
 const { Title, Text } = Typography;
 
@@ -111,13 +112,13 @@ export default function Alerts() {
     if (showLoading) setLoading(false);
   }, [message, t]);
 
+  // Alerts change on the engine's cadence, not the collector's, so a slower
+  // poll than the dashboard keeps this page current.
+  usePolling(() => load(false), 15000, { leading: false });
+
   useEffect(() => {
-    // Deferred so the first fetch doesn't set state synchronously inside the
-    // effect body. Alerts change on the engine's cadence, not the collector's,
-    // so a slower poll than the dashboard keeps this page current.
     const initial = window.setTimeout(() => load(), 0);
-    const timer = window.setInterval(() => load(false), 15000);
-    return () => { window.clearTimeout(initial); window.clearInterval(timer); };
+    return () => window.clearTimeout(initial);
   }, [load]);
 
   useEffect(() => {

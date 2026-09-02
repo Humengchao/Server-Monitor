@@ -6,6 +6,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { serversApi, ProcessInfo } from '../api/servers';
 import { formatBytes, severityColor } from '../utils/format';
+import { usePolling } from '../hooks/usePolling';
 
 const { Text } = Typography;
 
@@ -75,11 +76,7 @@ export default function ProcessTable({ serverId, serverType }: Props) {
     return () => { window.clearTimeout(initial); abortRef.current?.abort(); };
   }, [load]);
 
-  useEffect(() => {
-    if (!live) return;
-    const timer = window.setInterval(() => load(false), REFRESH_MS);
-    return () => window.clearInterval(timer);
-  }, [live, load]);
+  usePolling(() => load(false), REFRESH_MS, { leading: false, enabled: live });
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();

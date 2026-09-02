@@ -3,6 +3,7 @@ import { Alert, Button, Empty, Input, Result, Segmented, Space, Table, Tag, Tool
 import { ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { hostOpsApi, ListeningPort, PortExposure, exposureColor } from '../api/hostops';
+import { usePolling } from '../hooks/usePolling';
 
 const { Text } = Typography;
 
@@ -57,12 +58,12 @@ export default function PortTable({ serverId }: Props) {
     }
   }, [serverId, t]);
 
+  usePolling(() => load(false), REFRESH_MS, { leading: false });
+
   useEffect(() => {
     const initial = window.setTimeout(() => load(), 0);
-    const timer = window.setInterval(() => load(false), REFRESH_MS);
     return () => {
       window.clearTimeout(initial);
-      window.clearInterval(timer);
       abortRef.current?.abort();
     };
   }, [load]);

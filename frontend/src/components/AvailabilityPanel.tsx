@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import {
   availabilityColor, uptimeApi, Outage, ServerUptimeDetail, UptimeWindow,
 } from '../api/uptime';
+import { usePolling } from '../hooks/usePolling';
 
 const { Text } = Typography;
 
@@ -67,12 +68,14 @@ export default function AvailabilityPanel({ serverId }: Props) {
     }
   }, [serverId]);
 
+  // Availability moves slowly; a 5-minute refresh is plenty.
+  usePolling(() => load(), 300000, { leading: false });
+
+  // Keyed on `load` so switching to another server refetches: this panel is
+  // reused across servers without remounting.
   useEffect(() => {
-    // Deferred so the first fetch does not set state synchronously in the
-    // effect body. Availability moves slowly; a 5-minute refresh is plenty.
     const initial = window.setTimeout(() => load(), 0);
-    const timer = window.setInterval(() => load(), 300000);
-    return () => { window.clearTimeout(initial); window.clearInterval(timer); };
+    return () => window.clearTimeout(initial);
   }, [load]);
 
   const totals = useMemo(() => {

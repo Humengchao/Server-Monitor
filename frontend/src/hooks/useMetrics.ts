@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { serversApi, MetricPoint } from '../api/servers';
+import { usePolling } from './usePolling';
 
 export interface TimeRange {
   since: string;
@@ -64,11 +65,11 @@ export function useMetrics(serverId: string, timeRange: TimeRange, interval = 30
     }
   }, [serverId]);
 
+  usePolling(fetchLatest, interval, { leading: false });
+
   useEffect(() => {
     fetchLatest();
-    const timer = setInterval(fetchLatest, interval);
-    return () => clearInterval(timer);
-  }, [fetchLatest, interval]);
+  }, [fetchLatest]);
 
   useEffect(() => {
     fetchHistory();

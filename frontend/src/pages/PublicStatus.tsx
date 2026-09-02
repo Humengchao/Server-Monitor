@@ -28,6 +28,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { convertCurrency, currencySymbol, useExchangeRates } from '../hooks/useExchangeRates';
 import { availabilityColor } from '../api/uptime';
+import { usePolling } from '../hooks/usePolling';
 
 type NodeStatus = 'online' | 'degraded' | 'offline';
 type OverallStatus = 'operational' | 'degraded' | 'outage';
@@ -135,14 +136,14 @@ export default function PublicStatus() {
     }
   }, []);
 
+  // A public page can have many concurrent visitors; 10s keeps the status
+  // fresh enough without each open tab eating into the per-IP rate limit.
+  usePolling(() => loadStatus(), 10000, { leading: false });
+
   useEffect(() => {
     const initial = window.setTimeout(() => loadStatus(true), 0);
-    // A public page can have many concurrent visitors; 10s keeps the status
-    // fresh enough without each open tab eating into the per-IP rate limit.
-    const timer = window.setInterval(() => loadStatus(), 10000);
     return () => {
       window.clearTimeout(initial);
-      window.clearInterval(timer);
     };
   }, [loadStatus]);
 

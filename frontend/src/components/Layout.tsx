@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Layout as AntLayout, Menu, Button, Avatar, Badge, Space, Tooltip, Typography } from 'antd';
 import {
   DashboardOutlined,
@@ -17,6 +17,7 @@ import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '../store/authStore';
 import { alertsApi } from '../api/alerts';
+import { usePolling } from '../hooks/usePolling';
 
 const { Header, Sider, Content } = AntLayout;
 const { Text } = Typography;
@@ -33,19 +34,21 @@ export default function AppLayout({ darkMode, onToggleTheme }: Props) {
   const { t, i18n } = useTranslation();
   const [activeAlerts, setActiveAlerts] = useState(0);
 
+  const refreshAlertBadge = useCallback(() => {
+    alertsApi.summary()
+      .then((res) => setActiveAlerts(res.data?.active || 0))
+      .catch(() => undefined);
+  }, []);
+
   // The alert engine evaluates on its own cadence, so a 30s poll is enough to
   // keep the badge honest without adding noticeable request load.
+  usePolling(refreshAlertBadge, 30000, { leading: false });
+
+  // Also refresh on navigation, so acknowledging an alert and leaving the page
+  // updates the badge without waiting out the interval.
   useEffect(() => {
-    let cancelled = false;
-    const refresh = () => {
-      alertsApi.summary()
-        .then((res) => { if (!cancelled) setActiveAlerts(res.data?.active || 0); })
-        .catch(() => undefined);
-    };
-    refresh();
-    const timer = setInterval(refresh, 30000);
-    return () => { cancelled = true; clearInterval(timer); };
-  }, [location.pathname]);
+    refreshAlertBadge();
+  }, [location.pathname, refreshAlertBadge]);
 
   const menuItems = [
     { key: '/dashboard', icon: <DashboardOutlined />, label: t('nav.servers') },

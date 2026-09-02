@@ -22,6 +22,7 @@ import { convertCurrency, currencySymbol, useExchangeRates } from '../hooks/useE
 import { useFleetUptime, windowPercent } from '../hooks/useFleetUptime';
 import { availabilityColor } from '../api/uptime';
 import { monthlyCost, percentOf } from '../utils/format';
+import { usePolling } from '../hooks/usePolling';
 
 const { Title, Text } = Typography;
 
@@ -160,10 +161,10 @@ export default function Dashboard() {
     if (showLoading) setLoading(false);
   }, [message, t]);
 
+  usePolling(() => loadServers(false), 3000, { leading: false });
+
   useEffect(() => {
     loadServers();
-    const timer = setInterval(() => loadServers(false), 3000);
-    return () => clearInterval(timer);
   }, [loadServers]);
 
   const handleSubmit = async (values: any) => {

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, Suspense, lazy } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Typography, Tag, Space, Button, Card, Tabs, Spin, Modal, Form, Input, InputNumber, Select,
@@ -20,12 +20,20 @@ import MetricsChart from '../components/MetricsChart';
 import ProcessTable from '../components/ProcessTable';
 import ServiceTable from '../components/ServiceTable';
 import PortTable from '../components/PortTable';
-import SshTerminal from '../components/SshTerminal';
 import TagSelect from '../components/TagSelect';
 import CredentialSelect from '../components/CredentialSelect';
-import { ServerDockerPanel } from './Docker';
 import { formatBytes, formatUptime, getExpirationInfo, percentOf, severityColor } from '../utils/format';
 import { downloadCSV, safeFilenamePart } from '../utils/csv';
+
+// xterm and the Docker panel are only reachable through their own tabs, so
+// they load on demand instead of weighing down every visit to this page.
+const SshTerminal = lazy(() => import('../components/SshTerminal'));
+const ServerDockerPanel = lazy(() => import('./Docker').then((m) => ({ default: m.ServerDockerPanel })));
+
+const tabFallback = (
+  <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}><Spin /></div>
+);
+import { usePolling } from '../hooks/usePolling';
 
 const { Title } = Typography;
 const { RangePicker } = DatePicker;
@@ -130,13 +138,11 @@ export default function ServerDetail() {
   // Presets whose window ends "now" keep sliding: recompute the range every
   // 30s so the chart stays live instead of freezing at the moment of the
   // click. Fixed windows (yesterday, custom ranges) stay as picked.
-  useEffect(() => {
-    if (!activePreset || activePreset === 'yesterday') return;
-    const timer = window.setInterval(() => {
-      setTimeRange(getPresetRange(activePreset));
-    }, 30000);
-    return () => window.clearInterval(timer);
-  }, [activePreset]);
+  usePolling(
+    () => { if (activePreset) setTimeRange(getPresetRange(activePreset)); },
+    30000,
+    { leading: false, enabled: !!activePreset && activePreset !== 'yesterday' },
+  );
 
   const presets: { key: PresetKey; label: string }[] = [
     { key: '1h', label: t('preset.1h') },
@@ -500,7 +506,7 @@ export default function ServerDetail() {
           label: t('terminal.title'),
           children: (
             <div className="server-detail-terminal">
-              <SshTerminal serverId={id!} />
+              <Suspense fallback={tabFallback}><SshTerminal serverId={id!} /></Suspense>
             </div>
           ),
         },
@@ -508,7 +514,7 @@ export default function ServerDetail() {
           key: 'docker',
           label: t('docker.title'),
           children: dockerInstalled === true ? (
-            <ServerDockerPanel serverId={id!} version={server.docker_version} />
+            <Suspense fallback={tabFallback}><ServerDockerPanel serverId={id!} version={server.docker_version} /></Suspense>
           ) : (
             <div className="empty-state"><Empty description={t('docker.noServers')} /></div>
           ),

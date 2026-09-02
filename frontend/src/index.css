@@ -824,7 +824,7 @@ button, input, textarea, select { font: inherit; }
 }
 
 .probe-hero { position: relative; min-height: 610px; overflow: hidden; color: #fff; background: #182360; }
-.probe-hero-art { position: absolute; inset: 0; background: url('/status-assets/anime-ops-guardian.png') center center / cover no-repeat; transform: scale(1.01); }
+.probe-hero-art { position: absolute; inset: 0; background: url('/status-assets/anime-ops-guardian.jpg') center center / cover no-repeat; transform: scale(1.01); }
 .probe-hero-overlay { position: absolute; inset: 0; background: linear-gradient(90deg, rgba(15, 22, 67, .97) 0%, rgba(23, 33, 95, .91) 34%, rgba(31, 44, 119, .54) 60%, rgba(18, 27, 77, .08) 100%), linear-gradient(0deg, rgba(25, 24, 80, .38), transparent 60%); }
 
 .probe-nav { position: relative; z-index: 3; width: min(1380px, calc(100% - 64px)); height: 94px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,.13); }
@@ -978,7 +978,7 @@ button, input, textarea, select { font: inherit; }
   position: fixed;
   z-index: -3;
   inset: 0;
-  background: url('/status-assets/anime-ops-guardian.png') 50% 48% / cover no-repeat;
+  background: url('/status-assets/anime-ops-guardian.jpg') 50% 48% / cover no-repeat;
   transform: scale(1.025);
 }
 
