@@ -12,6 +12,7 @@ struct MachinesView: View {
     @State private var editingServer: Server?
     @State private var editingGroup: MachineGroup?
     @State private var pendingGroupDelete: MachineGroup?
+    @State private var failure: String?
 
     private func matches(_ server: Server) -> Bool {
         let query = search.trimmingCharacters(in: .whitespaces).lowercased()
@@ -42,11 +43,14 @@ struct MachinesView: View {
             titleVisibility: .visible
         ) {
             Button(loc.t("common.delete"), role: .destructive) {
-                if let group = pendingGroupDelete { try? monitor.deleteGroup(id: group.id) }
+                if let group = pendingGroupDelete {
+                    failure = failureMessage { try monitor.deleteGroup(id: group.id) }
+                }
                 pendingGroupDelete = nil
             }
             Button(loc.t("common.cancel"), role: .cancel) { pendingGroupDelete = nil }
         }
+        .actionFailureAlert($failure)
     }
 
     // MARK: - Groups
@@ -174,10 +178,14 @@ struct MachinesView: View {
             }
             Spacer(minLength: 4)
             Menu {
-                Button(loc.t("group.none")) { try? monitor.assign(server, to: nil) }
+                Button(loc.t("group.none")) {
+                    failure = failureMessage { try monitor.assign(server, to: nil) }
+                }
                 Divider()
                 ForEach(monitor.groups) { group in
-                    Button(group.name) { try? monitor.assign(server, to: group) }
+                    Button(group.name) {
+                        failure = failureMessage { try monitor.assign(server, to: group) }
+                    }
                 }
             } label: {
                 Image(systemName: "folder.badge.gearshape")

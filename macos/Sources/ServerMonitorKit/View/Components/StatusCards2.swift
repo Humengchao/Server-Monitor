@@ -241,6 +241,7 @@ struct StatusDockerCard: View {
     @State private var containers: [DockerContainer] = []
     @State private var stats: [String: DockerContainerStats] = [:]
     @State private var loading = false
+    @State private var failure: String?
 
     /// Containers to show without fetching — how the render check sees tiles
     /// without a Docker host.
@@ -292,7 +293,15 @@ struct StatusDockerCard: View {
 
     @ViewBuilder
     private var content: some View {
-        if running.isEmpty {
+        if let failure {
+            // This card only appears on a host where Docker was detected, so a
+            // failure here is real — and reporting it as "no containers" is the
+            // one answer that sends someone looking in the wrong place.
+            Label(failure, systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .textSelection(.enabled)
+        } else if running.isEmpty {
             Text(loc.t(loading ? "card.awaitingData" : "docker.noContainers"))
                 .font(.caption)
                 .foregroundStyle(.tertiary)
@@ -334,14 +343,22 @@ struct StatusDockerCard: View {
     private func load() async {
         guard preloaded == nil else { return }
         loading = true
+        failure = nil
         defer { loading = false }
         containers = []
         stats = [:]
-        guard let target = try? monitor.target(for: server) else { return }
-        containers = (try? await monitor.docker.listContainers(target: target)) ?? []
-        // Tolerated failing: without it the tiles still name every container
-        // and simply show no figures, which beats an empty card.
-        stats = (try? await monitor.docker.stats(target: target)) ?? [:]
+        do {
+            let target = try monitor.target(for: server)
+            containers = try await monitor.docker.listContainers(target: target)
+            // Tolerated failing: without it the tiles still name every container
+            // and simply show no figures, which beats an empty card.
+            stats = (try? await monitor.docker.stats(target: target)) ?? [:]
+        } catch {
+            // Switching machines cancels this task; that is not a Docker fault
+            // and must not leave the next host's card showing an error.
+            if error is CancellationError { return }
+            failure = error.localizedDescription
+        }
     }
 }
 

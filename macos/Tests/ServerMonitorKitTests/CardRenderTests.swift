@@ -332,3 +332,49 @@ struct CardRenderTests {
         return snapshot
     }
 }
+
+/// A host that has never connected, next to one that has — the difference the
+/// em dash is there to make visible.
+/// Opt-in: SM_RENDER_FACTS=/tmp/facts.png swift test --filter rendersFactsForAnUnreachedHost
+@Suite("Facts row rendering")
+@MainActor
+struct FactsRowRenderTests {
+
+    @Test func rendersFactsForAnUnreachedHost() throws {
+        guard let path = ProcessInfo.processInfo.environment["SM_RENDER_FACTS"] else { return }
+        let monitor = MonitorService(database: try Database(inMemory: true), settings: AppSettings())
+
+        func row(_ label: String, _ language: AppLanguage, connected: Bool) -> some View {
+            let localization = Localization()
+            localization.language = language
+            var server = Server(name: "host", host: "h", username: "u", authKind: .agent)
+            if connected {
+                server.cores = 8
+                server.memoryTotal = 16 * 1024 * 1024 * 1024
+                server.diskTotal = 512 * 1024 * 1024 * 1024
+            }
+            return VStack(alignment: .leading, spacing: 4) {
+                Text(verbatim: label).font(.caption2).foregroundStyle(.secondary)
+                ServerFactsRow(server: server)
+                    .environmentObject(localization)
+                    .environmentObject(monitor)
+            }
+        }
+
+        let view = VStack(alignment: .leading, spacing: 16) {
+            row("zh · polled", .zh, connected: true)
+            row("zh · never reached", .zh, connected: false)
+            row("en · polled", .en, connected: true)
+            row("en · never reached", .en, connected: false)
+        }
+        .padding(16)
+        .frame(width: 420, alignment: .leading)
+        .background(Color(nsColor: .windowBackgroundColor))
+
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 2
+        let image = try #require(renderer.nsImage)
+        try #require(CardRenderTests.png(from: image)).write(to: URL(fileURLWithPath: path))
+        print("wrote", path)
+    }
+}

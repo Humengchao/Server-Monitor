@@ -11,6 +11,7 @@ struct IdentitiesView: View {
 
     @State private var editing: Identity?
     @State private var pendingDelete: Identity?
+    @State private var failure: String?
 
     private var rows: [Identity] {
         let query = search.trimmingCharacters(in: .whitespaces).lowercased()
@@ -46,7 +47,7 @@ struct IdentitiesView: View {
         ) {
             Button(loc.t("common.delete"), role: .destructive) {
                 if let identity = pendingDelete {
-                    try? monitor.deleteIdentity(id: identity.id)
+                    failure = failureMessage { try monitor.deleteIdentity(id: identity.id) }
                 }
                 pendingDelete = nil
             }
@@ -59,6 +60,7 @@ struct IdentitiesView: View {
                 }
             }
         }
+        .actionFailureAlert($failure)
     }
 
     private func row(_ identity: Identity) -> some View {

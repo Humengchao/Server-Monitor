@@ -13,6 +13,7 @@ struct SnippetsView: View {
     @State private var selection: Snippet.ID?
     @State private var editing: Snippet?
     @State private var runTarget: Snippet?
+    @State private var failure: String?
 
     private var rows: [Snippet] {
         let query = search.trimmingCharacters(in: .whitespaces).lowercased()
@@ -53,6 +54,7 @@ struct SnippetsView: View {
         .sheet(item: $runTarget) { snippet in
             SnippetRunner(snippet: snippet)
         }
+        .actionFailureAlert($failure)
     }
 
     private func row(_ snippet: Snippet) -> some View {
@@ -92,7 +94,7 @@ struct SnippetsView: View {
             .buttonStyle(.borderless)
             .help(loc.t("snippet.copy"))
             Button(role: .destructive) {
-                try? monitor.deleteSnippet(id: snippet.id)
+                failure = failureMessage { try monitor.deleteSnippet(id: snippet.id) }
                 reload()
             } label: {
                 Image(systemName: "trash")
