@@ -61,6 +61,44 @@ func (h *DockerHandler) CheckDocker(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check docker"})
 		return
 	}
+
+	// refresh=1 asks the host directly instead of trusting the cached row. This
+	// is the recovery path for a server whose flag was cleared: without it the
+	// only way back is to wait for a background poll to happen to succeed.
+	if c.Query("refresh") == "1" {
+		server, err := models.GetServerByIDAndUser(db, id, userID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
+			return
+		}
+		client, err := h.sshCache.Get(server)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "SSH connection failed"})
+			return
+		}
+		probe := services.ProbeDocker(client, server.ServerType)
+		if probe.Known {
+			// Same rule as the collector: an installed host whose daemon stayed
+			// silent keeps its stored version rather than having it blanked.
+			if probe.Installed && probe.Version == "" && installed {
+				probe.Version = version
+			}
+			if probe.Installed != installed || probe.Version != version {
+				if err := models.UpdateDockerInfo(db.Raw, id, probe.Installed, probe.Version); err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save docker info"})
+					return
+				}
+			}
+			installed, version = probe.Installed, probe.Version
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"installed": installed,
+			"version":   version,
+			"refreshed": probe.Known,
+		})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"installed": installed,
 		"version":   version,

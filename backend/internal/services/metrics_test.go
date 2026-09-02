@@ -293,6 +293,114 @@ func TestParseDockerVersionRejectsNoise(t *testing.T) {
 	}
 }
 
+func TestParseDockerProbeDistinguishesAbsentFromUnanswered(t *testing.T) {
+	tests := []struct {
+		name         string
+		in           string
+		wantPresence dockerPresence
+		wantVersion  string
+	}{
+		// The healthy case: CLI present, daemon answered.
+		{"installed with version", "installed\n24.0.7\n", dockerInstalled, "24.0.7"},
+		// The case that used to delete servers from the Docker page: CLI present
+		// but the daemon was busy, restarting, or refused this user. Installed,
+		// version unknown — NOT absent.
+		{"installed, daemon silent", "installed\n", dockerInstalled, ""},
+		{"installed, daemon error", "installed\nCannot connect to the Docker daemon\n", dockerInstalled, ""},
+		{"installed, timed out", "installed\n\n", dockerInstalled, ""},
+		// The only state allowed to clear has_docker.
+		{"absent", "absent\n", dockerAbsent, ""},
+		// A truncated batched run, or a probe that never ran: nothing is known,
+		// and nothing must be written.
+		{"empty section", "", dockerUnknown, ""},
+		{"garbage", "bash: line 9: syntax error\n", dockerUnknown, ""},
+		// Legacy bare-version output still proves installation.
+		{"bare version", "24.0.7\n", dockerInstalled, "24.0.7"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			presence, version := parseDockerProbe(test.in)
+			if presence != test.wantPresence || version != test.wantVersion {
+				t.Fatalf("parseDockerProbe(%q) = (%v, %q), want (%v, %q)",
+					test.in, presence, version, test.wantPresence, test.wantVersion)
+			}
+		})
+	}
+}
+
+func TestResolveDockerStateNeverClearsOnTransientFailure(t *testing.T) {
+	stored := dockerInfoState{hasDocker: true, version: "24.0.7"}
+
+	// The scenario behind "many servers lost their Docker": the daemon did not
+	// answer one poll. The row must keep both the flag and the version.
+	next, write := resolveDockerState(stored, true, dockerInstalled, "")
+	if write {
+		t.Errorf("silent daemon caused a write: %+v", next)
+	}
+	if !next.hasDocker || next.version != "24.0.7" {
+		t.Errorf("silent daemon changed state to %+v, want it untouched", next)
+	}
+
+	// A probe that produced nothing at all — truncated run, garbage — writes
+	// nothing, whatever was stored before.
+	for _, prev := range []dockerInfoState{stored, {}} {
+		if _, write := resolveDockerState(prev, true, dockerUnknown, ""); write {
+			t.Errorf("unknown presence caused a write over %+v", prev)
+		}
+	}
+	// ...including when nothing is known yet: unknown must not become false.
+	if _, write := resolveDockerState(dockerInfoState{}, false, dockerUnknown, ""); write {
+		t.Error("unknown presence on an unseen server caused a write")
+	}
+
+	// Only a definite "absent" clears the flag.
+	next, write = resolveDockerState(stored, true, dockerAbsent, "")
+	if !write || next.hasDocker || next.version != "" {
+		t.Errorf("absent = (%+v, write=%v), want cleared and written", next, write)
+	}
+
+	// A version change on an installed host is written.
+	next, write = resolveDockerState(stored, true, dockerInstalled, "25.0.1")
+	if !write || next.version != "25.0.1" {
+		t.Errorf("version bump = (%+v, write=%v), want 25.0.1 written", next, write)
+	}
+
+	// Steady state: identical answer, no write.
+	if _, write := resolveDockerState(stored, true, dockerInstalled, "24.0.7"); write {
+		t.Error("unchanged state caused a write")
+	}
+
+	// First sighting of a server with Docker is written once.
+	next, write = resolveDockerState(dockerInfoState{}, false, dockerInstalled, "24.0.7")
+	if !write || !next.hasDocker {
+		t.Errorf("first sighting = (%+v, write=%v), want written", next, write)
+	}
+	// First sighting where the daemon is silent: installed, no version, still
+	// written so the Docker tab appears — the version fills in later.
+	next, write = resolveDockerState(dockerInfoState{}, false, dockerInstalled, "")
+	if !write || !next.hasDocker || next.version != "" {
+		t.Errorf("first silent sighting = (%+v, write=%v)", next, write)
+	}
+}
+
+func TestWindowsDockerPresence(t *testing.T) {
+	cases := []struct {
+		verdict, version string
+		want             dockerPresence
+	}{
+		{"installed", "24.0.7", dockerInstalled},
+		{"installed", "", dockerInstalled}, // daemon silent, still installed
+		{"absent", "", dockerAbsent},
+		{"", "24.0.7", dockerInstalled}, // pre-verdict script: version proves it
+		{"", "", dockerUnknown},         // pre-verdict script, nothing learned
+	}
+	for _, c := range cases {
+		if got := windowsDockerPresence(c.verdict, c.version); got != c.want {
+			t.Errorf("windowsDockerPresence(%q, %q) = %v, want %v", c.verdict, c.version, got, c.want)
+		}
+	}
+}
+
 func TestServerPollFingerprintChangesWithCredentials(t *testing.T) {
 	server := &models.Server{
 		Host:        "example.com",

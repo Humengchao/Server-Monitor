@@ -948,7 +948,49 @@ POST /api/alerts/test
 
 ---
 
-## 十、SSH WebSocket 终端
+## 十、Docker 接口
+
+> 需认证。容器操作通过共享的 SSH 连接缓存执行。
+
+### Docker 检测状态
+
+```
+GET /api/servers/:id/docker/check
+GET /api/servers/:id/docker/check?refresh=1
+```
+
+不带参数时返回数据库中缓存的检测结果；`refresh=1` 会**立即通过 SSH 询问主机**并更新缓存，
+是「某台服务器的 Docker 标记丢了」时的恢复入口。
+
+**响应**:
+
+```json
+{ "installed": true, "version": "24.0.7", "refreshed": true }
+```
+
+`refreshed` 仅在 `refresh=1` 时返回：`true` 表示主机给出了明确答案并已写回；`false` 表示这次没问到（主机不可达、
+输出被截断等），**缓存原样保留**。
+
+**检测语义**（采集器每次轮询也遵循同一套规则）:
+
+| 主机状态 | 探测结果 | 对 `has_docker` 的影响 |
+|---|---|---|
+| PATH 中没有 `docker` 命令 | `absent` | 写为 `false` —— **唯一**会清除标记的情形 |
+| 有 `docker` 命令，daemon 正常应答 | `installed` + 版本 | 写为 `true`，更新版本 |
+| 有 `docker` 命令，daemon 忙 / 重启中 / 拒绝该用户 / 5 秒内未响应 | `installed`，无版本 | 保持 `true`，**保留**已有版本 |
+| 探测本身没有产出（命令被截断、主机不可达） | `unknown` | **不写任何东西**，上次的结果继续有效 |
+
+这样区分的原因是一个曾经存在的 bug：旧实现只看 `docker info` 的输出，输出为空就写 `has_docker=false`。
+而 Docker 页面按这个标记过滤服务器，于是 daemon 忙一次、`docker info` 卡一次、或者整条批量采集命令因超时被截断一次，
+这台服务器就会从 Docker 页上消失，直到下一次探测碰巧成功。现在「没装」和「没问到」是两个不同的答案，
+并且 `docker info` 有独立的 5 秒上限，不会再拖垮同一次采集里排在它后面的其他指标。
+
+采集器启动时还会用数据库里的现有值预热它的变更检测缓存，否则重启后的第一次轮询若恰好没问到 daemon，
+会把正确的行覆盖成 `false`。
+
+---
+
+## 十一、SSH WebSocket 终端
 
 ```
 WS /api/ssh/:id
@@ -974,7 +1016,7 @@ ws.send('ls -la\n');
 
 ---
 
-## 十一、通用说明
+## 十二、通用说明
 
 ### 认证错误
 

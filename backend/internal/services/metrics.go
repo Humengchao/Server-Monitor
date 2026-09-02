@@ -109,6 +109,7 @@ func NewCollector(db *models.DB, interval time.Duration) *Collector {
 }
 
 func (c *Collector) Start() {
+	c.seedDockerInfo()
 	go func() {
 		ticker := time.NewTicker(c.interval)
 		defer ticker.Stop()
@@ -137,6 +138,23 @@ func (c *Collector) Start() {
 			}
 		}
 	}()
+}
+
+// seedDockerInfo primes the change-detection cache from what the database
+// already knows. Without it the first poll after a restart sees every server
+// as unknown, and any server whose daemon happened not to answer right then
+// would have its has_docker flag overwritten with false.
+func (c *Collector) seedDockerInfo() {
+	rows, err := models.GetAllDockerInfo(c.db.Raw)
+	if err != nil {
+		log.Printf("collector: seed docker info: %v", err)
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, r := range rows {
+		c.dockerInfo[r.ServerID] = dockerInfoState{hasDocker: r.HasDocker, version: r.Version}
+	}
 }
 
 // Stop signals the collector to stop polling and closes pooled connections.
@@ -525,7 +543,7 @@ func (c *Collector) applyRates(serverID uuid.UUID, m *models.MetricPoint, netRx,
 // syncHostInfo persists slow-changing host facts, writing only when they
 // differ from the last successfully stored values so steady-state polls don't
 // UPDATE the servers table every few seconds.
-func (c *Collector) syncHostInfo(serverID uuid.UUID, cores int, memTotal, diskTotal int64, dockerVersion string) {
+func (c *Collector) syncHostInfo(serverID uuid.UUID, cores int, memTotal, diskTotal int64, presence dockerPresence, dockerVersion string) {
 	if cores > 0 {
 		info := sysInfoState{cores: cores, memTotal: memTotal, diskTotal: diskTotal}
 		c.mu.Lock()
@@ -542,11 +560,11 @@ func (c *Collector) syncHostInfo(serverID uuid.UUID, cores int, memTotal, diskTo
 		}
 	}
 
-	docker := dockerInfoState{hasDocker: dockerVersion != "", version: dockerVersion}
 	c.mu.Lock()
 	prevDocker, known := c.dockerInfo[serverID]
 	c.mu.Unlock()
-	if !known || prevDocker != docker {
+	docker, write := resolveDockerState(prevDocker, known, presence, dockerVersion)
+	if write {
 		if err := models.UpdateDockerInfo(c.db.Raw, serverID, docker.hasDocker, docker.version); err != nil {
 			log.Printf("collector: update docker info for %s: %v", serverID, err)
 		} else {
@@ -555,6 +573,29 @@ func (c *Collector) syncHostInfo(serverID uuid.UUID, cores int, memTotal, diskTo
 			c.mu.Unlock()
 		}
 	}
+}
+
+// resolveDockerState decides what one poll's Docker probe should do to the
+// persisted row. It returns the state to store and whether to store it.
+//
+// The rules exist because the previous behaviour — "empty version means no
+// Docker, write it" — made servers vanish from the Docker page whenever a
+// single poll failed to reach the daemon:
+//
+//   - unknown (probe produced nothing): write nothing. The last answer stands.
+//   - absent (no CLI on PATH): the one state that clears has_docker.
+//   - installed but no version (daemon silent): keep has_docker=true and keep
+//     the version already stored, rather than blanking it.
+//   - anything else: write only if it differs from what was last stored.
+func resolveDockerState(prev dockerInfoState, known bool, presence dockerPresence, version string) (dockerInfoState, bool) {
+	if presence == dockerUnknown {
+		return prev, false
+	}
+	next := dockerInfoState{hasDocker: presence == dockerInstalled, version: version}
+	if known && next.hasDocker && next.version == "" && prev.hasDocker {
+		next.version = prev.version
+	}
+	return next, !known || prev != next
 }
 
 // linuxSectionSeparator delimits command outputs inside the batched metrics
@@ -590,8 +631,28 @@ var linuxMetricsCommand = strings.Join([]string{
 	"cat /proc/uptime",
 	"nproc",
 	"df -P -B1 /",
-	"docker info --format '{{.ServerVersion}}' || sudo -n docker info --format '{{.ServerVersion}}' || true",
+	linuxDockerProbe,
 }, "; echo "+linuxSectionSeparator+"; ")
+
+// linuxDockerProbe answers two separate questions, because conflating them is
+// how servers lose their Docker tab: "is Docker installed" and "did the daemon
+// answer just now".
+//
+// The first line is the verdict on installation, decided by whether a docker
+// CLI is on PATH — a fact that does not flicker. The second is the daemon
+// version, which can legitimately be empty for a moment: the daemon is
+// restarting, is busy, or refuses this SSH user. That transient emptiness used
+// to be persisted as has_docker=false, and the Docker page filters on that
+// flag, so a single slow poll made a server vanish from it.
+//
+// `docker info` gets its own 5-second ceiling. It can block for a long time
+// against a wedged daemon, and this is the last section of a 20-second batched
+// run — without the cap it would starve every metric behind it and then be
+// reported as "no Docker" on top.
+const linuxDockerProbe = `if command -v docker >/dev/null 2>&1; then echo installed; ` +
+	`timeout 5 docker info --format '{{.ServerVersion}}' 2>/dev/null || ` +
+	`timeout 5 sudo -n docker info --format '{{.ServerVersion}}' 2>/dev/null || true; ` +
+	`else echo absent; fi`
 
 // splitLinuxSections splits batched command output on separator lines. If the
 // output was truncated, the remaining sections come back empty.
@@ -637,8 +698,8 @@ func (c *Collector) collectLinux(client *ssh.Client, s *models.Server) (*models.
 	m.DiskUsed = diskUsed
 
 	cores := parseNproc(sections[linuxSectionNproc])
-	dockerVersion := parseDockerVersion(sections[linuxSectionDocker])
-	c.syncHostInfo(s.ID, cores, m.MemoryTotal, diskTotal, dockerVersion)
+	presence, dockerVersion := parseDockerProbe(sections[linuxSectionDocker])
+	c.syncHostInfo(s.ID, cores, m.MemoryTotal, diskTotal, presence, dockerVersion)
 
 	return m, nil
 }
@@ -865,9 +926,51 @@ func parseNproc(out string) int {
 	return cores
 }
 
-// parseDockerVersion sanity-checks the docker section of a metrics run: a real
-// server version is a short single token like "24.0.7". Anything else (error
-// text, sudo noise) means docker is not usable on the host.
+// dockerPresence is what one poll learned about Docker on a host.
+type dockerPresence int
+
+const (
+	// dockerUnknown means the probe produced nothing usable: the batched command
+	// was truncated, the section was garbage, or an older agent-less host did
+	// not run the probe at all. Nothing is persisted for it — the last known
+	// answer stands until a poll that actually knows.
+	dockerUnknown dockerPresence = iota
+	// dockerAbsent means no docker CLI is on PATH. This is the only state that
+	// clears has_docker.
+	dockerAbsent
+	// dockerInstalled means the CLI exists. Version may still be empty when the
+	// daemon did not answer this time; that is a transient, not an uninstall.
+	dockerInstalled
+)
+
+// parseDockerProbe reads the linuxDockerProbe section: an "installed"/"absent"
+// verdict line, optionally followed by the daemon version.
+//
+// The version must be a short single token like "24.0.7". Anything else —
+// error text, sudo noise, a partial line from a truncated run — is treated as
+// "daemon did not answer", never as a version.
+func parseDockerProbe(out string) (dockerPresence, string) {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	switch strings.TrimSpace(lines[0]) {
+	case "absent":
+		return dockerAbsent, ""
+	case "installed":
+		if len(lines) < 2 {
+			return dockerInstalled, ""
+		}
+		return dockerInstalled, parseDockerVersion(lines[1])
+	}
+	// Backwards compatibility with the bare-version output a Windows host still
+	// produces: a valid version alone proves Docker is installed. Anything else
+	// is unknown, not absent.
+	if version := parseDockerVersion(out); version != "" {
+		return dockerInstalled, version
+	}
+	return dockerUnknown, ""
+}
+
+// parseDockerVersion sanity-checks a version token: a real server version is a
+// short single token like "24.0.7". Anything else is not a version.
 func parseDockerVersion(out string) string {
 	version := strings.TrimSpace(out)
 	if version == "" || len(version) > 31 || strings.ContainsAny(version, " \t\n") {
@@ -893,7 +996,8 @@ $disks = Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3'
 $disktotal = ($disks | Measure-Object -Property Size -Sum).Sum
 $diskfree = ($disks | Measure-Object -Property FreeSpace -Sum).Sum
 $queue = (Get-CimInstance Win32_PerfFormattedData_PerfOS_System).ProcessorQueueLength
-$docker = if (Get-Command docker -ErrorAction SilentlyContinue) { docker info --format "{{.ServerVersion}}" } else { '' }
+$dockerpresent = if (Get-Command docker -ErrorAction SilentlyContinue) { 'installed' } else { 'absent' }
+$docker = if ($dockerpresent -eq 'installed') { docker info --format "{{.ServerVersion}}" 2>$null } else { '' }
 Write-Output ("cpu=" + [int64][math]::Round([double]$cpu))
 Write-Output ("memtotal=" + $os.TotalVisibleMemorySize)
 Write-Output ("memfree=" + $os.FreePhysicalMemory)
@@ -906,6 +1010,7 @@ Write-Output ("cores=" + $cores)
 Write-Output ("disktotal=" + [int64]$disktotal)
 Write-Output ("diskfree=" + [int64]$diskfree)
 Write-Output ("queue=" + [int64]$queue)
+Write-Output ("dockerpresent=" + $dockerpresent)
 Write-Output ("docker=" + $docker)`
 
 // encodePowerShell encodes a script as UTF-16LE base64 for -EncodedCommand,
@@ -928,7 +1033,7 @@ func (c *Collector) collectWindows(client *ssh.Client, s *models.Server) (*model
 	}
 
 	vals := make(map[string]int64)
-	dockerVersion := ""
+	dockerVersion, dockerPresent := "", ""
 	for _, line := range strings.Split(out, "\n") {
 		k, v, ok := strings.Cut(strings.TrimSpace(line), "=")
 		if !ok {
@@ -937,6 +1042,10 @@ func (c *Collector) collectWindows(client *ssh.Client, s *models.Server) (*model
 		v = strings.TrimSpace(v)
 		if k == "docker" {
 			dockerVersion = parseDockerVersion(v)
+			continue
+		}
+		if k == "dockerpresent" {
+			dockerPresent = v
 			continue
 		}
 		n, err := strconv.ParseInt(v, 10, 64)
@@ -967,9 +1076,66 @@ func (c *Collector) collectWindows(client *ssh.Client, s *models.Server) (*model
 	m.NetworkRxTotal, m.NetworkTxTotal = netRxRaw, netTxRaw
 	c.applyRates(s.ID, m, netRxRaw, netTxRaw, vals["diskread"], vals["diskwrite"])
 
-	c.syncHostInfo(s.ID, int(vals["cores"]), m.MemoryTotal, vals["disktotal"], dockerVersion)
+	c.syncHostInfo(s.ID, int(vals["cores"]), m.MemoryTotal, vals["disktotal"],
+		windowsDockerPresence(dockerPresent, dockerVersion), dockerVersion)
 
 	return m, nil
+}
+
+// windowsDockerPresence resolves the two PowerShell keys the same way the Linux
+// probe is read. A script from before the dockerpresent key existed reports an
+// empty verdict; a version alone then still proves installation, and nothing
+// at all is unknown rather than absent.
+func windowsDockerPresence(verdict, version string) dockerPresence {
+	switch verdict {
+	case "installed":
+		return dockerInstalled
+	case "absent":
+		return dockerAbsent
+	}
+	if version != "" {
+		return dockerInstalled
+	}
+	return dockerUnknown
+}
+
+// DockerProbeResult is what an on-demand probe learned, in API-facing terms.
+type DockerProbeResult struct {
+	// Known is false when the probe produced nothing usable; Installed and
+	// Version are then meaningless and the stored row should be left alone.
+	Known     bool
+	Installed bool
+	Version   string
+}
+
+// ProbeDocker asks a host about Docker right now, using the same probe and the
+// same reading as the collector, so a manual "re-check" and the background poll
+// can never disagree about what counts as installed.
+func ProbeDocker(client *ssh.Client, serverType string) DockerProbeResult {
+	if serverType == "windows" {
+		out, _ := RunCmd(client, "powershell -NoProfile -NonInteractive -EncodedCommand "+
+			encodePowerShell(`$p = if (Get-Command docker -ErrorAction SilentlyContinue) { 'installed' } else { 'absent' }
+$v = if ($p -eq 'installed') { docker info --format "{{.ServerVersion}}" 2>$null } else { '' }
+Write-Output ("dockerpresent=" + $p); Write-Output ("docker=" + $v)`))
+		verdict, version := "", ""
+		for _, line := range strings.Split(out, "\n") {
+			k, v, ok := strings.Cut(strings.TrimSpace(line), "=")
+			if !ok {
+				continue
+			}
+			switch k {
+			case "dockerpresent":
+				verdict = strings.TrimSpace(v)
+			case "docker":
+				version = parseDockerVersion(v)
+			}
+		}
+		presence := windowsDockerPresence(verdict, version)
+		return DockerProbeResult{Known: presence != dockerUnknown, Installed: presence == dockerInstalled, Version: version}
+	}
+	out, _ := RunCmd(client, linuxDockerProbe)
+	presence, version := parseDockerProbe(out)
+	return DockerProbeResult{Known: presence != dockerUnknown, Installed: presence == dockerInstalled, Version: version}
 }
 
 // RunDockerCmd runs a docker command, falling back to sudo docker if needed.

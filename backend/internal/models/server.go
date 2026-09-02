@@ -307,6 +307,37 @@ func GetServerDockerInfo(db *sql.DB, id, userID uuid.UUID) (bool, string, error)
 	return hasDocker, version, err
 }
 
+// DockerInfoRow is one server's persisted Docker facts, for seeding the
+// collector's change-detection cache at startup.
+type DockerInfoRow struct {
+	ServerID  uuid.UUID
+	HasDocker bool
+	Version   string
+}
+
+// GetAllDockerInfo returns the persisted Docker facts for every server. The
+// collector loads these once at startup so its "last written value" cache is
+// not empty on the first poll — an empty cache treats every server as unknown,
+// and a first poll that happened to miss the daemon would then write
+// has_docker=false over a row that was correct.
+func GetAllDockerInfo(db *sql.DB) ([]DockerInfoRow, error) {
+	rows, err := db.Query(
+		`SELECT id, COALESCE(has_docker, FALSE), COALESCE(docker_version, '') FROM servers`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]DockerInfoRow, 0)
+	for rows.Next() {
+		var r DockerInfoRow
+		if err := rows.Scan(&r.ServerID, &r.HasDocker, &r.Version); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 func ServerHasDirectSSHAuth(db *sql.DB, id, userID uuid.UUID) (bool, error) {
 	var hasAuth bool
 	err := db.QueryRow(
