@@ -377,6 +377,60 @@ struct HostDetailParserTests {
         #expect(sparse.cpuModel == "AMD EPYC 7B13", "cpu model must not land in another field")
     }
 
+    @Test func aFirmwareVariableStoreIsNotStorage() throws {
+        // Verbatim from a UEFI ARM host: efivarfs is 128 KB of firmware
+        // variables and was sitting on the storage card beside the real disks.
+        let rows = ProcParsers.filesystems("""
+        Filesystem 1B-blocks Used Available Capacity Mounted on
+        efivarfs 131072 7509 118411 6% /sys/firmware/efi/efivars
+        /dev/sda1 47373041664 11703223296 33228500992 26% /
+        /dev/sda16 1006632960 202375168 733417472 22% /boot
+        /dev/sda15 111149056 6427648 104721408 6% /boot/efi
+        """)
+        #expect(!rows.contains { $0.mount.hasPrefix("/sys/") })
+        #expect(rows.contains { $0.mount == "/boot/efi" }, "a real EFI partition stays")
+        #expect(rows.count == 3)
+        let root = try #require(rows.first)
+        #expect(root.mount == "/", "root leads")
+        #expect(root.used == 11_703_223_296)
+    }
+
+    @Test func aKernelMountIsDroppedWhateverItsTypeIsCalled() {
+        // The type list will always be one behind; the mount point is the part
+        // that does not need updating when a new pseudo-filesystem appears.
+        #expect(ProcParsers.isPseudoFilesystem("efivarfs"))
+        #expect(ProcParsers.isPseudoFilesystem("somethingnew", mount: "/sys/fs/whatever"))
+        #expect(ProcParsers.isPseudoFilesystem("tracefs", mount: "/proc/x"))
+        #expect(!ProcParsers.isPseudoFilesystem("/dev/sda15", mount: "/boot/efi"))
+        #expect(!ProcParsers.isPseudoFilesystem("/dev/sda1", mount: "/"))
+    }
+
+    @Test func anArmHostStillNamesItsCPU() {
+        // /proc/cpuinfo has no "model name" on aarch64, so the CPU model came
+        // back empty on every ARM host. The collection line falls back to
+        // `lscpu`, whose column padding leaves the value indented.
+        let arm = ProcParsers.hostIdentity("""
+        host=arm-1
+        kern=6.8.0-1030-oracle
+        arch=aarch64
+        os=Ubuntu 24.04.4 LTS
+        ips=10.0.0.5
+        cpu= Neoverse-N1
+        """)
+        #expect(arm.architecture == "aarch64")
+        #expect(arm.cpuModel == "Neoverse-N1")
+    }
+
+    @Test func theCollectionLineAsksLscpuOnlyAsAFallback() throws {
+        // Ordered so an x86 host, where /proc/cpuinfo answers, never pays for
+        // an extra process.
+        let command = ProcParsers.linuxMetricsCommand
+        let cpuinfo = try #require(command.range(of: "^model name"))
+        let lscpu = try #require(command.range(of: "lscpu"))
+        #expect(cpuinfo.lowerBound < lscpu.lowerBound)
+        #expect(command.contains("||"), "a fallback, not a second query")
+    }
+
     @Test func cpuBreakdownSharesTheWholeWindow() {
         // user 10, nice 0, system 20, idle 60, iowait 10 over a 100-jiffy window.
         let first = "cpu  0 0 0 0 0 0 0 0 0 0"

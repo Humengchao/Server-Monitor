@@ -40,14 +40,14 @@ public enum ProcParsers {
             "nproc",
             // Every local filesystem, not just `/`: the storage card lists
             // mounts, and the headline figure still comes from `/`.
-            "df -P -B1 -x tmpfs -x devtmpfs -x overlay -x squashfs 2>/dev/null || df -P -B1",
+            "df -P -B1 -x tmpfs -x devtmpfs -x overlay -x squashfs -x efivarfs 2>/dev/null || df -P -B1",
             // Sorted by CPU share, trimmed here rather than locally so the
             // round trip stays small on a busy host.
             "ps -eo pid=,user=,pcpu=,pmem=,rss=,args= --sort=-pcpu 2>/dev/null | head -n 30",
             // key=value rather than one fact per line: `lines()` drops empty lines,
             // so a host where any of these produced nothing shifted every later
             // field up — the CPU model would arrive as the IP address list.
-            "echo host=$(hostname); echo kern=$(uname -r); echo arch=$(uname -m); echo os=$(. /etc/os-release 2>/dev/null && echo $PRETTY_NAME); echo ips=$(hostname -I 2>/dev/null); echo cpu=$(grep -m1 '^model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2-)",
+            "echo host=$(hostname); echo kern=$(uname -r); echo arch=$(uname -m); echo os=$(. /etc/os-release 2>/dev/null && echo $PRETTY_NAME); echo ips=$(hostname -I 2>/dev/null); echo cpu=$({ grep -m1 '^model name' /proc/cpuinfo 2>/dev/null || lscpu 2>/dev/null | grep -m1 -i '^model name'; } | cut -d: -f2-)",
             // Short-circuits to nothing on the ~all hosts with no NVIDIA card,
             // so this costs one `command -v` there. Emitted as key=value for
             // the same reason the host-info section is.
@@ -410,7 +410,7 @@ public enum ProcParsers {
             let used = Int64(fields[fields.count - 4]) ?? 0
             guard total > 0 else { continue }
             let device = fields.count >= 6 ? String(fields[0]) : ""
-            guard !Self.isPseudoFilesystem(device) else { continue }
+            guard !Self.isPseudoFilesystem(device, mount: mount) else { continue }
             result.append(FilesystemUsage(mount: mount, device: device, used: used, total: total))
         }
         // Biggest first, but `/` always leads: it is the one people look for.
@@ -420,9 +420,17 @@ public enum ProcParsers {
         }
     }
 
-    static func isPseudoFilesystem(_ device: String) -> Bool {
-        ["tmpfs", "devtmpfs", "overlay", "squashfs", "udev", "none"].contains(device)
-            || device.hasPrefix("/dev/loop")
+    /// Whether a `df` row is a kernel interface rather than storage.
+    ///
+    /// Type alone is not enough: `efivarfs` slipped through and put the 128 KB
+    /// firmware variable store on the storage card of every UEFI host, next to
+    /// its real disks. Any mount under /sys, /proc or /dev is the same kind of
+    /// thing whatever its type happens to be called, which also covers the
+    /// next one of these rather than waiting to be surprised by it.
+    static func isPseudoFilesystem(_ device: String, mount: String = "") -> Bool {
+        let pseudo = ["tmpfs", "devtmpfs", "overlay", "squashfs", "udev", "none", "efivarfs", "ramfs"]
+        if pseudo.contains(device) || device.hasPrefix("/dev/loop") { return true }
+        return mount.hasPrefix("/sys/") || mount.hasPrefix("/proc/") || mount.hasPrefix("/dev/")
     }
 
     /// Rows of `ps -eo pid=,user=,pcpu=,pmem=,rss=,args=`.
