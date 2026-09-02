@@ -1,12 +1,12 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  Table, Button, Modal, Form, Input, Select, Space, Typography, Popconfirm, App, Tag,
+  Table, Button, Modal, Form, Input, Select, Space, Typography, Popconfirm, App, Tag, Card,
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, KeyOutlined, WindowsOutlined, AppleOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { credentialsApi, Credential } from '../api/credentials';
 
-const { Title } = Typography;
+const { Title, Text } = Typography;
 
 export default function Credentials() {
   const { t } = useTranslation();
@@ -137,8 +137,13 @@ export default function Credentials() {
 
   return (
     <div>
-      <Space style={{ marginBottom: 24, width: '100%', justifyContent: 'space-between' }}>
-        <Title level={4} style={{ margin: 0 }}>{t('credential.title')}</Title>
+      <div className="page-heading">
+        <div>
+          <Text className="eyebrow">{t('credential.eyebrow')}</Text>
+          <Title level={2}>{t('credential.title')}</Title>
+          <Text type="secondary">{t('credential.subtitle')}</Text>
+        </div>
+        <Space className="page-actions">
         <Button
           type="primary"
           icon={<PlusOutlined />}
@@ -150,15 +155,19 @@ export default function Credentials() {
         >
           {t('credential.add')}
         </Button>
-      </Space>
+        </Space>
+      </div>
 
-      <Table
-        dataSource={creds}
-        columns={columns}
-        rowKey="id"
-        loading={loading}
-        pagination={false}
-      />
+      <Card className="panel-card">
+        <Table
+          className="server-table"
+          dataSource={creds}
+          columns={columns}
+          rowKey="id"
+          loading={loading}
+          pagination={false}
+        />
+      </Card>
 
       <Modal
         title={editing ? t('credential.edit') : t('credential.add')}

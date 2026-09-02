@@ -392,62 +392,52 @@ export default function Dashboard() {
         </Space>
       </div>
 
-      <Row gutter={[16, 16]} className="overview-grid">
-        <Col xs={12} sm={8} xl={3}>
-          <Card className="overview-card overview-card-primary" variant="borderless">
-            <div className="overview-icon"><CloudServerOutlined /></div>
-            <div><Text type="secondary">{t('dashboard.totalServers')}</Text><strong>{stats.total}</strong></div>
+      {/* A CSS grid rather than antd columns: seven tiles never divide 24
+          evenly, and antd's xl={3} left a 12.5% hole plus tiles too narrow for
+          "100.00%". auto-fit gives every tile the same width and the row
+          reflows to 4/3/2 columns as the viewport shrinks. */}
+      <div className="overview-grid overview-grid-7">
+        <Card className="overview-card overview-card-primary" variant="borderless">
+          <div className="overview-icon"><CloudServerOutlined /></div>
+          <div><Text type="secondary">{t('dashboard.totalServers')}</Text><strong>{stats.total}</strong></div>
+        </Card>
+        <Card className="overview-card overview-card-success" variant="borderless">
+          <div className="overview-icon"><CheckCircleOutlined /></div>
+          <div><Text type="secondary">{t('dashboard.online')}</Text><strong>{stats.online}</strong></div>
+        </Card>
+        <Card className={`overview-card ${stats.offline > 0 ? 'overview-card-danger' : 'overview-card-muted'}`} variant="borderless">
+          <div className="overview-icon"><DisconnectOutlined /></div>
+          <div><Text type="secondary">{t('dashboard.offline')}</Text><strong>{stats.offline}</strong></div>
+        </Card>
+        <Card className="overview-card overview-card-accent" variant="borderless">
+          <div className="overview-icon"><DashboardOutlined /></div>
+          <div><Text type="secondary">{t('dashboard.avgCpu')}</Text><strong>{stats.avgCPU}</strong></div>
+        </Card>
+        <Card className="overview-card overview-card-teal" variant="borderless">
+          <div className="overview-icon"><DatabaseOutlined /></div>
+          <div><Text type="secondary">{t('dashboard.avgMemory')}</Text><strong>{stats.avgMemory}</strong></div>
+        </Card>
+        <Tooltip title={t('uptime.badgeHint')}>
+          <Card className="overview-card overview-card-uptime" variant="borderless">
+            <div className="overview-icon"><RiseOutlined /></div>
+            <div>
+              <Text type="secondary">{t('uptime.overviewLabel')}</Text>
+              <strong style={fleetAvailability === null ? undefined : { color: availabilityColor(fleetAvailability) }}>
+                {fleetAvailability === null ? '—' : `${fleetAvailability.toFixed(2)}%`}
+              </strong>
+            </div>
           </Card>
-        </Col>
-        <Col xs={12} sm={8} xl={3}>
-          <Card className="overview-card overview-card-success" variant="borderless">
-            <div className="overview-icon"><CheckCircleOutlined /></div>
-            <div><Text type="secondary">{t('dashboard.online')}</Text><strong>{stats.online}</strong></div>
+        </Tooltip>
+        <Tooltip title={t('dashboard.monthlySpendHint')}>
+          <Card className="overview-card overview-card-amber" variant="borderless">
+            <div className="overview-icon"><WalletOutlined /></div>
+            <div>
+              <Text type="secondary">{t('dashboard.monthlySpend')}</Text>
+              <strong>{currencySymbol(stats.displayCurrency)}{stats.spend.toFixed(stats.spend >= 100 ? 0 : 1)}</strong>
+            </div>
           </Card>
-        </Col>
-        <Col xs={12} sm={8} xl={3}>
-          <Card className={`overview-card ${stats.offline > 0 ? 'overview-card-danger' : 'overview-card-muted'}`} variant="borderless">
-            <div className="overview-icon"><DisconnectOutlined /></div>
-            <div><Text type="secondary">{t('dashboard.offline')}</Text><strong>{stats.offline}</strong></div>
-          </Card>
-        </Col>
-        <Col xs={12} sm={8} xl={3}>
-          <Card className="overview-card overview-card-accent" variant="borderless">
-            <div className="overview-icon"><DashboardOutlined /></div>
-            <div><Text type="secondary">{t('dashboard.avgCpu')}</Text><strong>{stats.avgCPU}</strong></div>
-          </Card>
-        </Col>
-        <Col xs={12} sm={8} xl={3}>
-          <Card className="overview-card overview-card-teal" variant="borderless">
-            <div className="overview-icon"><DatabaseOutlined /></div>
-            <div><Text type="secondary">{t('dashboard.avgMemory')}</Text><strong>{stats.avgMemory}</strong></div>
-          </Card>
-        </Col>
-        <Col xs={12} sm={8} xl={3}>
-          <Tooltip title={t('uptime.badgeHint')}>
-            <Card className="overview-card overview-card-uptime" variant="borderless">
-              <div className="overview-icon"><RiseOutlined /></div>
-              <div>
-                <Text type="secondary">{t('uptime.overviewLabel')}</Text>
-                <strong style={fleetAvailability === null ? undefined : { color: availabilityColor(fleetAvailability) }}>
-                  {fleetAvailability === null ? '—' : `${fleetAvailability.toFixed(2)}%`}
-                </strong>
-              </div>
-            </Card>
-          </Tooltip>
-        </Col>
-        <Col xs={12} sm={8} xl={3}>
-          <Tooltip title={t('dashboard.monthlySpendHint')}>
-            <Card className="overview-card overview-card-amber" variant="borderless">
-              <div className="overview-icon"><WalletOutlined /></div>
-              <div>
-                <Text type="secondary">{t('dashboard.monthlySpend')}</Text>
-                <strong>{currencySymbol(stats.displayCurrency)}{stats.spend.toFixed(stats.spend >= 100 ? 0 : 1)}</strong>
-              </div>
-            </Card>
-          </Tooltip>
-        </Col>
-      </Row>
+        </Tooltip>
+      </div>
 
       <div className="fleet-toolbar">
         <Segmented

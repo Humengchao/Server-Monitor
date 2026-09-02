@@ -156,12 +156,39 @@ button, input, textarea, select { font: inherit; }
 .tag-filter { min-width: 190px; }
 .page-actions .ant-btn { box-shadow: none; }
 
-.overview-grid { margin-bottom: 30px; }
-.overview-card.ant-card { overflow: hidden; border: 1px solid var(--border); background: var(--surface); box-shadow: var(--shadow-sm); }
-.overview-card .ant-card-body { padding: 18px 20px; display: flex; align-items: center; gap: 14px; }
-.overview-icon { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 13px; font-size: 20px; }
-.overview-card > .ant-card-body > div:last-child { display: flex; flex-direction: column; }
-.overview-card strong { margin-top: 2px; color: var(--text); font-size: 27px; line-height: 1; letter-spacing: -.5px; }
+/* Stat tiles. One grid, equal columns, equal heights: a row of seven never
+   divides antd's 24 columns, and unequal tiles read as a mistake. */
+.overview-grid {
+  margin-bottom: 26px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+/* The dashboard has seven tiles. auto-fit lands them as 6 + 1 at common
+   desktop widths, and a single orphan on its own row looks like a bug. Pin
+   the column count to the tile count when there is room, and fall back to a
+   4 + 3 split rather than whatever the width happens to produce. */
+.overview-grid.overview-grid-7 { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+@media (max-width: 1500px) { .overview-grid.overview-grid-7 { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+/* Below tablet width the pinned counts must yield to the phone layout; the
+   two-class selector above would otherwise outrank the generic mobile rule. */
+@media (max-width: 640px) { .overview-grid.overview-grid-7 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.overview-grid > .ant-tooltip-open, .overview-grid > .ant-card { min-width: 0; }
+.overview-card.ant-card { height: 100%; overflow: hidden; border: 1px solid var(--border); background: var(--surface); box-shadow: var(--shadow-sm); }
+.overview-card .ant-card-body { height: 100%; min-height: 86px; padding: 16px 18px; display: flex; align-items: center; gap: 13px; }
+.overview-icon { width: 42px; height: 42px; flex: 0 0 42px; display: grid; place-items: center; border-radius: 12px; font-size: 19px; }
+.overview-card > .ant-card-body > div:last-child { min-width: 0; display: flex; flex-direction: column; }
+/* The label must stay on one line: a wrapped label makes its tile taller than
+   its neighbours, and the row stops reading as a row. */
+.overview-card .ant-typography { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.overview-card strong {
+  margin-top: 3px;
+  color: var(--text);
+  font-size: clamp(20px, 1.6vw, 26px);
+  line-height: 1;
+  letter-spacing: -.5px;
+  white-space: nowrap;
+}
 .overview-card-primary .overview-icon { color: #526ff0; background: rgba(82, 111, 240, .11); }
 .overview-card-success .overview-icon { color: #16a980; background: rgba(22, 169, 128, .11); }
 .overview-card-muted .overview-icon { color: #8d6dd7; background: rgba(141, 109, 215, .11); }
@@ -447,6 +474,44 @@ button, input, textarea, select { font: inherit; }
 /* Shared panel surface */
 .panel-card.ant-card { border: 1px solid var(--border); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow-sm); }
 
+/* Docker page */
+.docker-hosts.ant-collapse { border: 0; background: transparent; }
+.docker-hosts.ant-collapse > .ant-collapse-item {
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: 16px !important;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+.docker-hosts.ant-collapse > .ant-collapse-item > .ant-collapse-header { padding: 14px 18px; align-items: center; }
+.docker-hosts.ant-collapse .ant-collapse-content { border-top: 1px solid var(--border); background: transparent; }
+.docker-hosts.ant-collapse .ant-collapse-content-box { padding: 6px 12px 12px; }
+.docker-host-head { min-width: 0; display: flex; align-items: center; gap: 12px; }
+.docker-host-icon { width: 38px; height: 38px; flex-basis: 38px; font-size: 17px; border-radius: 11px; }
+.docker-host-identity { min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
+.docker-host-identity strong { color: var(--text); font-size: 14px; }
+.docker-host-identity span { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.docker-host-counts { margin-left: 6px; display: flex; align-items: center; gap: 10px; }
+.docker-count { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.docker-count i { width: 7px; height: 7px; border-radius: 50%; }
+.docker-count.running i { background: #16a980; box-shadow: 0 0 0 3px rgba(22, 169, 128, .14); }
+.docker-count.stopped i { background: #9aa4bb; }
+.docker-undetected { margin-top: 26px; }
+.docker-undetected .section-heading > div { flex-direction: column; align-items: flex-start; gap: 2px; }
+.docker-undetected-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
+.docker-undetected-row {
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px dashed var(--border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+}
+.docker-undetected-row .server-platform { width: 36px; height: 36px; flex-basis: 36px; font-size: 16px; border-radius: 10px; }
+.docker-undetected-row .docker-host-identity { flex: 1; }
+
 /* Server detail hero */
 .detail-hero {
   margin-bottom: 20px;
@@ -479,14 +544,19 @@ button, input, textarea, select { font: inherit; }
 .detail-actions .ant-btn { box-shadow: none; }
 
 /* Stat tiles */
+/* Eight tiles. Fixed to four columns rather than auto-fill: auto-fill at
+   this width produced five, which leaves 5 + 3 with a hole in the second row.
+   4x2 is always complete. */
 .stat-tile-grid {
   margin-bottom: 22px;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(212px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
 }
+@media (max-width: 1100px) { .stat-tile-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .stat-tile {
   min-width: 0;
+  min-height: 84px;
   padding: 15px 16px;
   display: flex;
   align-items: flex-start;
@@ -506,7 +576,22 @@ button, input, textarea, select { font: inherit; }
 
 /* Charts */
 .chart-toolbar { margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
-.metrics-charts { display: grid; gap: 22px; }
+/* Two charts per row on a desktop. One full-width chart per row made the
+   pane 1900px tall, and a 1100px-wide area chart of a 3-second series is just
+   a lot of horizontal noise. Each panel gets its own frame so the pair reads as
+   two objects rather than one wall of lines. */
+.metrics-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.metrics-charts > .chart-panel {
+  min-width: 0;
+  padding: 14px 16px 8px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-soft);
+}
+/* An odd panel count leaves the last one alone; let it span the row so the
+   grid still ends flush. */
+.metrics-charts > .chart-panel:last-child:nth-child(odd) { grid-column: 1 / -1; }
+@media (max-width: 1100px) { .metrics-charts { grid-template-columns: minmax(0, 1fr); } }
 .chart-panel-head { margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
 .chart-panel-head h4 { margin: 0; color: var(--text); font-size: 13px; font-weight: 650; }
 .chart-legend { display: flex; gap: 14px; color: var(--muted); font-size: 11px; }
@@ -685,10 +770,10 @@ button, input, textarea, select { font: inherit; }
   .page-actions { display: grid !important; grid-template-columns: 1fr 1fr; width: 100%; }
   .page-actions .tag-filter { grid-column: 1 / -1; width: 100%; }
   .page-actions .ant-btn { width: 100%; }
-  .overview-grid { margin-bottom: 24px; }
-  .overview-card .ant-card-body { padding: 14px; gap: 10px; }
-  .overview-icon { width: 38px; height: 38px; }
-  .overview-card strong { font-size: 22px; }
+  .overview-grid { margin-bottom: 20px; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .overview-card .ant-card-body { min-height: 72px; padding: 12px 13px; gap: 10px; }
+  .overview-icon { width: 36px; height: 36px; flex-basis: 36px; font-size: 16px; }
+  .overview-card strong { font-size: 20px; }
   .overview-card .ant-typography { font-size: 11px; }
   .section-heading > div { display: block; }
   .section-heading .ant-typography-secondary { display: block; margin-top: 3px; }

@@ -195,6 +195,11 @@ export const serversApi = {
 
   checkDocker: (id: string) =>
     client.get<{ installed: boolean; version?: string }>(`/servers/${id}/docker/check`),
+  /** Asks the host directly and updates the stored flag — the recovery path for a
+   *  server whose Docker flag was lost to a transient probe failure. */
+  redetectDocker: (id: string) =>
+    client.get<{ installed: boolean; version?: string; refreshed: boolean }>(
+      `/servers/${id}/docker/check`, { params: { refresh: 1 } }),
 
   getContainers: (id: string) =>
     client.get<DockerContainer[]>(`/servers/${id}/docker/containers`),

@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Table, Tag, Typography } from 'antd';
+import { Card, Table, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useTranslation } from 'react-i18next';
 import { authApi, LoginHistoryItem } from '../api/auth';
 
-const { Title } = Typography;
+const { Title, Text } = Typography;
 
 export default function LoginHistory() {
   const { t } = useTranslation();
@@ -59,8 +59,16 @@ export default function LoginHistory() {
 
   return (
     <div>
-      <Title level={4} style={{ marginBottom: 16 }}>{t('loginHistory.title')}</Title>
+      <div className="page-heading">
+        <div>
+          <Text className="eyebrow">{t('loginHistory.eyebrow')}</Text>
+          <Title level={2}>{t('loginHistory.title')}</Title>
+          <Text type="secondary">{t('loginHistory.subtitle')}</Text>
+        </div>
+      </div>
+      <Card className="panel-card">
       <Table
+        className="server-table"
         rowKey="id"
         columns={columns}
         dataSource={records}
@@ -73,6 +81,7 @@ export default function LoginHistory() {
           showTotal: (cnt) => t('loginHistory.total', { count: cnt }),
         }}
       />
+      </Card>
     </div>
   );
 }

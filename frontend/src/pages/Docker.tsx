@@ -1,7 +1,10 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { Collapse, Table, Tag, Button, Space, Typography, Spin, Empty, Drawer, App, Card } from 'antd';
-import { ReloadOutlined, CaretRightOutlined, PauseOutlined, SyncOutlined, ArrowRightOutlined, FileTextOutlined, CodeOutlined } from '@ant-design/icons';
+import { Collapse, Table, Tag, Button, Space, Typography, Spin, Empty, Drawer, App, Card, Tooltip } from 'antd';
+import {
+  ReloadOutlined, CaretRightOutlined, PauseOutlined, SyncOutlined, ArrowRightOutlined, FileTextOutlined, CodeOutlined,
+  ContainerOutlined, CloudServerOutlined, CheckCircleOutlined, QuestionCircleOutlined, SearchOutlined,
+} from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useTranslation } from 'react-i18next';
 import { serversApi, Server, DockerContainer } from '../api/servers';
@@ -333,6 +336,11 @@ export default function Docker() {
   const { t } = useTranslation();
   const { message } = App.useApp();
   const [servers, setServers] = useState<ServerDocker[]>([]);
+  // Servers whose stored flag says "no Docker". Kept rather than filtered out:
+  // the flag can be lost to a transient probe failure, and a server that
+  // silently vanishes from this page is exactly the symptom that hides the bug.
+  const [undetected, setUndetected] = useState<Server[]>([]);
+  const [redetecting, setRedetecting] = useState<string | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const [activeKeys, setActiveKeys] = useState<string[]>([]);
   const [searchParams] = useSearchParams();
@@ -359,6 +367,7 @@ export default function Docker() {
         }));
 
       setServers(withDocker);
+      setUndetected(allServers.filter((s) => !s.has_docker));
 
       if (expandServerId) {
         setActiveKeys([expandServerId]);
@@ -462,15 +471,56 @@ export default function Docker() {
     },
   ];
 
+  const redetect = async (server: Server) => {
+    setRedetecting(server.id);
+    try {
+      const res = await serversApi.redetectDocker(server.id);
+      if (res.data.installed) {
+        message.success(t('docker.redetectFound', { name: server.name, version: res.data.version || '' }));
+        loadServers();
+      } else if (res.data.refreshed) {
+        message.info(t('docker.redetectAbsent', { name: server.name }));
+      } else {
+        // The host could not be asked at all; the stored answer was left alone.
+        message.warning(t('docker.redetectUnknown', { name: server.name }));
+      }
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      message.error(detail || t('docker.redetectFailed'));
+    } finally {
+      setRedetecting(null);
+    }
+  };
+
+  const totals = {
+    containers: servers.reduce((sum, sd) => sum + sd.containers.length, 0),
+    running: servers.reduce((sum, sd) => sum + sd.containers.filter((c) => c.state === 'running').length, 0),
+  };
+
   const collapseItems = servers.map((sd) => ({
     key: sd.server.id,
     label: (
-      <Space>
-        <Text strong>{sd.server.name}</Text>
-        <Text type="secondary">({sd.server.host})</Text>
-        <Tag color="blue">{t('docker.version', { version: sd.version })}</Tag>
-        <Text type="secondary">{t('docker.containers', { count: sd.containers.length })}</Text>
-      </Space>
+      <div className="docker-host-head">
+        <span className="server-platform linux docker-host-icon"><ContainerOutlined /></span>
+        <div className="docker-host-identity">
+          <strong>{sd.server.name}</strong>
+          <span>{sd.server.host}{sd.version ? ` · Docker ${sd.version}` : ''}</span>
+        </div>
+        <div className="docker-host-counts">
+          {sd.loaded ? (
+            <>
+              <span className="docker-count running">
+                <i />{t('docker.runningCount', { count: sd.containers.filter((c) => c.state === 'running').length })}
+              </span>
+              {sd.containers.some((c) => c.state !== 'running') && (
+                <span className="docker-count stopped">
+                  <i />{t('docker.stoppedCount', { count: sd.containers.filter((c) => c.state !== 'running').length })}
+                </span>
+              )}
+            </>
+          ) : sd.loading ? <Spin size="small" /> : null}
+        </div>
+      </div>
     ),
     extra: (
       <Button
@@ -512,21 +562,89 @@ export default function Docker() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <Title level={4} style={{ margin: 0 }}>{t('docker.title')}</Title>
-        <Button icon={<ReloadOutlined />} onClick={loadServers}>{t('common.refresh')}</Button>
+      <div className="page-heading">
+        <div>
+          <Text className="eyebrow">{t('docker.eyebrow')}</Text>
+          <Title level={2}>{t('docker.title')}</Title>
+          <Text type="secondary">{t('docker.subtitle')}</Text>
+        </div>
+        <Space className="page-actions">
+          <Button icon={<ReloadOutlined />} onClick={loadServers} loading={initialLoading}>{t('common.refresh')}</Button>
+        </Space>
+      </div>
+
+      <div className="overview-grid">
+        <Card className="overview-card overview-card-primary" variant="borderless">
+          <div className="overview-icon"><CloudServerOutlined /></div>
+          <div><Text type="secondary">{t('docker.hostsWithDocker')}</Text><strong>{servers.length}</strong></div>
+        </Card>
+        <Card className="overview-card overview-card-accent" variant="borderless">
+          <div className="overview-icon"><ContainerOutlined /></div>
+          <div><Text type="secondary">{t('docker.totalContainers')}</Text><strong>{totals.containers}</strong></div>
+        </Card>
+        <Card className="overview-card overview-card-success" variant="borderless">
+          <div className="overview-icon"><CheckCircleOutlined /></div>
+          <div><Text type="secondary">{t('docker.runningContainers')}</Text><strong>{totals.running}</strong></div>
+        </Card>
+        <Card className={`overview-card ${undetected.length ? 'overview-card-amber' : 'overview-card-muted'}`} variant="borderless">
+          <div className="overview-icon"><QuestionCircleOutlined /></div>
+          <div><Text type="secondary">{t('docker.hostsWithout')}</Text><strong>{undetected.length}</strong></div>
+        </Card>
       </div>
 
       {initialLoading ? (
         <div style={{ textAlign: 'center', padding: 80 }}><Spin size="large" /></div>
-      ) : servers.length === 0 ? (
-        <Empty description={t('docker.noServers')} />
       ) : (
-        <Collapse
-          activeKey={activeKeys}
-          onChange={handleCollapseChange}
-          items={collapseItems}
-        />
+        <>
+          {servers.length === 0 ? (
+            <Card className="panel-card">
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('docker.noServers')} />
+            </Card>
+          ) : (
+            <Collapse
+              className="docker-hosts"
+              activeKey={activeKeys}
+              onChange={handleCollapseChange}
+              items={collapseItems}
+            />
+          )}
+
+          {/* Servers the collector has not seen Docker on. Listed rather than
+              hidden so a flag lost to a slow poll can be recovered here, on
+              demand, instead of waiting for a background poll to happen to
+              succeed. */}
+          {undetected.length > 0 && (
+            <div className="docker-undetected">
+              <div className="section-heading">
+                <div>
+                  <Title level={4}>{t('docker.undetectedTitle')}</Title>
+                  <Text type="secondary">{t('docker.undetectedHint')}</Text>
+                </div>
+              </div>
+              <div className="docker-undetected-list">
+                {undetected.map((server) => (
+                  <div key={server.id} className="docker-undetected-row">
+                    <span className={`server-platform ${server.server_type === 'windows' ? 'windows' : 'linux'}`}><CloudServerOutlined /></span>
+                    <div className="docker-host-identity">
+                      <strong>{server.name}</strong>
+                      <span>{server.host}</span>
+                    </div>
+                    <Space size={6}>
+                      <Tooltip title={t('docker.redetectHint')}>
+                        <Button size="small" icon={<SearchOutlined />}
+                          loading={redetecting === server.id}
+                          onClick={() => redetect(server)}>
+                          {t('docker.redetect')}
+                        </Button>
+                      </Tooltip>
+                      <Button size="small" type="text" icon={<ArrowRightOutlined />} onClick={() => navigate(`/servers/${server.id}`)} />
+                    </Space>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {logsTarget && (
