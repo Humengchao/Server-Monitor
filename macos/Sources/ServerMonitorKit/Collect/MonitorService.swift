@@ -347,6 +347,17 @@ public final class MonitorService: ObservableObject {
         return min(grown, Self.maxBackoff)
     }
 
+    /// Whether a server's backoff window is still open.
+    ///
+    /// The window is an absolute date, so a clock that moves backwards — an
+    /// NTP correction on a machine with a dead RTC, a restored VM snapshot —
+    /// would otherwise strand a host in a wait far longer than any backoff can
+    /// legitimately produce, with no way out but relaunching. A remaining wait
+    /// longer than the cap is not a backoff; it is a moved clock.
+    func isStillWaiting(until due: Date, now: Date) -> Bool {
+        due > now && due.timeIntervalSince(now) <= Self.maxBackoff
+    }
+
     /// Records a failed poll and pushes the next attempt out.
     func noteFailure(serverID: UUID, now: Date = Date()) {
         let streak = (failureStreak[serverID] ?? 0) + 1
@@ -397,7 +408,9 @@ public final class MonitorService: ObservableObject {
     func pollDue(ignoringBackoff: Bool = false, now: Date = Date()) -> [Task<Void, Never>] {
         servers.compactMap { server in
             guard !inFlight.contains(server.id) else { return nil }
-            if !ignoringBackoff, let due = retryAfter[server.id], due > now { return nil }
+            if !ignoringBackoff, let due = retryAfter[server.id], isStillWaiting(until: due, now: now) {
+                return nil
+            }
             inFlight.insert(server.id)
             return Task { [weak self] in
                 await self?.poll(server)

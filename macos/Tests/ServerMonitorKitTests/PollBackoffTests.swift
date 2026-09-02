@@ -54,6 +54,21 @@ struct PollBackoffTests {
         for task in later { task.cancel() }
     }
 
+    @Test func aBackwardClockJumpDoesNotStrandAHost() throws {
+        let monitor = try service()
+        let now = Date()
+        let due = now.addingTimeInterval(MonitorService.maxBackoff)
+        #expect(monitor.isStillWaiting(until: due, now: now), "a legitimate full-cap wait")
+
+        // The clock moved back an hour under us. Nothing the backoff can do
+        // produces a wait that long, so it must not be honoured — otherwise
+        // the host never polls again until the app is relaunched.
+        let after = now.addingTimeInterval(-3600)
+        #expect(!monitor.isStillWaiting(until: due, now: after))
+
+        #expect(!monitor.isStillWaiting(until: now.addingTimeInterval(-1), now: now), "already due")
+    }
+
     @Test func manualRefreshOverridesTheBackoff() throws {
         let monitor = try service()
         let server = Server(name: "gone", host: "10.255.255.1", username: "root", authKind: .agent)
