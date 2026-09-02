@@ -328,8 +328,9 @@ public final class MonitorService: ObservableObject {
     /// a poll already in flight are left to it rather than polled twice.
     public func pollAll() async {
         for task in pollDue() { await task.value }
-        // Deterministic for the caller: what it started is visible when it
-        // returns, not a quarter-second later.
+        // Deterministic for the caller: what it started is applied when this
+        // returns, not a quarter-second later — and regardless of visibility,
+        // since tests and the manual refresh both rely on it.
         flushPending()
     }
 
@@ -400,6 +401,24 @@ public final class MonitorService: ObservableObject {
     /// Results waiting to be applied together; see `commit`.
     private(set) var pending: [(serverID: UUID, apply: () -> Void)] = []
     private var flushScheduled = false
+
+    /// False while every window is hidden or fully covered.
+    ///
+    /// SwiftUI keeps evaluating and laying out views when a window is occluded
+    /// — AppKit only skips the drawing. Profiling nine hosts with the window
+    /// behind Finder put ~11% of a core in `sizeThatFits` and
+    /// `StackLayout.placeChildren` for a dashboard nobody could see. Holding
+    /// results back while nothing is visible removes that; collection, the
+    /// database and alerts are unaffected, and `windowBecameVisible()` applies
+    /// whatever accumulated so the first frame shown is current.
+    private(set) var uiIsVisible = true
+
+    /// Called from the app when window occlusion changes.
+    public func setUIVisible(_ visible: Bool) {
+        guard visible != uiIsVisible else { return }
+        uiIsVisible = visible
+        if visible { flushPending() }
+    }
     /// How long results are gathered before being applied as one change.
     static let publishWindow: Duration = .milliseconds(250)
 
@@ -415,6 +434,14 @@ public final class MonitorService: ObservableObject {
     /// dashboard redraws at most four times a second however many hosts there
     /// are. The first result after a quiet spell is not delayed at all.
     func commit(for serverID: UUID, _ apply: @escaping @MainActor () -> Void) {
+        // Nothing on screen: queue it and let `setUIVisible(true)` or the next
+        // `pollAll` apply it. The menu bar reads `peakCPU`/`offlineServers`,
+        // which are computed from this same state, so it catches up then too —
+        // it is a summary of a few numbers, not a view worth 11% of a core.
+        guard uiIsVisible else {
+            pending.append((serverID, apply))
+            return
+        }
         if flushScheduled {
             pending.append((serverID, apply))
             return
@@ -436,14 +463,26 @@ public final class MonitorService: ObservableObject {
     func flushPending() {
         flushScheduled = false
         guard !pending.isEmpty else { return }
+        // Only the most recent result per server matters: while hidden, a
+        // minute behind Finder queues a dozen snapshots per host and applying
+        // them in turn would lay the dashboard out a dozen times to show the
+        // last one.
+        var latestPerServer: [UUID: () -> Void] = [:]
+        var order: [UUID] = []
+        for item in pending {
+            if latestPerServer[item.serverID] == nil { order.append(item.serverID) }
+            latestPerServer[item.serverID] = item.apply
+        }
+        pending = order.compactMap { id in latestPerServer[id].map { (serverID: id, apply: $0) } }
         let batch = pending
         pending.removeAll()
         for item in batch where servers.contains(where: { $0.id == item.serverID }) {
             item.apply()
         }
         // A burst still arriving gets another window rather than an immediate
-        // publish per result.
-        scheduleFlush()
+        // publish per result — but not while hidden, where nothing should be
+        // waking up every 250 ms.
+        if uiIsVisible { scheduleFlush() }
     }
 
     /// Servers that failed their last poll, for the menu bar summary.

@@ -17,6 +17,19 @@ public final class Database: @unchecked Sendable {
     public let queue: any DatabaseWriter
 
     /// Where the store lives: ~/Library/Application Support/ServerMonitor.
+    /// A scratch store that cannot fail, for the launch path: if the on-disk
+    /// database will not open, the app still needs *a* store so the window can
+    /// render and explain why. Opening an in-memory SQLite and running the
+    /// migrations on it has no external dependency, but the initialiser is
+    /// throwing, and `try!` there would turn "your database is unreadable"
+    /// into "the app crashes on launch with no message".
+    ///
+    /// Returns nil only if even that fails, which nothing short of a broken
+    /// SQLite would cause — the caller then has a real problem to report.
+    public static func scratch() -> Database? {
+        try? Database(inMemory: true)
+    }
+
     public static func defaultURL() throws -> URL {
         let base = try FileManager.default.url(
             for: .applicationSupportDirectory,

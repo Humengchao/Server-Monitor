@@ -1,5 +1,7 @@
 import Foundation
-import UserNotifications
+// Not Sendable-audited: its completion types cross isolation boundaries that
+// Swift 6 would reject. The uses here are all main-actor.
+@preconcurrency import UserNotifications
 
 /// Turns poll results into desktop notifications.
 ///

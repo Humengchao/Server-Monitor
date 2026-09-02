@@ -123,14 +123,20 @@ public struct SSHTerminalView: NSViewRepresentable {
 
         public func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
 
+        // SwiftTerm does not document which thread these arrive on, so hop to
+        // the main actor rather than assert we are already there:
+        // `assumeIsolated` traps if the assumption is ever wrong, turning a
+        // would-be data race into a crash. `session` is main-actor state.
         public func setTerminalTitle(source: LocalProcessTerminalView, title: String) {
-            MainActor.assumeIsolated { session.retitled(title) }
+            let session = session
+            Task { @MainActor in session.retitled(title) }
         }
 
         public func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
 
         public func processTerminated(source: TerminalView, exitCode: Int32?) {
-            MainActor.assumeIsolated { session.ended(code: exitCode) }
+            let session = session
+            Task { @MainActor in session.ended(code: exitCode) }
         }
     }
 }

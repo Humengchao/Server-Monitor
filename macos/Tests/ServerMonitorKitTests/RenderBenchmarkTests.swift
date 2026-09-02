@@ -553,6 +553,118 @@ struct RenderBenchmarkTests {
         }
     }
 
+    /// The local cost of one poll's parse. Nine hosts at a 5 s interval is
+    /// ~1.8 of these a second, on the collector.
+    @Test func parseCostOfOneRealBatch() {
+        guard Self.enabled else { return }
+        // Shaped like a real host: 16 cores, 40 interfaces (a docker box), a
+        // full ps listing, several mounts.
+        let stat: String = (["cpu  100 5 50 900 20 3 2 0 0 0"] + (0..<16).map {
+            "cpu\($0) \(6 + $0) 0 3 56 1 0 0 0 0 0"
+        }).joined(separator: "\n")
+        let meminfo: String = (0..<48).map { "Field\($0):  \(1000 + $0) kB" }.joined(separator: "\n")
+            + "\nMemTotal:  32900000 kB\nMemFree:  1200000 kB\nBuffers:  1300000 kB"
+            + "\nCached:  18800000 kB\nSwapTotal: 2000000 kB\nSwapFree: 1500000 kB"
+        let netdev: String = "Inter-|   Receive\n face |bytes\n" + (0..<40).map {
+            "  eth\($0): \(900000 + $0) 9 0 0 0 0 0 0 \(700000 + $0) 7 0 0 0 0 0 0"
+        }.joined(separator: "\n")
+        let diskstats: String = (0..<12).map { index in
+            let name = String(UnicodeScalar(97 + index)!)
+            return String("   8  \(index) sd\(name) 1 2 \(30000 + index) 4 5 6 \(40000 + index) 8 9 10 11 12 13 14")
+        }.joined(separator: "\n")
+        let ps: String = (0..<30).map {
+            "  \(1000 + $0) root      \(Double($0) / 2)  1.\($0 % 10)  \(50000 + $0) /usr/bin/some-daemon --flag=\($0) --path /var/lib/thing"
+        }.joined(separator: "\n")
+        let df: String = "Filesystem 1024-blocks Used Available Capacity Mounted on\n" + (0..<6).map { index in
+            let name = String(UnicodeScalar(97 + index)!)
+            return String("/dev/vd\(name) 84421599232 30799843328 49318871040 39% /mnt\(index)")
+        }.joined(separator: "\n")
+        let hostInfo: String = ["host=web-1", "kern=6.8.0-134-generic", "arch=x86_64",
+                        "os=Ubuntu 24.04.4 LTS", "ips=10.0.0.5 172.17.0.1",
+                        "cpu=Intel(R) Xeon(R) Platinum 8269CY CPU @ 2.50GHz"].joined(separator: "\n")
+        let sections: [String] = [
+            "1756000000000000000", stat, stat, meminfo, "1.2 2.1 1.8 1/900 12345",
+            netdev, diskstats, "123456.78 987654.32", "16", df, ps, hostInfo,
+            "", "29.1.3|20|8|3|0", "1756000000500000000",
+        ]
+        let separator: String = "\n" + ProcParsers.sectionSeparator + "\n"
+        let output: String = sections.joined(separator: separator)
+        print("\n-- parse of one poll's output (\(output.utf8.count / 1024) KB) --")
+
+        func time(_ label: String, runs: Int = 200, _ block: () -> Void) {
+            block()
+            let started = Date()
+            for _ in 0..<runs { block() }
+            let ms = Date().timeIntervalSince(started) * 1000 / Double(runs)
+            print(String(format: "  %-38@ %7.2f ms  -> %4.1f%% of a core at 1.8/s",
+                         label as NSString, ms, ms * 1.8 / 10))
+        }
+
+        let wanted = ProcParsers.Section.allCases.count
+        time("splitSections only") { _ = ProcParsers.splitSections(output, want: wanted) }
+        let parts = ProcParsers.splitSections(output, want: wanted)
+        func part(_ section: ProcParsers.Section) -> String { parts[section.rawValue] }
+        time("cpu: percent + cores + breakdown") {
+            _ = ProcParsers.cpuPercent(first: part(.statFirst), second: part(.statSecond))
+            _ = ProcParsers.coreLoads(first: part(.statFirst), second: part(.statSecond))
+            _ = ProcParsers.cpuBreakdown(first: part(.statFirst), second: part(.statSecond))
+        }
+        time("memInfo + memoryBreakdown") {
+            _ = ProcParsers.memInfo(part(.memInfo))
+            _ = ProcParsers.memoryBreakdown(part(.memInfo))
+        }
+        time("netDev + netInterfaces") {
+            _ = ProcParsers.netDev(part(.netDev))
+            _ = ProcParsers.netInterfaces(part(.netDev))
+        }
+        time("processes") { _ = ProcParsers.processes(part(.processes)) }
+        time("filesystems + diskUsage") {
+            _ = ProcParsers.filesystems(part(.diskUsage))
+            _ = ProcParsers.diskUsage(part(.diskUsage))
+        }
+        time("the rest") {
+            _ = ProcParsers.diskStats(part(.diskStats))
+            _ = ProcParsers.loadAverage(part(.loadAvg))
+            _ = ProcParsers.hostIdentity(part(.hostInfo))
+            _ = ProcParsers.gpuStatus(part(.gpu))
+            _ = ProcParsers.uptime(part(.uptime))
+            _ = ProcParsers.cores(part(.nproc))
+        }
+    }
+
+    /// Where the steady-state CPU actually goes: each poll spawns an ssh
+    /// client, and each host also gets a ping every 30 s.
+    @Test func subprocessSpawnCost() async throws {
+        guard Self.enabled else { return }
+        func time(_ label: String, runs: Int, _ block: () async throws -> Void) async rethrows {
+            try await block()
+            let started = Date()
+            let cpuBefore = Self.processCPUSeconds()
+            for _ in 0..<runs { try await block() }
+            let wall = Date().timeIntervalSince(started) / Double(runs) * 1000
+            let cpu = (Self.processCPUSeconds() - cpuBefore) / Double(runs) * 1000
+            print(String(format: "  %-34@ wall %6.1f ms   our CPU %5.2f ms", label as NSString, wall, cpu))
+        }
+        print("\n-- subprocess cost (this process's own CPU, not the child's) --")
+        await time("spawn /usr/bin/true", runs: 60) {
+            _ = try? await SSHRunner.execute(executable: "/usr/bin/true", arguments: [], timeout: 5)
+        }
+        await time("spawn ssh (usage, no connect)", runs: 40) {
+            _ = try? await SSHRunner.execute(executable: "/usr/bin/ssh", arguments: ["-V"], timeout: 5)
+        }
+        print("  → 9 hosts / 5 s = 1.8 spawns/s, plus a ping per host per 30 s")
+    }
+
+    /// This process's consumed CPU, for attributing cost to our side rather
+    /// than the child's.
+    static func processCPUSeconds() -> Double {
+        var usage = rusage()
+        guard getrusage(RUSAGE_SELF, &usage) == 0 else { return 0 }
+        let user = Double(usage.ru_utime.tv_sec) + Double(usage.ru_utime.tv_usec) / 1e6
+        let system = Double(usage.ru_stime.tv_sec) + Double(usage.ru_stime.tv_usec) / 1e6
+        return user + system
+    }
+
     @Test func trafficBars() throws {
         guard Self.enabled else { return }
         let localization = Localization()

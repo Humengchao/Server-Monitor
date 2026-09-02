@@ -277,7 +277,9 @@ struct PollingActivityTests {
         #expect(monitor.pending.count == 5)
 
         try await Task.sleep(for: .milliseconds(400))      // past the 250 ms window
-        #expect(applied == 6, "the flush applied the whole burst")
+        // One flush, and the queue is collapsed to the newest per server —
+        // five snapshots of one host are five layout passes to show the last.
+        #expect(applied == 2, "the flush applied the newest queued result")
         #expect(monitor.pending.isEmpty)
     }
 
@@ -307,6 +309,74 @@ struct PollingActivityTests {
         monitor.flushPending()
         #expect(doomedApplied == 0, "a deleted server's queued result must not resurrect it")
         #expect(keptApplied == 2)
+    }
+
+    @Test func nothingIsPublishedWhileEveryWindowIsHidden() async throws {
+        // SwiftUI lays views out even when the window is covered; the profile
+        // showed ~11% of a core in sizeThatFits for a dashboard nobody could
+        // see. Results must queue instead.
+        let monitor = try service()
+        try monitor.addServer(refusingServer())
+        let id = monitor.servers[0].id
+        var applied = 0
+
+        monitor.setUIVisible(false)
+        for _ in 0..<4 { monitor.commit(for: id) { applied += 1 } }
+        #expect(applied == 0, "hidden: nothing should reach the view tree")
+        #expect(monitor.pending.count == 4)
+
+        // And no 250 ms timer running in the background for nothing.
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(applied == 0, "a flush fired while hidden")
+
+        monitor.setUIVisible(true)
+        #expect(applied == 1, "showing the window applies the latest per server, not all four")
+        #expect(monitor.pending.isEmpty)
+    }
+
+    @Test func onlyTheNewestResultPerServerSurvivesTheQueue() throws {
+        // A minute behind Finder queues a dozen snapshots per host; laying the
+        // dashboard out a dozen times to arrive at the last one is pointless.
+        let monitor = try service()
+        try monitor.addServer(refusingServer())
+        try monitor.addServer(Server(name: "b", host: "127.0.0.1", port: 1, username: "u", authKind: .agent))
+        let first = monitor.servers[0].id, second = monitor.servers[1].id
+        var order: [String] = []
+
+        monitor.setUIVisible(false)
+        monitor.commit(for: first) { order.append("a1") }
+        monitor.commit(for: second) { order.append("b1") }
+        monitor.commit(for: first) { order.append("a2") }
+        monitor.commit(for: second) { order.append("b2") }
+        monitor.setUIVisible(true)
+        #expect(order == ["a2", "b2"], "got \(order): newest per server, in first-seen order")
+    }
+
+    @Test func visibilityChangesAreIdempotent() throws {
+        let monitor = try service()
+        try monitor.addServer(refusingServer())
+        let id = monitor.servers[0].id
+        var applied = 0
+        monitor.setUIVisible(true)                 // already visible
+        monitor.commit(for: id) { applied += 1 }
+        #expect(applied == 1)
+        monitor.setUIVisible(false)
+        monitor.setUIVisible(false)                // repeated: no flush
+        monitor.commit(for: id) { applied += 1 }
+        #expect(applied == 1)
+        monitor.setUIVisible(true)
+        #expect(applied == 2)
+        monitor.setUIVisible(true)                 // repeated: nothing left
+        #expect(applied == 2)
+    }
+
+    @Test func manualRefreshAppliesEvenWhileHidden() async throws {
+        // The menu bar's refresh works with no window on screen.
+        let monitor = try service()
+        try monitor.addServer(refusingServer())
+        monitor.setUIVisible(false)
+        await monitor.pollAll()
+        #expect(monitor.status[monitor.servers[0].id] != nil, "a manual refresh must still land")
     }
 
     @Test func manualRefreshWaitsForWhatItStarted() async throws {
@@ -340,3 +410,39 @@ struct UpdateOSKindTests {
         #expect(stored.tags == ["prod"], "the poll clobbered the tags")
     }
 }
+
+@Suite("Startup fallback")
+struct StartupFallbackTests {
+
+    @Test func aScratchStoreOpensAndIsUsable() throws {
+        // The launch path falls back to this when the on-disk store will not
+        // open. It used to be reached with `try!`, so a failure here crashed
+        // the app before it could say anything.
+        let scratch = try #require(Database.scratch())
+        // Fully migrated, not just opened: the window still renders lists.
+        var server = Server(name: "s", host: "h", username: "u", authKind: .agent)
+        server.tags = ["t"]
+        try scratch.save(server)
+        #expect(try scratch.allServers().count == 1)
+        #expect(try scratch.allGroups().isEmpty)
+        #expect(try scratch.allIdentities().isEmpty)
+    }
+
+    @Test func scratchStoresAreIndependent() throws {
+        // Each is its own in-memory database; one must not see the other's rows.
+        let a = try #require(Database.scratch())
+        let b = try #require(Database.scratch())
+        try a.save(Server(name: "only-in-a", host: "h", username: "u", authKind: .agent))
+        #expect(try a.allServers().count == 1)
+        #expect(try b.allServers().isEmpty)
+    }
+
+    @Test func openingAnUnwritablePathFailsRatherThanTrapping() {
+        // The condition the fallback exists for: the real store cannot open.
+        // It must surface as a thrown error, not a crash.
+        #expect(throws: (any Error).self) {
+            _ = try Database(url: URL(fileURLWithPath: "/dev/null/nope/monitor.sqlite"))
+        }
+    }
+}
+

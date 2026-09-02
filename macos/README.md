@@ -100,7 +100,7 @@ full handshake.
 ```bash
 cd macos
 swift build            # compile
-swift test             # 261 tests, fully offline
+swift test             # 270 tests, fully offline
 ./scripts/bundle.sh    # -> dist/Server Monitor.app
 MAKE_DMG=1 ./scripts/bundle.sh   # also produce a .dmg
 
