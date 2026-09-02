@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import SwiftUI
 
 /// Whether the last collection attempt for a server succeeded.
@@ -44,6 +45,10 @@ public final class MonitorService: ObservableObject {
     private let collector: MetricsCollector
     private var pollTask: Task<Void, Never>?
     private var maintenanceTask: Task<Void, Never>?
+    private var pathMonitor: NWPathMonitor?
+    /// Nil until the first path update, so starting up is not mistaken for a
+    /// network that just came back.
+    private var networkWasSatisfied: Bool?
     /// Held while polling, to keep macOS App Nap from freezing the poll loop's
     /// timer when the window is in the background. Exposed only so a test can
     /// assert the start/stop contract.
@@ -269,6 +274,7 @@ public final class MonitorService: ObservableObject {
             options: .userInitiatedAllowingIdleSystemSleep,
             reason: "Polling monitored servers"
         )
+        watchNetworkPath()
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
@@ -303,6 +309,9 @@ public final class MonitorService: ObservableObject {
         maintenanceTask?.cancel()
         pollTask = nil
         maintenanceTask = nil
+        pathMonitor?.cancel()
+        pathMonitor = nil
+        networkWasSatisfied = nil
         if let pollingActivity {
             ProcessInfo.processInfo.endActivity(pollingActivity)
             self.pollingActivity = nil
@@ -351,6 +360,35 @@ public final class MonitorService: ObservableObject {
     func noteSuccess(serverID: UUID) {
         failureStreak[serverID] = nil
         retryAfter[serverID] = nil
+    }
+
+    /// Watches the local network path.
+    ///
+    /// On a laptop the usual reason every host fails at once is this machine,
+    /// not nine servers: a closed lid, a train, a different Wi-Fi. Without
+    /// this, the backoff built up during the outage keeps the fleet dark for
+    /// up to five minutes after the network is already back.
+    private func watchNetworkPath() {
+        guard pathMonitor == nil else { return }
+        let monitor = NWPathMonitor()
+        pathMonitor = monitor
+        monitor.pathUpdateHandler = { [weak self] path in
+            // Only a Bool crosses actors; the path itself stays on its queue.
+            let satisfied = path.status == .satisfied
+            Task { @MainActor in self?.networkPathChanged(satisfied: satisfied) }
+        }
+        monitor.start(queue: DispatchQueue(label: "com.hmc.ServerMonitor.network"))
+    }
+
+    /// Clears every backoff when the network returns, and polls at once.
+    func networkPathChanged(satisfied: Bool) {
+        defer { networkWasSatisfied = satisfied }
+        // The first update is just the current state, not a transition.
+        guard let previous = networkWasSatisfied else { return }
+        guard satisfied, !previous else { return }
+        failureStreak.removeAll()
+        retryAfter.removeAll()
+        _ = pollDue()
     }
 
     /// Starts a poll for every server not already being polled, and returns

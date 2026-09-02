@@ -96,6 +96,37 @@ struct PollBackoffTests {
         #expect(monitor.backoffDelay(streak: 1) == 0)
     }
 
+    @Test func theNetworkComingBackClearsEveryBackoff() throws {
+        let monitor = try service()
+        let a = UUID(), b = UUID()
+        for _ in 1...10 { monitor.noteFailure(serverID: a); monitor.noteFailure(serverID: b) }
+
+        // The first update is the current state, not a transition: it must not
+        // be mistaken for a recovery.
+        monitor.networkPathChanged(satisfied: true)
+        #expect(monitor.retryAfter[a] != nil, "startup is not a recovery")
+
+        monitor.networkPathChanged(satisfied: false)
+        monitor.networkPathChanged(satisfied: true)
+        // Nine hosts failing at once is almost always this machine — a lid, a
+        // train, a different Wi-Fi — so the whole fleet is retried, not just
+        // whichever host happened to come due first.
+        #expect(monitor.retryAfter.isEmpty)
+        #expect(monitor.failureStreak.isEmpty)
+    }
+
+    @Test func stayingOfflineDoesNotClearAnything() throws {
+        let monitor = try service()
+        let id = UUID()
+        monitor.networkPathChanged(satisfied: true)   // establish a baseline
+        for _ in 1...10 { monitor.noteFailure(serverID: id) }
+
+        monitor.networkPathChanged(satisfied: false)
+        monitor.networkPathChanged(satisfied: false)
+        // Losing the network, or hearing about it twice, is not a recovery.
+        #expect(monitor.retryAfter[id] != nil)
+    }
+
     @Test func deletingAServerForgetsItsBackoff() throws {
         let monitor = try service()
         let server = Server(name: "gone", host: "10.255.255.1", username: "root", authKind: .agent)
