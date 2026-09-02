@@ -79,7 +79,7 @@ struct CounterCard: View {
                 .foregroundStyle(.secondary)
             HStack(spacing: 8) {
                 Circle().fill(tint).frame(width: 9, height: 9)
-                Text("\(value)")
+                Text(verbatim: "\(value)")
                     .font(.system(.title, design: .rounded, weight: .semibold))
                     .monospacedDigit()
             }

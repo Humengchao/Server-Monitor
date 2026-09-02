@@ -57,9 +57,15 @@ public struct MenuBarPanel: View {
             Text(loc.t("app.title")).font(.headline)
             Spacer()
             if offline > 0 {
-                Label("\(offline)", systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.red)
+                // Not Label("\(offline)", …): that argument is a
+                // LocalizedStringKey, which groups digits.
+                Label {
+                    Text(verbatim: String(offline))
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.red)
             } else {
                 Label(loc.t("common.online"), systemImage: "checkmark.circle.fill")
                     .font(.caption)
@@ -85,10 +91,11 @@ public struct MenuBarPanel: View {
                     metric("CPU", snapshot.cpuPercent)
                     metric(loc.t("metric.memory"), snapshot.memoryPercent)
                 }
-            } else if case .offline = status {
+            } else if case .offline(let reason) = status {
                 Text(loc.t("common.offline"))
                     .font(.caption2)
                     .foregroundStyle(.red)
+                    .help(reason)
             } else {
                 ProgressView().controlSize(.small)
             }
@@ -149,11 +156,11 @@ public struct MenuBarLabel: View {
         HStack(spacing: 3) {
             Image(systemName: offline > 0 ? "bolt.trianglebadge.exclamationmark" : "bolt.horizontal")
             if offline > 0 {
-                Text("\(offline)").font(.caption2.weight(.bold))
+                Text(verbatim: "\(offline)").font(.caption2.weight(.bold))
             } else if let peak = monitor.peakCPU {
                 // Showing the busiest host means the icon carries information
                 // even when everything is healthy.
-                Text("\(Int(peak.percent.rounded()))%")
+                Text(verbatim: "\(Int(peak.percent.rounded()))%")
                     .font(.caption2)
                     .monospacedDigit()
             }

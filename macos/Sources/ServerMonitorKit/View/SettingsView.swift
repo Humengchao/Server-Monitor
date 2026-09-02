@@ -23,7 +23,7 @@ public struct SettingsView: View {
             Section {
                 Picker(loc.t("settings.pollInterval"), selection: $settings.pollInterval) {
                     ForEach(AppSettings.allowedIntervals, id: \.self) { value in
-                        Text("\(Int(value)) \(loc.t("settings.seconds"))").tag(value)
+                        Text(verbatim: "\(Int(value)) \(loc.t("settings.seconds"))").tag(value)
                     }
                 }
                 Text(loc.t("settings.pollIntervalHelp"))
@@ -34,7 +34,7 @@ public struct SettingsView: View {
             Section {
                 Picker(loc.t("settings.retention"), selection: $settings.retentionDays) {
                     ForEach(AppSettings.allowedRetention, id: \.self) { value in
-                        Text("\(value) \(loc.t("settings.days"))").tag(value)
+                        Text(verbatim: "\(value) \(loc.t("settings.days"))").tag(value)
                     }
                 }
                 Text(loc.t("settings.retentionHelp"))
@@ -77,7 +77,7 @@ public struct SettingsView: View {
                 }
                 Picker(loc.t("settings.terminalFontSize"), selection: $settings.terminalFontSize) {
                     ForEach(AppSettings.terminalFontSizes, id: \.self) { size in
-                        Text("\(Int(size)) pt").tag(size)
+                        Text(verbatim: "\(Int(size)) pt").tag(size)
                     }
                 }
             }

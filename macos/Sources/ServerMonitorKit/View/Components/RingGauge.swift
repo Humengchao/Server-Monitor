@@ -34,7 +34,7 @@ public struct RingGauge: View {
                 .rotationEffect(.degrees(-90))
                 .animation(.easeOut(duration: 0.35), value: value)
 
-            Text("\(Int(value.rounded()))%")
+            Text(verbatim: "\(Int(value.rounded()))%")
                 .font(.system(size: diameter * 0.26, weight: .semibold, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(.primary)

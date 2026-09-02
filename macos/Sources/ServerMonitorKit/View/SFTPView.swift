@@ -95,7 +95,7 @@ struct SFTPView: View {
                 Text(busy).font(.caption2).foregroundStyle(.secondary)
             }
             if !selection.isEmpty {
-                Text("\(selection.count)").font(.caption2).foregroundStyle(.secondary)
+                Text(verbatim: "\(selection.count)").font(.caption2).foregroundStyle(.secondary)
                 Button {
                     Task { await downloadSelected() }
                 } label: {

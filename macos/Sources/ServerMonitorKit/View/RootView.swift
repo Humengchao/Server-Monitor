@@ -279,7 +279,7 @@ public struct RootView: View {
                         .foregroundStyle(.red)
                         .help(reason)
                 } else if let snapshot = monitor.latest[server.id] {
-                    Text("CPU \(Format.percent(snapshot.cpuPercent))")
+                    Text(verbatim: "CPU \(Format.percent(snapshot.cpuPercent))")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .monospacedDigit()

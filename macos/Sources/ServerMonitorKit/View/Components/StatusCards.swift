@@ -81,7 +81,7 @@ struct StatusCPUCard: View {
                     VStack(spacing: 4) {
                         RingGauge(value: snapshot.cpuPercent, diameter: 74, lineWidth: 8)
                         if snapshot.cores > 0 {
-                            Text("\(snapshot.cores) \(loc.t("card.cores"))")
+                            Text(verbatim: "\(snapshot.cores) \(loc.t("card.cores"))")
                                 .font(.system(size: 9))
                                 .foregroundStyle(.secondary)
                         }
@@ -181,7 +181,7 @@ struct StatusCPUCard: View {
     private func coreBarContent(_ core: CoreLoad) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 4) {
-                Text("#\(core.index)")
+                Text(verbatim: "#\(core.index)")
                     .font(.system(size: 9, design: .rounded))
                     .foregroundStyle(.tertiary)
                 Spacer(minLength: 0)

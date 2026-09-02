@@ -94,7 +94,7 @@ struct MachinesView: View {
                 .frame(width: 4, height: 34)
             VStack(alignment: .leading, spacing: 3) {
                 Text(group.name).font(.body.weight(.medium)).lineLimit(1)
-                Text("\(loc.t("group.machines", "\(members.count)")) · \(online) \(loc.t("common.online"))")
+                Text(verbatim: "\(loc.t("group.machines", "\(members.count)")) · \(online) \(loc.t("common.online"))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

@@ -117,7 +117,7 @@ struct StatusNetworkCard: View {
                     .monospacedDigit()
                     .foregroundStyle(.orange)
             }
-            Text("↓ \(Format.bytes(interface.rxTotal))   ↑ \(Format.bytes(interface.txTotal))")
+            Text(verbatim: "↓ \(Format.bytes(interface.rxTotal))   ↑ \(Format.bytes(interface.txTotal))")
                 .font(.system(size: 9))
                 .monospacedDigit()
                 .foregroundStyle(.tertiary)
@@ -157,7 +157,7 @@ struct StatusProcessCard: View {
 
     var body: some View {
         StatusCard(title: loc.t("card.processes"), systemImage: "list.bullet.rectangle", tint: .pink) {
-            Text("\(snapshot.processes.count)")
+            Text(verbatim: "\(snapshot.processes.count)")
                 .font(.caption)
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
@@ -532,7 +532,7 @@ struct StatusGPUCard: View {
     private func gpuRow(_ gpu: GPUInfo) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 6) {
-                Text("#\(gpu.index)")
+                Text(verbatim: "#\(gpu.index)")
                     .font(.system(size: 9, design: .rounded))
                     .foregroundStyle(.tertiary)
                 Text(gpu.name).font(.caption.weight(.medium)).lineLimit(1)
