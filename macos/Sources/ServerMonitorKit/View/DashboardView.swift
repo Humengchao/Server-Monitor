@@ -242,11 +242,14 @@ struct ServerCardHeader: View {
                     .monospacedDigit()
                     .foregroundStyle(ServerCardHeader.latencyTint(milliseconds))
             }
-        case .offline:
+        case .offline(let reason):
             HStack(spacing: 6) {
                 Circle().fill(.red).frame(width: 8, height: 8)
                 Text(loc.t("common.offline")).font(.callout).foregroundStyle(.red)
             }
+            // The reason is spelled out in the detail header; on the dashboard
+            // it has to fit in a hover, or the card loses its fixed height.
+            .help(reason)
         case .polling, .unknown:
             ProgressView().controlSize(.small)
         }
@@ -260,11 +263,26 @@ struct ServerFactsRow: View {
     @EnvironmentObject private var monitor: MonitorService
     @EnvironmentObject private var loc: Localization
 
+    /// A host we have never reached has zeroes in its row, not measurements.
+    /// Printing "0 Cores" states a fact we do not have.
+    private func known(_ value: Int64, _ text: @autoclosure () -> String) -> String {
+        value > 0 ? text() : "—"
+    }
+
     var body: some View {
         HStack(spacing: 18) {
-            FactChip(systemImage: "cpu", text: "\(server.cores) Cores")
-            FactChip(systemImage: "memorychip", text: Format.bytes(server.memoryTotal))
-            FactChip(systemImage: "internaldrive", text: Format.bytes(server.diskTotal))
+            FactChip(
+                systemImage: "cpu",
+                text: known(Int64(server.cores), "\(server.cores) \(loc.t("metric.cores"))")
+            )
+            FactChip(
+                systemImage: "memorychip",
+                text: known(server.memoryTotal, Format.bytes(server.memoryTotal))
+            )
+            FactChip(
+                systemImage: "internaldrive",
+                text: known(server.diskTotal, Format.bytes(server.diskTotal))
+            )
             if let snapshot = monitor.latest[server.id], snapshot.uptimeSeconds > 0 {
                 FactChip(
                     systemImage: "power",

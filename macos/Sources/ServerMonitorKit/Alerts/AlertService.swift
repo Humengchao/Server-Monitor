@@ -160,7 +160,7 @@ public final class AlertService: ObservableObject {
     /// Guarded on the bundle identifier because `UNUserNotificationCenter`
     /// raises an Objective-C exception in a process with no bundle — which is
     /// exactly how the test runner executes.
-    public static let systemDelivery: AlertDelivery = { title, body in
+    nonisolated public static let systemDelivery: AlertDelivery = { title, body in
         guard Bundle.main.bundleIdentifier != nil else { return }
         let content = UNMutableNotificationContent()
         content.title = title
@@ -177,7 +177,7 @@ public final class AlertService: ObservableObject {
 
 /// Where a notification is handed off. Injected so tests can observe what would
 /// be delivered without a notification centre.
-public typealias AlertDelivery = @MainActor (_ title: String, _ body: String) -> Void
+public typealias AlertDelivery = @MainActor @Sendable (_ title: String, _ body: String) -> Void
 
 /// Notification text. Separate from `Localization` because alerts are produced
 /// off the view tree, where the environment object is not reachable.

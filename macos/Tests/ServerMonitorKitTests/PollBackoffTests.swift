@@ -1,0 +1,112 @@
+import Foundation
+import Testing
+@testable import ServerMonitorKit
+
+/// A host that is simply gone costs a 10 s connect timeout and one held ssh
+/// process per attempt. Before the backoff, the app paid that forever.
+@Suite("Poll backoff")
+@MainActor
+struct PollBackoffTests {
+
+    private func service() throws -> MonitorService {
+        let settings = AppSettings()
+        settings.pollInterval = 5
+        return MonitorService(database: try Database(inMemory: true), settings: settings)
+    }
+
+    @Test func firstFailureRetriesImmediately() throws {
+        let monitor = try service()
+        // One blip should not delay anything: a five-second gap is already the
+        // normal cadence, and a single dropped poll is unremarkable.
+        #expect(monitor.backoffDelay(streak: 1) == 0)
+    }
+
+    @Test func delayGrowsGeometricallyThenStops() throws {
+        let monitor = try service()
+        #expect(monitor.backoffDelay(streak: 2) == 10)
+        #expect(monitor.backoffDelay(streak: 3) == 20)
+        #expect(monitor.backoffDelay(streak: 4) == 40)
+        #expect(monitor.backoffDelay(streak: 8) == 300, "capped, not unbounded")
+        #expect(monitor.backoffDelay(streak: 40) == MonitorService.maxBackoff)
+    }
+
+    @Test func theCapKeepsRecoveryNoticeable() throws {
+        let monitor = try service()
+        // The point of the cap: a host that comes back is seen within minutes,
+        // not hours. Anything much larger turns the monitor into a stale panel.
+        #expect(MonitorService.maxBackoff <= 300)
+    }
+
+    @Test func aWaitingServerIsSkippedUntilItsTimeComes() throws {
+        let monitor = try service()
+        let server = Server(name: "gone", host: "10.255.255.1", username: "root", authKind: .agent)
+        try monitor.addServer(server)
+        let stored = try #require(monitor.servers.first)
+
+        let now = Date()
+        // Three failures => a 20 s wait, through the same call the poll's
+        // catch block makes.
+        for _ in 1...3 { monitor.noteFailure(serverID: stored.id, now: now) }
+        #expect(monitor.pollDue(now: now).isEmpty, "still inside its backoff window")
+
+        let later = monitor.pollDue(now: now.addingTimeInterval(21))
+        #expect(later.count == 1, "polled again once the window passes")
+        for task in later { task.cancel() }
+    }
+
+    @Test func manualRefreshOverridesTheBackoff() throws {
+        let monitor = try service()
+        let server = Server(name: "gone", host: "10.255.255.1", username: "root", authKind: .agent)
+        try monitor.addServer(server)
+        let stored = try #require(monitor.servers.first)
+
+        let now = Date()
+        for _ in 1...10 { monitor.noteFailure(serverID: stored.id, now: now) }
+        // Clicking refresh means "try now" — skipping the host the user is
+        // most likely asking about would make the button look broken.
+        let tasks = monitor.pollDue(ignoringBackoff: true, now: now)
+        #expect(tasks.count == 1)
+        for task in tasks { task.cancel() }
+    }
+
+    @Test func editingAServerClearsItsBackoff() throws {
+        let monitor = try service()
+        let server = Server(name: "typo", host: "10.255.255.1", username: "root", authKind: .agent)
+        try monitor.addServer(server)
+        var stored = try #require(monitor.servers.first)
+        for _ in 1...10 { monitor.noteFailure(serverID: stored.id) }
+
+        stored.host = "10.0.0.9"
+        try monitor.updateServer(stored)
+        #expect(monitor.retryAfter[stored.id] == nil, "the edit is the fix; retry at once")
+        #expect(monitor.failureStreak[stored.id] == nil)
+    }
+
+    @Test func recoveryClearsTheBackoffAtOnce() throws {
+        let monitor = try service()
+        let id = UUID()
+        for _ in 1...10 { monitor.noteFailure(serverID: id) }
+        #expect(monitor.retryAfter[id] != nil)
+
+        monitor.noteSuccess(serverID: id)
+        // A host that answers is back on the normal cadence immediately —
+        // it must not serve out the rest of a five-minute penalty.
+        #expect(monitor.retryAfter[id] == nil)
+        #expect(monitor.failureStreak[id] == nil)
+        #expect(monitor.backoffDelay(streak: 1) == 0)
+    }
+
+    @Test func deletingAServerForgetsItsBackoff() throws {
+        let monitor = try service()
+        let server = Server(name: "gone", host: "10.255.255.1", username: "root", authKind: .agent)
+        try monitor.addServer(server)
+        let stored = try #require(monitor.servers.first)
+        for _ in 1...10 { monitor.noteFailure(serverID: stored.id) }
+
+        try monitor.deleteServer(stored)
+        // A re-added host with the same UUID would otherwise inherit a
+        // stranger's backoff.
+        #expect(monitor.retryAfter[stored.id] == nil)
+        #expect(monitor.failureStreak[stored.id] == nil)
+    }
+}

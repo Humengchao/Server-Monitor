@@ -272,11 +272,12 @@ public struct RootView: View {
             }
             VStack(alignment: .leading, spacing: 1) {
                 Text(server.name).lineLimit(1)
-                if case .offline = monitor.status[server.id] ?? .unknown {
+                if case .offline(let reason) = monitor.status[server.id] ?? .unknown {
                     // Not the last snapshot's CPU: that reads as a live figure.
                     Text(loc.t("common.offline"))
                         .font(.caption2)
                         .foregroundStyle(.red)
+                        .help(reason)
                 } else if let snapshot = monitor.latest[server.id] {
                     Text("CPU \(Format.percent(snapshot.cpuPercent))")
                         .font(.caption2)

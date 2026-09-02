@@ -166,10 +166,10 @@ public struct ServerDetailView: View {
             ServerCardHeader(server: server)
             ServerFactsRow(server: server)
             if case .offline(let reason) = status {
-            Label(reason, systemImage: "exclamationmark.triangle.fill")
-                .font(.caption)
-                .foregroundStyle(.red)
-                .textSelection(.enabled)
+                Label(reason, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
             }
         }
         .padding(14)

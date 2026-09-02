@@ -92,6 +92,9 @@ public final class MonitorService: ObservableObject {
         if let previous {
             Task { await collector.forget(target: previous) }
         }
+        // Editing a failing host is usually the fix for it. Sitting out a
+        // five-minute backoff afterwards would look like the edit did nothing.
+        noteSuccess(serverID: server.id)
         reload()
     }
 
@@ -104,6 +107,8 @@ public final class MonitorService: ObservableObject {
         alerts?.forget(serverID: server.id)
         latest.removeValue(forKey: server.id)
         status.removeValue(forKey: server.id)
+        failureStreak.removeValue(forKey: server.id)
+        retryAfter.removeValue(forKey: server.id)
         pending.removeAll { $0.serverID == server.id }
         reload()
     }
@@ -310,12 +315,51 @@ public final class MonitorService: ObservableObject {
     /// a queue of ssh processes behind it.
     private(set) var inFlight: Set<UUID> = []
 
+    // MARK: - Failure backoff
+
+    /// Consecutive failed polls per server, reset by any success.
+    private(set) var failureStreak: [UUID: Int] = [:]
+    /// Earliest time `pollDue` will try a server again.
+    private(set) var retryAfter: [UUID: Date] = [:]
+
+    /// Longest a failing host waits between attempts. It still gets retried
+    /// often enough that a recovery is noticed within a few minutes.
+    static let maxBackoff: TimeInterval = 300
+
+    /// A host that is simply gone costs a full 10 s connect timeout per
+    /// attempt, and one held ssh process the whole time. Polling it on the
+    /// normal 5 s cadence means doing that forever — on battery, for a host
+    /// that has been down all day. Back off geometrically instead, and reset
+    /// the moment it answers.
+    func backoffDelay(streak: Int) -> TimeInterval {
+        guard streak > 1 else { return 0 }
+        let base = settings.pollInterval
+        let grown = base * pow(2, Double(streak - 1))
+        return min(grown, Self.maxBackoff)
+    }
+
+    /// Records a failed poll and pushes the next attempt out.
+    func noteFailure(serverID: UUID, now: Date = Date()) {
+        let streak = (failureStreak[serverID] ?? 0) + 1
+        failureStreak[serverID] = streak
+        let delay = backoffDelay(streak: streak)
+        retryAfter[serverID] = delay > 0 ? now.addingTimeInterval(delay) : nil
+    }
+
+    /// Any answer at all clears the backoff, so a host that comes back is
+    /// polled at the normal cadence from its very next tick.
+    func noteSuccess(serverID: UUID) {
+        failureStreak[serverID] = nil
+        retryAfter[serverID] = nil
+    }
+
     /// Starts a poll for every server not already being polled, and returns
     /// those tasks without waiting for them. Each host runs on its own clock.
     @discardableResult
-    func pollDue() -> [Task<Void, Never>] {
+    func pollDue(ignoringBackoff: Bool = false, now: Date = Date()) -> [Task<Void, Never>] {
         servers.compactMap { server in
             guard !inFlight.contains(server.id) else { return nil }
+            if !ignoringBackoff, let due = retryAfter[server.id], due > now { return nil }
             inFlight.insert(server.id)
             return Task { [weak self] in
                 await self?.poll(server)
@@ -327,7 +371,9 @@ public final class MonitorService: ObservableObject {
     /// One pass over every server, waited for — the manual refresh. Hosts with
     /// a poll already in flight are left to it rather than polled twice.
     public func pollAll() async {
-        for task in pollDue() { await task.value }
+        // A user-driven refresh is an explicit "try now", so it overrides the
+        // backoff rather than silently skipping the hosts that need it most.
+        for task in pollDue(ignoringBackoff: true) { await task.value }
         // Deterministic for the caller: what it started is applied when this
         // returns, not a quarter-second later — and regardless of visibility,
         // since tests and the manual refresh both rely on it.
@@ -369,6 +415,7 @@ public final class MonitorService: ObservableObject {
 
             // Everything the UI observes, in one batch.
             let now = Date()
+            noteSuccess(serverID: server.id)
             commit(for: server.id) {
                 self.latest[server.id] = snapshot
                 self.status[server.id] = .online(at: now)
@@ -390,6 +437,7 @@ public final class MonitorService: ObservableObject {
             // A cancelled poll says nothing about the host.
             if error is CancellationError { return }
             guard servers.contains(where: { $0.id == server.id }) else { return }
+            noteFailure(serverID: server.id)
             let failure = ServerStatus.offline(reason: error.localizedDescription)
             commit(for: server.id) { self.status[server.id] = failure }
             alerts?.evaluate(server: server, status: failure, snapshot: nil)

@@ -41,7 +41,7 @@ public actor MetricsCollector {
             // whole collection. The Linux batch contains `sleep` and several
             // `cat`s; against a Windows shell that does not fail fast, it hung
             // until the timeout — a detection should cost a moment, not 30s.
-            let detected = await detectOS(target: target)
+            let detected = try await detectOS(target: target)
             if detected == .linux {
                 (snapshot, elapsed, clocks) = try await collectLinux(target: target)
             } else {
@@ -64,9 +64,33 @@ public actor MetricsCollector {
     }
 
     /// Asks the host what it is, with a short timeout.
-    private func detectOS(target: SSHTarget) async -> OSKind {
-        let output = (try? await runner.run("uname -s", on: target, timeout: 15)) ?? ""
-        return Self.osKind(fromUname: output)
+    ///
+    /// A Windows host answers by *failing* — it has no `uname` — so a non-zero
+    /// exit from the remote shell is the Windows signal rather than an error.
+    /// ssh's own failures are a different thing entirely: 255, a timeout, or a
+    /// failed launch all mean no shell was ever reached. Swallowing those and
+    /// guessing `.windows` sent an unreachable host through the whole Windows
+    /// collection as well, so every poll of a down host paid two 10 s connect
+    /// timeouts instead of one, and reported the failure in Windows terms.
+    private func detectOS(target: SSHTarget) async throws -> OSKind {
+        do {
+            let output = try await runner.run("uname -s", on: target, timeout: 15)
+            return Self.osKind(fromUname: output)
+        } catch let failure as SSHRunner.Failure {
+            guard let kind = Self.osKind(fromProbeFailure: failure) else { throw failure }
+            return kind
+        }
+    }
+
+    /// What a failed `uname -s` says about the host, or `nil` when it says
+    /// nothing — in which case the caller must rethrow rather than guess.
+    ///
+    /// ssh reserves status 255 for its own errors, so a different status means
+    /// a shell answered and simply had no `uname`: that is Windows. A 255, a
+    /// timeout, or a launch failure means we never reached a shell.
+    static func osKind(fromProbeFailure failure: SSHRunner.Failure) -> OSKind? {
+        if case .commandFailed(let status, _) = failure, status != 255 { return .windows }
+        return nil
     }
 
     /// A Linux host prints "Linux"; a Windows shell prints an error, or nothing
