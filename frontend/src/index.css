@@ -223,7 +223,10 @@ button, input, textarea, select { font: inherit; }
   outline: none;
 }
 
-.server-card .ant-card-body { padding: 20px; }
+/* A column so the last block can absorb the slack: cards share a min-height to
+   keep a row level, and without this the leftover space piled up at the bottom
+   as a void instead of being distributed. */
+.server-card .ant-card-body { height: 100%; padding: 20px; display: flex; flex-direction: column; }
 .server-card-header { display: flex; align-items: center; gap: 11px; }
 /* Firing-alert badge. Sits beside the online pill because that is where the
    eye already goes for host state, and a host can be "online" while several
@@ -274,7 +277,9 @@ button, input, textarea, select { font: inherit; }
 
 .server-tags { min-height: 24px; margin: 15px 0 10px; display: flex; gap: 4px; flex-wrap: wrap; }
 .server-tags .ant-tag { margin: 0; border-radius: 6px; font-size: 10px; }
-.server-specs { min-height: 45px; padding-bottom: 13px; display: flex; gap: 7px 13px; flex-wrap: wrap; border-bottom: 1px solid var(--border); }
+.server-specs { min-height: 45px; margin-top: 15px; padding-bottom: 13px; display: flex; gap: 7px 13px; flex-wrap: wrap; border-bottom: 1px solid var(--border); }
+/* The tag row already supplies the gap when it is present. */
+.server-tags + .server-specs { margin-top: 0; }
 .server-specs .ant-space { line-height: 1; }
 .server-specs .anticon { color: #929cb2; font-size: 12px; }
 .server-specs .ant-typography { font-size: 11px; }
@@ -295,7 +300,7 @@ button, input, textarea, select { font: inherit; }
 .throughput-grid .ant-space .ant-typography { display: block; overflow: hidden; font-size: 10px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
 .throughput-grid .rx { color: #18b690; }
 .throughput-grid .tx { color: #5d7df7; }
-.metrics-unavailable { height: 116px; display: flex; align-items: center; justify-content: center; gap: 8px; }
+.metrics-unavailable { flex: 1; min-height: 116px; display: flex; align-items: center; justify-content: center; gap: 8px; }
 /* Class, not "> span": antd's Typography.Text is also a span, so the bare
    child selector styled the label as a 7px circle and CJK text then wrapped one
    character per line. */

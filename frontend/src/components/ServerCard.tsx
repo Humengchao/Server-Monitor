@@ -116,14 +116,19 @@ function ServerCard({
         </div>
       )}
 
-      <div className="server-tags">
-        {server.public_location && (
-          <Tag variant="filled" className="location-tag" icon={<EnvironmentOutlined />}>{server.public_location}</Tag>
-        )}
-        {server.tags?.map((tag) => (
-          <Tag key={tag.id} color={tag.color}>{tag.name}</Tag>
-        ))}
-      </div>
+      {/* Rendered only when there is something to show: an empty tag row still
+          took 24px plus 25px of margin, which is where the odd band of white
+          under the header on an untagged card came from. */}
+      {(server.public_location || !!server.tags?.length) && (
+        <div className="server-tags">
+          {server.public_location && (
+            <Tag variant="filled" className="location-tag" icon={<EnvironmentOutlined />}>{server.public_location}</Tag>
+          )}
+          {server.tags?.map((tag) => (
+            <Tag key={tag.id} color={tag.color}>{tag.name}</Tag>
+          ))}
+        </div>
+      )}
 
       <div className="server-specs">
         <Space size={5}><DashboardOutlined /><Text type="secondary">{server.cpu_cores || 0} {t('card.core')}</Text></Space>

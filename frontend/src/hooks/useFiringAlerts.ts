@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { alertsApi, AlertEvent } from '../api/alerts';
+import { usePolling } from './usePolling';
 
 // The alert engine evaluates on its own cadence (ALERT_INTERVAL, 30s by
 // default), so polling faster than that only costs requests.
@@ -44,11 +45,7 @@ export function useFiringAlerts(): FiringAlerts {
     }
   }, []);
 
-  useEffect(() => {
-    const initial = window.setTimeout(() => load(), 0);
-    const timer = window.setInterval(() => load(), REFRESH_MS);
-    return () => { window.clearTimeout(initial); window.clearInterval(timer); };
-  }, [load]);
+  usePolling(() => load(), REFRESH_MS);
 
   return { byServer, loading };
 }
