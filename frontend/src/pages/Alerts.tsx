@@ -58,13 +58,11 @@ function describeEvent(event: AlertEvent, t: Translate): string {
   if (!event.metric) return event.message;
   if (event.metric === 'offline') {
     return t('alerts.messageOffline', {
-      server: event.server_name,
       duration: formatDuration(Math.round(event.value), t),
     });
   }
   const unit = METRIC_UNITS[event.metric] ?? '';
   return t('alerts.messageThreshold', {
-    server: event.server_name,
     metric: t(`alerts.metric.${event.metric}`),
     value: `${event.value.toFixed(1)}${unit}`,
     comparator: event.comparator === '<' ? t('alerts.belowInline') : t('alerts.aboveInline'),
@@ -126,6 +124,22 @@ export default function Alerts() {
   }, []);
 
   const activeEvents = useMemo(() => events.filter((e) => !e.resolved_at), [events]);
+  const [eventFilter, setEventFilter] = useState<'active' | 'resolved' | 'all'>('active');
+  // Rules a reader needs to act on come first: currently firing, then armed,
+  // then paused. Creation order buries a firing rule under paused ones.
+  const sortedRules = useMemo(() => {
+    const firingByRule = new Map<string, number>();
+    for (const e of events) {
+      if (!e.resolved_at && e.rule_id) firingByRule.set(e.rule_id, (firingByRule.get(e.rule_id) || 0) + 1);
+    }
+    const rank = (r: AlertRule) => (firingByRule.get(r.id) ? 0 : r.enabled ? 1 : 2);
+    return [...rules].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+  }, [rules, events]);
+  const shownEvents = useMemo(() => {
+    if (eventFilter === 'active') return events.filter((e) => !e.resolved_at);
+    if (eventFilter === 'resolved') return events.filter((e) => e.resolved_at);
+    return events;
+  }, [events, eventFilter]);
   const enabledRules = useMemo(() => rules.filter((r) => r.enabled).length, [rules]);
   const coveredServers = useMemo(() => {
     if (rules.some((r) => r.enabled && !r.server_id)) return servers.length;
@@ -324,32 +338,27 @@ export default function Alerts() {
         </Space>
       </div>
 
-      <Row gutter={[16, 16]} className="overview-grid">
-        <Col xs={12} md={6}>
-          <Card className={`overview-card ${activeEvents.length ? 'overview-card-danger' : 'overview-card-success'}`} variant="borderless">
-            <div className="overview-icon">{activeEvents.length ? <AlertOutlined /> : <CheckCircleOutlined />}</div>
-            <div><Text type="secondary">{t('alerts.active')}</Text><strong>{activeEvents.length}</strong></div>
-          </Card>
-        </Col>
-        <Col xs={12} md={6}>
-          <Card className="overview-card overview-card-primary" variant="borderless">
-            <div className="overview-icon"><BellOutlined /></div>
-            <div><Text type="secondary">{t('alerts.rules')}</Text><strong>{rules.length}</strong></div>
-          </Card>
-        </Col>
-        <Col xs={12} md={6}>
-          <Card className="overview-card overview-card-accent" variant="borderless">
-            <div className="overview-icon"><ThunderboltOutlined /></div>
-            <div><Text type="secondary">{t('alerts.enabledRules')}</Text><strong>{enabledRules}</strong></div>
-          </Card>
-        </Col>
-        <Col xs={12} md={6}>
-          <Card className="overview-card overview-card-muted" variant="borderless">
-            <div className="overview-icon"><HistoryOutlined /></div>
-            <div><Text type="secondary">{t('alerts.coverage')}</Text><strong>{coveredServers}</strong></div>
-          </Card>
-        </Col>
-      </Row>
+      {/* Plain divs, not Row/Col: .overview-grid is a CSS grid, and an antd Col
+          inside it resolves its span percentage against the grid track instead
+          of the row, collapsing each tile to a quarter of its cell. */}
+      <div className="overview-grid">
+        <Card className={`overview-card ${activeEvents.length ? 'overview-card-danger' : 'overview-card-success'}`} variant="borderless">
+          <div className="overview-icon">{activeEvents.length ? <AlertOutlined /> : <CheckCircleOutlined />}</div>
+          <div><Text type="secondary">{t('alerts.active')}</Text><strong>{activeEvents.length}</strong></div>
+        </Card>
+        <Card className="overview-card overview-card-primary" variant="borderless">
+          <div className="overview-icon"><BellOutlined /></div>
+          <div><Text type="secondary">{t('alerts.rules')}</Text><strong>{rules.length}</strong></div>
+        </Card>
+        <Card className="overview-card overview-card-accent" variant="borderless">
+          <div className="overview-icon"><ThunderboltOutlined /></div>
+          <div><Text type="secondary">{t('alerts.enabledRules')}</Text><strong>{enabledRules}</strong></div>
+        </Card>
+        <Card className="overview-card overview-card-muted" variant="borderless">
+          <div className="overview-icon"><HistoryOutlined /></div>
+          <div><Text type="secondary">{t('alerts.coverage')}</Text><strong>{coveredServers}</strong></div>
+        </Card>
+      </div>
 
       <div className="section-heading">
         <Segmented
@@ -361,7 +370,21 @@ export default function Alerts() {
           ]}
         />
         {view === 'events' && events.length > 0 && (
-          <Text type="secondary">{t('alerts.eventCount', { count: events.length })}</Text>
+          <Space size={12}>
+            {/* Defaults to "active": on a page whose job is to show what is
+                broken, resolved history is context, not the headline. */}
+            <Segmented
+              size="small"
+              value={eventFilter}
+              onChange={(value) => setEventFilter(value as typeof eventFilter)}
+              options={[
+                { label: `${t('alerts.filterActive')} ${activeEvents.length}`, value: 'active' },
+                { label: t('alerts.filterResolved'), value: 'resolved' },
+                { label: t('alerts.filterAll'), value: 'all' },
+              ]}
+            />
+            <Text type="secondary">{t('alerts.eventCount', { count: shownEvents.length })}</Text>
+          </Space>
         )}
       </div>
 
@@ -370,7 +393,7 @@ export default function Alerts() {
       ) : view === 'rules' ? (
         <Card className="panel-card" styles={{ body: { padding: 0 } }}>
           <Table
-            dataSource={rules}
+            dataSource={sortedRules}
             columns={ruleColumns}
             rowKey="id"
             pagination={false}
@@ -378,13 +401,14 @@ export default function Alerts() {
             locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('alerts.noRules')} /> }}
           />
         </Card>
-      ) : events.length === 0 ? (
+      ) : shownEvents.length === 0 ? (
         <div className="empty-state">
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('alerts.noEvents')} />
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={eventFilter === 'active' ? t('alerts.noActiveEvents') : t('alerts.noEvents')} />
         </div>
       ) : (
         <div className="alert-timeline">
-          {events.map((event) => (
+          {shownEvents.map((event) => (
             <button
               type="button"
               key={event.id}

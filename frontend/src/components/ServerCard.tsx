@@ -18,6 +18,7 @@ import {
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { Server } from '../api/servers';
+import { AlertEvent } from '../api/alerts';
 import { availabilityColor } from '../api/uptime';
 import { useNavigate } from 'react-router-dom';
 import { formatBytes, formatGB, formatUptime, getExpirationInfo, percentOf, severityColor } from '../utils/format';
@@ -35,10 +36,12 @@ interface Props {
   onToggleSelect?: (server: Server) => void;
   /** Observed 24h availability; undefined until the census loads. */
   availability?: number;
+  /** Rules currently firing on this host. */
+  firing?: AlertEvent[];
 }
 
 function ServerCard({
-  server, observedAt, onEdit, onDelete, selectable, selected, onToggleSelect, availability,
+  server, observedAt, onEdit, onDelete, selectable, selected, onToggleSelect, availability, firing,
 }: Props) {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
@@ -81,6 +84,11 @@ function ServerCard({
       <div className="server-card-header">
         <div className={`server-platform ${server.server_type === 'windows' ? 'windows' : 'linux'}`}>
           {server.server_type === 'windows' ? <WindowsOutlined /> : <CloudServerOutlined />}
+          {!!firing?.length && (
+            <Tooltip title={firing.map((e) => e.rule_name).filter(Boolean).join('\n') || undefined}>
+              <span className="alert-pill">{firing.length}</span>
+            </Tooltip>
+          )}
         </div>
         <div className="server-identity">
           <Text strong ellipsis title={server.name}>{server.name}</Text>
@@ -179,7 +187,12 @@ function ServerCard({
             </div>
           </div>
         </div>
-      ) : <div className="metrics-unavailable"><span /><Text type="secondary">{t('metrics.noData')}</Text></div>}
+      ) : (
+        <div className="metrics-unavailable">
+          <span className="metrics-unavailable-dot" />
+          <Text type="secondary">{t('metrics.noData')}</Text>
+        </div>
+      )}
     </Card>
   );
 }

@@ -174,6 +174,11 @@ button, input, textarea, select { font: inherit; }
    two-class selector above would otherwise outrank the generic mobile rule. */
 @media (max-width: 640px) { .overview-grid.overview-grid-7 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .overview-grid > .ant-tooltip-open, .overview-grid > .ant-card { min-width: 0; }
+/* Defensive: an antd Col dropped into this grid resolves its span percentage
+   against the grid track rather than the row, collapsing the tile to a quarter
+   of its cell and squeezing the label out of existence. Neutralise the span so
+   a stray Col degrades to a normal tile instead of a vertical sliver. */
+.overview-grid > .ant-col { max-width: 100%; flex: 1 1 auto; }
 .overview-card.ant-card { height: 100%; overflow: hidden; border: 1px solid var(--border); background: var(--surface); box-shadow: var(--shadow-sm); }
 .overview-card .ant-card-body { height: 100%; min-height: 86px; padding: 16px 18px; display: flex; align-items: center; gap: 13px; }
 .overview-icon { width: 42px; height: 42px; flex: 0 0 42px; display: grid; place-items: center; border-radius: 12px; font-size: 19px; }
@@ -193,7 +198,7 @@ button, input, textarea, select { font: inherit; }
 .overview-card-success .overview-icon { color: #16a980; background: rgba(22, 169, 128, .11); }
 .overview-card-muted .overview-icon { color: #8d6dd7; background: rgba(141, 109, 215, .11); }
 
-.section-heading { margin-bottom: 14px; display: flex; align-items: flex-end; justify-content: space-between; }
+.section-heading { margin-bottom: 14px; display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .section-heading > div { display: flex; align-items: baseline; gap: 10px; }
 .section-heading h4.ant-typography { margin: 0; color: var(--text); }
 .section-heading .ant-typography-secondary { font-size: 12px; }
@@ -220,6 +225,40 @@ button, input, textarea, select { font: inherit; }
 
 .server-card .ant-card-body { padding: 20px; }
 .server-card-header { display: flex; align-items: center; gap: 11px; }
+/* Firing-alert badge. Sits beside the online pill because that is where the
+   eye already goes for host state, and a host can be "online" while several
+   rules are firing on it — the two facts are independent. */
+.server-platform { position: relative; }
+.alert-pill {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 2px solid var(--surface);
+  color: #fff;
+  background: #e2545f;
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  animation: alertPulse 2.4s ease-in-out infinite;
+}
+/* The list view has room on the name line, so the badge stays inline there
+   rather than floating on the icon as it does on the cards. */
+.table-alert-pill {
+  position: static;
+  margin-left: 7px;
+  padding: 0 6px;
+  height: 16px;
+  border: 0;
+  font-size: 10px;
+  vertical-align: 1px;
+}
 .server-platform { width: 42px; height: 42px; flex: 0 0 42px; display: grid; place-items: center; border-radius: 13px; font-size: 19px; }
 .server-platform.linux { color: #526ff0; background: rgba(82, 111, 240, .11); }
 .server-platform.windows { color: #168bd2; background: rgba(22, 139, 210, .11); }
@@ -257,8 +296,11 @@ button, input, textarea, select { font: inherit; }
 .throughput-grid .rx { color: #18b690; }
 .throughput-grid .tx { color: #5d7df7; }
 .metrics-unavailable { height: 116px; display: flex; align-items: center; justify-content: center; gap: 8px; }
-.metrics-unavailable > span { width: 7px; height: 7px; border-radius: 50%; background: #aab1c1; }
-.metrics-unavailable .ant-typography { font-size: 12px; }
+/* Class, not "> span": antd's Typography.Text is also a span, so the bare
+   child selector styled the label as a 7px circle and CJK text then wrapped one
+   character per line. */
+.metrics-unavailable-dot { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: #aab1c1; }
+.metrics-unavailable .ant-typography { font-size: 12px; white-space: nowrap; }
 
 /* Auth */
 .auth-page { position: relative; min-height: 100vh; display: grid; grid-template-columns: minmax(430px, 1.05fr) minmax(440px, .95fr); overflow: hidden; background: var(--surface); }
@@ -629,10 +671,10 @@ button, input, textarea, select { font: inherit; }
 .alert-rule-cell .ant-typography { font-size: 11px; }
 .alert-form-footer { width: 100%; justify-content: space-between; }
 
-.alert-timeline { display: flex; flex-direction: column; gap: 10px; }
+.alert-timeline { display: flex; flex-direction: column; gap: 8px; }
 .alert-entry {
   width: 100%;
-  padding: 14px 16px;
+  padding: 11px 15px;
   display: flex;
   align-items: flex-start;
   gap: 13px;
