@@ -68,8 +68,10 @@ jobs:
 
       - name: Test
         # Everything is offline: the live suites only run when SM_LIVE_ALIAS /
-        # SM_WIN_HOST are set, and nothing sets them here.
-        run: swift test 2>&1 | tail -n 40
+        # SM_WIN_HOST are set, and nothing sets them here. Built under strict
+        # concurrency with warnings as errors — the project keeps sources and
+        # tests clean there, and this is where a regression gets caught.
+        run: swift test -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors 2>&1 | tail -n 40
 
       - name: Version
         id: version
