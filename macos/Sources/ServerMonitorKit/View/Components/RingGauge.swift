@@ -32,7 +32,12 @@ public struct RingGauge: View {
                 )
                 // Start the arc at 12 o'clock instead of 3.
                 .rotationEffect(.degrees(-90))
-                .animation(.easeOut(duration: 0.35), value: value)
+                // No animation on value changes, deliberately. Every poll moves
+                // every gauge, and an eased arc meant 0.35 s of display-rate
+                // frames per gauge per tick: on a machine screen with a dozen
+                // gauges that was 71% of the main thread's work — ~400 ms per
+                // tick — for a sweep nobody watches. The gauge snaps, the way
+                // Activity Monitor's do.
 
             Text(verbatim: "\(Int(value.rounded()))%")
                 .font(.system(size: diameter * 0.26, weight: .semibold, design: .rounded))
