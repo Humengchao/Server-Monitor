@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 struct SFTPView: View {
     let server: Server
 
-    @EnvironmentObject private var monitor: MonitorService
+    @Environment(\.monitorService) private var monitor
     @EnvironmentObject private var loc: Localization
 
     @State private var target: SSHTarget?
@@ -212,9 +212,9 @@ struct SFTPView: View {
 
     private func start() async {
         do {
-            let resolved = try monitor.target(for: server)
+            let resolved = try monitor.required.target(for: server)
             target = resolved
-            let home = try await monitor.sftp.home(on: resolved)
+            let home = try await monitor.required.sftp.home(on: resolved)
             await open(home, pushHistory: false)
         } catch {
             failure = error.localizedDescription
@@ -226,7 +226,7 @@ struct SFTPView: View {
         loading = true
         defer { loading = false }
         do {
-            let listing = try await monitor.sftp.list(newPath, on: target)
+            let listing = try await monitor.required.sftp.list(newPath, on: target)
             if pushHistory, !path.isEmpty, path != newPath {
                 backStack.append(path)
             }
@@ -261,7 +261,7 @@ struct SFTPView: View {
         busy = loc.t("sftp.newFolder")
         defer { busy = nil }
         do {
-            try await monitor.sftp.makeDirectory("\(path)/\(name)", on: target)
+            try await monitor.required.sftp.makeDirectory("\(path)/\(name)", on: target)
             await reload()
         } catch {
             failure = error.localizedDescription
@@ -273,7 +273,7 @@ struct SFTPView: View {
         busy = loc.t("sftp.rename")
         defer { busy = nil }
         do {
-            try await monitor.sftp.rename(file, to: newName, on: target)
+            try await monitor.required.sftp.rename(file, to: newName, on: target)
             await reload()
         } catch {
             failure = error.localizedDescription
@@ -285,7 +285,7 @@ struct SFTPView: View {
         busy = loc.t("common.delete")
         defer { busy = nil }
         do {
-            try await monitor.sftp.remove(file, on: target)
+            try await monitor.required.sftp.remove(file, on: target)
             await reload()
         } catch {
             failure = error.localizedDescription
@@ -301,7 +301,7 @@ struct SFTPView: View {
         progress = 0
         defer { busy = nil; progress = nil }
         do {
-            try await monitor.sftp.download(file, to: url, on: target) { value in
+            try await monitor.required.sftp.download(file, to: url, on: target) { value in
                 Task { @MainActor in progress = value }
             }
         } catch {
@@ -326,7 +326,7 @@ struct SFTPView: View {
             busy = "\(loc.t("sftp.downloading")) \(index + 1)/\(chosen.count)"
             progress = 0
             do {
-                try await monitor.sftp.download(
+                try await monitor.required.sftp.download(
                     file,
                     to: directory.appendingPathComponent(file.name),
                     on: target
@@ -348,7 +348,7 @@ struct SFTPView: View {
         defer { busy = nil }
         for file in chosen {
             do {
-                try await monitor.sftp.remove(file, on: target)
+                try await monitor.required.sftp.remove(file, on: target)
             } catch {
                 failure = error.localizedDescription
                 break
@@ -369,7 +369,7 @@ struct SFTPView: View {
         defer { busy = nil; progress = nil }
         do {
             progress = 0
-            try await monitor.sftp.upload(url, toDirectory: path, on: target) { value in
+            try await monitor.required.sftp.upload(url, toDirectory: path, on: target) { value in
                 Task { @MainActor in progress = value }
             }
             await reload()

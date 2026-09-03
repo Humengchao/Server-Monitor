@@ -11,7 +11,7 @@ struct IPLocationCard: View {
     let server: Server
     let snapshot: MetricSnapshot?
 
-    @EnvironmentObject private var monitor: MonitorService
+    @Environment(\.monitorService) private var monitor
     @EnvironmentObject private var loc: Localization
 
     @State private var info: GeoInfo?
@@ -99,7 +99,7 @@ struct IPLocationCard: View {
         failure = nil
         defer { looking = false }
         do {
-            let result = try await monitor.geo.lookup(endpoint)
+            let result = try await monitor.required.geo.lookup(endpoint)
             info = result
             // Persist just the country: the flag is what the dashboard and the
             // sidebar show, and re-asking on every visit would be rude to a
@@ -107,7 +107,7 @@ struct IPLocationCard: View {
             if !result.countryCode.isEmpty, result.countryCode != server.countryCode {
                 var updated = server
                 updated.countryCode = result.countryCode
-                try? monitor.updateServer(updated)
+                try? monitor?.updateServer(updated)
             }
         } catch {
             failure = error.localizedDescription

@@ -9,7 +9,7 @@ struct TerminalPane: View {
     /// also closes that session's history record.
     var sessionID: UUID? = nil
 
-    @EnvironmentObject private var monitor: MonitorService
+    @Environment(\.monitorService) private var monitor
     @EnvironmentObject private var sessions: SessionManager
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var loc: Localization
@@ -91,7 +91,7 @@ struct TerminalPane: View {
     /// the user can edit or confirm before it executes.
     private var snippetMenu: some View {
         Menu {
-            let snippets = monitor.snippets()
+            let snippets = monitor?.snippets() ?? []
             if snippets.isEmpty {
                 Text(loc.t("terminal.noSnippets"))
             } else {
@@ -112,7 +112,7 @@ struct TerminalPane: View {
 
     private func resolve() {
         do {
-            target = try monitor.target(for: server)
+            target = try monitor.required.target(for: server)
             failure = nil
         } catch {
             failure = error.localizedDescription

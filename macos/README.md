@@ -89,6 +89,19 @@ full handshake.
   all of it comes out of output the poll already fetched.
 - **Terminal font** — six monospaced faces and six sizes, with a live preview.
 - **Bilingual** (中文 / English) and follows the system appearance.
+- **One publish per poll tick.** Hosts finish a tick about a second apart, so
+  results are held until the last poll the tick launched returns (capped at
+  2 s), then applied as one change: one dashboard pass per tick instead of the
+  3.4 measured before. A host with nothing on screen yet is shown at once.
+  Nothing is published while every window is hidden or covered; the menu bar
+  and the database keep going regardless.
+- **Backs off from hosts that keep failing** — geometrically, capped at five
+  minutes, cleared by any answer, by editing the host, and by the network
+  coming back (`NWPathMonitor`), since nine hosts failing at once is almost
+  always this machine's link. A manual refresh always means "try now".
+- **Keyboard.** A Go menu (⌘1…⌘7) for the sidebar; ⌘N for "new whatever this
+  screen is about", ⇧⌘N new group, ⇧⌘I import, ⌘T / ⇧⌘T terminal or SFTP on
+  the selected machine, ⌘R refresh. The window reopens where it was left.
 
 ## Requirements
 
@@ -165,6 +178,13 @@ with Xcode. If Chrome is missing the app builds without an icon.
   hop.
 - Latency is sampled every 30 seconds rather than every poll, since it moves
   slowly and each sample costs a `ping` process.
+- Open terminal and SFTP sessions do not survive a relaunch (their
+  connections die with the process); the sidebar selection does.
+- The vnStat install button's install step has only been exercised as far as
+  its read-only probe against real hosts; the install itself puts software on
+  someone's server and has not been run unattended.
+- The GPU card is tested against captured `nvidia-smi` output only — no NVIDIA
+  host was available.
 
 ## Layout
 

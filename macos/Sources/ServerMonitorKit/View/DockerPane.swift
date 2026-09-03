@@ -4,7 +4,7 @@ import SwiftUI
 struct DockerPane: View {
     let server: Server
 
-    @EnvironmentObject private var monitor: MonitorService
+    @Environment(\.monitorService) private var monitor
     @EnvironmentObject private var loc: Localization
 
     @State private var containers: [DockerContainer] = []
@@ -270,8 +270,8 @@ struct DockerPane: View {
         loading = true
         defer { loading = false }
         do {
-            let target = try monitor.target(for: server)
-            let docker = monitor.docker
+            let target = try monitor.required.target(for: server)
+            let docker = try monitor.required.docker
             containers = try await docker.listContainers(target: target)
             compose = (try? await docker.listComposeProjects(target: target)) ?? []
             images = try await docker.listImages(target: target)
@@ -291,8 +291,8 @@ struct DockerPane: View {
         busy.insert(container.id)
         defer { busy.remove(container.id) }
         do {
-            let target = try monitor.target(for: server)
-            try await monitor.docker.perform(action, containerID: container.id, target: target)
+            let target = try monitor.required.target(for: server)
+            try await monitor.required.docker.perform(action, containerID: container.id, target: target)
             await reload()
         } catch {
             failure = error.localizedDescription
@@ -301,8 +301,8 @@ struct DockerPane: View {
 
     private func showLogs(_ container: DockerContainer) async {
         do {
-            let target = try monitor.target(for: server)
-            let text = try await monitor.docker.logs(containerID: container.id, target: target)
+            let target = try monitor.required.target(for: server)
+            let text = try await monitor.required.docker.logs(containerID: container.id, target: target)
             logs = LogsSheet(id: container.id, title: container.name, text: text)
         } catch {
             failure = error.localizedDescription
