@@ -347,7 +347,14 @@ func compare(value float64, comparator string, threshold float64) bool {
 // sent to webhooks when an alert opens.
 func FormatAlertMessage(rule models.AlertRule, snap models.AlertSnapshot, value float64) string {
 	if rule.Metric == models.AlertMetricOffline {
-		return fmt.Sprintf("%s has not reported for %s", snap.ServerName, formatDuration(time.Duration(value)*time.Second))
+		base := fmt.Sprintf("%s has not reported for %s", snap.ServerName, formatDuration(time.Duration(value)*time.Second))
+		// Whoever reads this at 3am gets the cause with the symptom. "Offline"
+		// alone sends them to check the host; "SSH authentication rejected"
+		// sends them to the credential, which is where the fix is.
+		if reason := OfflineReason(snap.LastErrorKind); reason != "" {
+			return base + " — " + reason
+		}
+		return base
 	}
 	unit := models.AlertMetricUnits[rule.Metric]
 	return fmt.Sprintf("%s %s is %s%s (%s %s%s for %s)",
@@ -420,15 +427,19 @@ func NewWebhookNotifier(allowPrivate bool) *WebhookNotifier {
 }
 
 type webhookPayload struct {
-	Status     string    `json:"status"`
-	Rule       string    `json:"rule"`
-	Server     string    `json:"server"`
-	Metric     string    `json:"metric"`
-	Value      float64   `json:"value"`
-	Threshold  float64   `json:"threshold"`
-	Comparator string    `json:"comparator"`
-	Message    string    `json:"message"`
-	Timestamp  time.Time `json:"timestamp"`
+	Status     string  `json:"status"`
+	Rule       string  `json:"rule"`
+	Server     string  `json:"server"`
+	Metric     string  `json:"metric"`
+	Value      float64 `json:"value"`
+	Threshold  float64 `json:"threshold"`
+	Comparator string  `json:"comparator"`
+	Message    string  `json:"message"`
+	// Machine-readable cause for an offline alert ("auth", "unreachable", …),
+	// so a receiver can route on it instead of matching on the prose in
+	// Message. Omitted when there is nothing to report.
+	Reason    string    `json:"reason,omitempty"`
+	Timestamp time.Time `json:"timestamp"`
 }
 
 // Send posts the transition asynchronously; delivery failures are logged and
@@ -452,6 +463,11 @@ func (n *WebhookNotifier) Send(rule models.AlertRule, snap models.AlertSnapshot,
 		Comparator: rule.Comparator,
 		Message:    message,
 		Timestamp:  at,
+	}
+	// Only meaningful while the host is actually dark; a recovery carries no
+	// cause, and a threshold alert's cause is the threshold.
+	if status != "resolved" && rule.Metric == models.AlertMetricOffline {
+		payload.Reason = snap.LastErrorKind
 	}
 	go func() {
 		if err := n.Post(context.Background(), target, payload); err != nil {

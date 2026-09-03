@@ -88,6 +88,9 @@ type AlertSnapshot struct {
 	Load1      float64
 	LatencyMS  int
 	RecordedAt time.Time
+	// Why the collector last failed to reach the host, when it did. Carried
+	// here so an offline alert can name the cause instead of only the silence.
+	LastErrorKind string
 }
 
 func CreateAlertRule(db *sql.DB, r *AlertRule) error {
@@ -183,7 +186,8 @@ func GetAlertSnapshots(db *sql.DB) ([]AlertSnapshot, error) {
 		 lm.server_id IS NOT NULL,
 		 COALESCE(lm.cpu_percent, 0), COALESCE(lm.memory_used, 0), COALESCE(lm.memory_total, 0),
 		 COALESCE(lm.disk_used_bytes, 0), COALESCE(lm.load_1, 0), COALESCE(lm.latency_ms, 0),
-		 COALESCE(lm.recorded_at, TIMESTAMPTZ 'epoch')
+		 COALESCE(lm.recorded_at, TIMESTAMPTZ 'epoch'),
+		 COALESCE(s.last_error_kind, '')
 		 FROM servers s
 		 LEFT JOIN server_latest_metrics lm ON lm.server_id = s.id`)
 	if err != nil {
@@ -194,7 +198,7 @@ func GetAlertSnapshots(db *sql.DB) ([]AlertSnapshot, error) {
 	for rows.Next() {
 		var s AlertSnapshot
 		if err := rows.Scan(&s.ServerID, &s.UserID, &s.ServerName, &s.DiskTotal, &s.HasMetrics,
-			&s.CPUPercent, &s.MemoryUsed, &s.MemTotal, &s.DiskUsed, &s.Load1, &s.LatencyMS, &s.RecordedAt); err != nil {
+			&s.CPUPercent, &s.MemoryUsed, &s.MemTotal, &s.DiskUsed, &s.Load1, &s.LatencyMS, &s.RecordedAt, &s.LastErrorKind); err != nil {
 			return nil, err
 		}
 		snapshots = append(snapshots, s)

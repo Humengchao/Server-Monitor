@@ -83,3 +83,22 @@ func TrimPollErrorDetail(err error) string {
 	}
 	return detail
 }
+
+// offlineReasons phrases each kind for a notification, where there is one line
+// and no chance to ask a follow-up question. Deliberately separate from the
+// UI's copy: the panel can afford a paragraph of advice, a webhook cannot.
+var offlineReasons = map[PollErrorKind]string{
+	PollErrorAuth:        "SSH authentication was rejected",
+	PollErrorHostKey:     "the host key no longer matches the one on record",
+	PollErrorUnreachable: "the host could not be reached",
+	PollErrorTimeout:     "the connection timed out",
+	PollErrorCommand:     "connected, but the metrics probe failed",
+	PollErrorStorage:     "collected, but the sample could not be stored",
+}
+
+// OfflineReason renders a stored kind for a notification, or "" when there is
+// nothing useful to add — an unset kind, or `other`, whose raw error is too
+// variable to phrase in one clause.
+func OfflineReason(kind string) string {
+	return offlineReasons[PollErrorKind(kind)]
+}

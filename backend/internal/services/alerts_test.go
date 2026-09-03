@@ -286,3 +286,41 @@ func TestApplyDefaultWebhooksNoDefaults(t *testing.T) {
 		t.Errorf("webhook = %q, want empty", rules[0].WebhookURL)
 	}
 }
+
+func TestFormatAlertMessageOfflineNamesTheCause(t *testing.T) {
+	offlineRule := rule(models.AlertMetricOffline, ">", 0, 300)
+
+	// With no recorded cause the message is unchanged: an offline alert that
+	// predates any classified failure must not gain a dangling separator.
+	plain := FormatAlertMessage(offlineRule, snapshot(nil), 480)
+	if strings.Contains(plain, "—") {
+		t.Errorf("message with no cause should not carry a separator: %q", plain)
+	}
+
+	withAuth := FormatAlertMessage(offlineRule, snapshot(func(s *models.AlertSnapshot) {
+		s.LastErrorKind = string(PollErrorAuth)
+	}), 480)
+	for _, want := range []string{"web-01", "8m", "SSH authentication was rejected"} {
+		if !strings.Contains(withAuth, want) {
+			t.Errorf("message %q missing %q", withAuth, want)
+		}
+	}
+
+	// `other` has no one-clause phrasing, so it adds nothing rather than
+	// padding the alert with a word that carries no information.
+	other := FormatAlertMessage(offlineRule, snapshot(func(s *models.AlertSnapshot) {
+		s.LastErrorKind = string(PollErrorOther)
+	}), 480)
+	if other != plain {
+		t.Errorf("an unclassifiable cause should read the same as none:\n got  %q\n want %q", other, plain)
+	}
+
+	// A threshold alert's cause is its threshold; a stale poll error must not
+	// leak into one.
+	cpu := FormatAlertMessage(rule(models.AlertMetricCPU, ">", 80, 300), snapshot(func(s *models.AlertSnapshot) {
+		s.LastErrorKind = string(PollErrorAuth)
+	}), 91.5)
+	if strings.Contains(cpu, "authentication") {
+		t.Errorf("threshold message should not carry a poll error: %q", cpu)
+	}
+}
