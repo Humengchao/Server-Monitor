@@ -30,7 +30,7 @@ public struct RootView: View {
     @State private var keyScanToken = 0
     @State private var search = ""
 
-    public enum Selection: Hashable, RawRepresentable {
+    public enum Selection: Hashable, RawRepresentable, Sendable {
         case dashboard
         case machines
         case identities
