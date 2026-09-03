@@ -49,6 +49,10 @@ export default function BatchExecModal({ open, servers, onClose }: Props) {
   const [command, setCommand] = useState('');
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState<BatchResult[] | null>(null);
+  // Controlled, not defaultActiveKey: that only applies when the Collapse first
+  // mounts, so a second run's failures stayed folded away behind the first
+  // run's expansion state.
+  const [openResults, setOpenResults] = useState<string[]>([]);
 
   const risk = useMemo(() => detectRisk(command), [command]);
   const overLimit = servers.length > BATCH_MAX_TARGETS;
@@ -56,7 +60,21 @@ export default function BatchExecModal({ open, servers, onClose }: Props) {
   const reset = () => {
     setCommand('');
     setResults(null);
+    setOpenResults([]);
     setRunning(false);
+  };
+
+  /**
+   * Which result panels to open after a run.
+   *
+   * Failures always: their output is why the run is being read at all. A lone
+   * result too — hiding one host's output behind a disclosure defeats the point
+   * of having run the command. Successes across a fleet stay folded so a
+   * 20-host run is still scannable.
+   */
+  const panelsToOpen = (batch: BatchResult[]): string[] => {
+    if (batch.length === 1) return batch.map((r) => r.server_id);
+    return batch.filter((r) => !r.ok).map((r) => r.server_id);
   };
 
   const handleClose = () => {
@@ -89,9 +107,12 @@ export default function BatchExecModal({ open, servers, onClose }: Props) {
       onOk: async () => {
         setRunning(true);
         setResults(null);
+        setOpenResults([]);
         try {
           const res = await serversApi.bulkExec(servers.map((s) => s.id), trimmed);
-          setResults(res.data.results || []);
+          const batch = res.data.results || [];
+          setResults(batch);
+          setOpenResults(panelsToOpen(batch));
           if (res.data.failed === 0) {
             message.success(t('batch.allSucceeded', { count: res.data.succeeded }));
           } else {
@@ -196,7 +217,8 @@ export default function BatchExecModal({ open, servers, onClose }: Props) {
             <Collapse
               className="batch-results"
               items={items}
-              defaultActiveKey={results.filter((r) => !r.ok).map((r) => r.server_id)}
+              activeKey={openResults}
+              onChange={(keys) => setOpenResults(Array.isArray(keys) ? keys : [keys])}
             />
           </div>
         )}
