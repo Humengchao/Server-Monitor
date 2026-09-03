@@ -15,7 +15,8 @@ import {
   RiseOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import { Server } from '../api/servers';
+// Aliased: antd exports a `Tag` component and this module renders it.
+import { Server, Tag as ServerTag } from '../api/servers';
 import PlatformIcon from './PlatformIcon';
 import { PollErrorBadge } from './PollErrorNotice';
 import { platformClass } from '../utils/platform';
@@ -226,6 +227,18 @@ function isOnlineAt(s: Server, observedAt: number): boolean {
   return observedAt > 0 && !!at && observedAt - new Date(at).getTime() < 120000;
 }
 
+/** Cheap equality for the tag list, which is short and rarely changes. */
+function sameTags(a: ServerTag[] = [], b: ServerTag[] = []): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((tag, i) => tag.id === b[i].id && tag.name === b[i].name && tag.color === b[i].color);
+}
+
+/** Same, for the alert events driving the corner count and its tooltip. */
+function sameFiring(a: AlertEvent[] = [], b: AlertEvent[] = []): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((event, i) => event.id === b[i].id && event.rule_name === b[i].rule_name);
+}
+
 // Memoized: the dashboard replaces the whole servers array every poll, so we
 // only re-render a card when its own displayed data (or online state) changes.
 export default React.memo(ServerCard, (prev, next) => {
@@ -241,11 +254,23 @@ export default React.memo(ServerCard, (prev, next) => {
     a.memory_total === b.memory_total &&
     a.disk_total === b.disk_total &&
     a.public_location === b.public_location &&
+    // Both drive visible badges and both were missing, so a card whose alert
+    // count or failure reason changed kept showing the old one until some
+    // other field happened to move. On an offline host nothing else moves —
+    // exactly the card those badges exist for.
+    a.last_error_kind === b.last_error_kind &&
+    a.last_error === b.last_error &&
+    sameFiring(prev.firing, next.firing) &&
     prev.selectable === next.selectable &&
     prev.selected === next.selected &&
     prev.availability === next.availability &&
     isOnlineAt(a, prev.observedAt) === isOnlineAt(b, next.observedAt) &&
-    JSON.stringify(a.tags || []) === JSON.stringify(b.tags || []) &&
-    JSON.stringify(a.latest_metrics) === JSON.stringify(b.latest_metrics)
+    sameTags(a.tags, b.tags) &&
+    // recorded_at identifies the sample: server_latest_metrics is upserted with
+    // a new timestamp on every write, so equal timestamps mean the same row and
+    // therefore identical values. Two JSON.stringify calls per card per poll
+    // used to answer the same question — 400 of them every three seconds on a
+    // 200-host fleet, which was most of a 110ms hitch.
+    a.latest_metrics?.recorded_at === b.latest_metrics?.recorded_at
   );
 });
