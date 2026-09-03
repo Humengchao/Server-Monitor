@@ -6,7 +6,7 @@ import {
 } from 'antd';
 import {
   ArrowLeftOutlined, EditOutlined, DeleteOutlined, DockerOutlined, KeyOutlined, SaveOutlined,
-  WindowsOutlined, AppleOutlined, CopyOutlined, DownloadOutlined, CloudServerOutlined,
+  LinuxOutlined, WindowsOutlined, CopyOutlined, DownloadOutlined,
   ClockCircleOutlined, ThunderboltOutlined, ArrowDownOutlined, ArrowUpOutlined, DashboardOutlined,
   DatabaseOutlined, HddOutlined, LineChartOutlined,
 } from '@ant-design/icons';
@@ -16,6 +16,8 @@ import { useTranslation } from 'react-i18next';
 import { serversApi, Server, MetricPoint } from '../api/servers';
 import { useMetrics, TimeRange } from '../hooks/useMetrics';
 import AvailabilityPanel from '../components/AvailabilityPanel';
+import PlatformIcon from '../components/PlatformIcon';
+import { platformClass } from '../utils/platform';
 import MetricsChart from '../components/MetricsChart';
 import ProcessTable from '../components/ProcessTable';
 import ServiceTable from '../components/ServiceTable';
@@ -327,8 +329,8 @@ export default function ServerDetail() {
           <Button className="detail-back" icon={<ArrowLeftOutlined />} onClick={() => navigate('/dashboard')}>
             {t('common.back')}
           </Button>
-          <div className={`detail-avatar ${server.server_type === 'windows' ? 'windows' : 'linux'}`}>
-            {server.server_type === 'windows' ? <WindowsOutlined /> : <CloudServerOutlined />}
+          <div className={`detail-avatar ${platformClass(server.server_type)}`}>
+            <PlatformIcon serverType={server.server_type} />
           </div>
           <div className="detail-identity">
             <div className="detail-identity-line">
@@ -564,7 +566,7 @@ export default function ServerDetail() {
           </Form.Item>
           <Form.Item name="server_type" label={t('server.type')} initialValue="linux">
             <Select>
-              <Select.Option value="linux"><AppleOutlined /> Linux</Select.Option>
+              <Select.Option value="linux"><LinuxOutlined /> Linux</Select.Option>
               <Select.Option value="windows"><WindowsOutlined /> Windows</Select.Option>
             </Select>
           </Form.Item>

@@ -6,7 +6,7 @@ import {
 import { DatePicker } from 'antd';
 import dayjs from 'dayjs';
 import {
-  PlusOutlined, ReloadOutlined, FilterOutlined, SafetyOutlined, WindowsOutlined, AppleOutlined,
+  PlusOutlined, ReloadOutlined, FilterOutlined, SafetyOutlined, WindowsOutlined, LinuxOutlined,
   CloudServerOutlined, CheckCircleOutlined, DisconnectOutlined, SearchOutlined, AppstoreOutlined,
   BarsOutlined, DashboardOutlined, DatabaseOutlined, WalletOutlined, SortAscendingOutlined,
   CheckSquareOutlined, RiseOutlined,
@@ -573,7 +573,7 @@ export default function Dashboard() {
           </Form.Item>
           <Form.Item name="server_type" label={t('server.type')} initialValue="linux">
             <Select>
-              <Select.Option value="linux"><AppleOutlined /> Linux</Select.Option>
+              <Select.Option value="linux"><LinuxOutlined /> Linux</Select.Option>
               <Select.Option value="windows"><WindowsOutlined /> Windows</Select.Option>
             </Select>
           </Form.Item>

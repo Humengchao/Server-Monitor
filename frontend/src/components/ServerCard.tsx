@@ -1,8 +1,6 @@
 import React from 'react';
 import { Button, Card, Checkbox, Tag, Progress, Typography, Space, Tooltip } from 'antd';
 import {
-  WindowsOutlined,
-  CloudServerOutlined,
   ArrowUpOutlined,
   ArrowDownOutlined,
   DashboardOutlined,
@@ -18,6 +16,8 @@ import {
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { Server } from '../api/servers';
+import PlatformIcon from './PlatformIcon';
+import { platformClass } from '../utils/platform';
 import { AlertEvent } from '../api/alerts';
 import { availabilityColor } from '../api/uptime';
 import { useNavigate } from 'react-router-dom';
@@ -82,8 +82,8 @@ function ServerCard({
         </div>
       )}
       <div className="server-card-header">
-        <div className={`server-platform ${server.server_type === 'windows' ? 'windows' : 'linux'}`}>
-          {server.server_type === 'windows' ? <WindowsOutlined /> : <CloudServerOutlined />}
+        <div className={`server-platform ${platformClass(server.server_type)}`}>
+          <PlatformIcon serverType={server.server_type} />
           {!!firing?.length && (
             <Tooltip title={firing.map((e) => e.rule_name).filter(Boolean).join('\n') || undefined}>
               <span className="alert-pill">{firing.length}</span>
@@ -122,7 +122,9 @@ function ServerCard({
       {(server.public_location || !!server.tags?.length) && (
         <div className="server-tags">
           {server.public_location && (
-            <Tag variant="filled" className="location-tag" icon={<EnvironmentOutlined />}>{server.public_location}</Tag>
+            <Tag variant="filled" className="location-tag" icon={<EnvironmentOutlined />} title={server.public_location}>
+              {server.public_location}
+            </Tag>
           )}
           {server.tags?.map((tag) => (
             <Tag key={tag.id} color={tag.color}>{tag.name}</Tag>
@@ -130,11 +132,24 @@ function ServerCard({
         </div>
       )}
 
+      {/* Hardware facts are omitted rather than zeroed when the collector has
+          never reached the host: a row of "0 核 · 0 GB · 0 GB" described a
+          machine with no CPU and no disk instead of one we have not measured.
+          The row itself survives because availability and expiry are known
+          without ever connecting. */}
       <div className="server-specs">
-        <Space size={5}><DashboardOutlined /><Text type="secondary">{server.cpu_cores || 0} {t('card.core')}</Text></Space>
-        <Space size={5}><DatabaseOutlined /><Text type="secondary">{formatGB(server.memory_total)}</Text></Space>
-        <Space size={5}><HddOutlined /><Text type="secondary">{formatGB(server.disk_total)}</Text></Space>
-        <Space size={5}><ClockCircleOutlined /><Text type="secondary">{formatUptime(m?.uptime_seconds || 0)}</Text></Space>
+        {!!server.cpu_cores && (
+          <Space size={5}><DashboardOutlined /><Text type="secondary">{server.cpu_cores} {t('card.core')}</Text></Space>
+        )}
+        {server.memory_total > 0 && (
+          <Space size={5}><DatabaseOutlined /><Text type="secondary">{formatGB(server.memory_total)}</Text></Space>
+        )}
+        {server.disk_total > 0 && (
+          <Space size={5}><HddOutlined /><Text type="secondary">{formatGB(server.disk_total)}</Text></Space>
+        )}
+        {!!m?.uptime_seconds && (
+          <Space size={5}><ClockCircleOutlined /><Text type="secondary">{formatUptime(m.uptime_seconds)}</Text></Space>
+        )}
         {isOnline && !!m?.latency_ms && (
           <Tooltip title={t('card.latencyHint')}>
             <Space size={5}><ThunderboltOutlined /><Text type="secondary">{m.latency_ms} ms</Text></Space>

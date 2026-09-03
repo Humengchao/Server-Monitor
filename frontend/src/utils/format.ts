@@ -11,14 +11,22 @@ export function formatBytes(bytes: number, fractionDigits?: number): string {
   return `${(bytes / 1024 ** index).toFixed(digits)} ${BYTE_UNITS[index]}`;
 }
 
+/**
+ * Hardware inventory, e.g. "16.0 GB".
+ *
+ * Absent reads as unknown, not as zero. These figures come from the collector's
+ * first successful connection, so a host that has never been reached carries 0
+ * for every one of them — and a card reading "0 核 · 0 GB · 0 GB" describes a
+ * machine with no CPU and no disk rather than one we have not measured yet.
+ */
 export function formatGB(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 GB';
+  if (!Number.isFinite(bytes) || bytes <= 0) return '—';
   return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 }
 
-/** Compact uptime, e.g. "1y 2m 3d". */
+/** Compact uptime, e.g. "1y 2m 3d"; "—" when never reported. */
 export function formatUptime(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds <= 0) return '0d';
+  if (!Number.isFinite(seconds) || seconds <= 0) return '—';
   const totalDays = Math.floor(seconds / 86400);
   const years = Math.floor(totalDays / 365);
   const remainingDays = totalDays % 365;

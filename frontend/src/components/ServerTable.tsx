@@ -1,11 +1,13 @@
 import React from 'react';
 import { Button, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import {
-  AlertOutlined, ArrowDownOutlined, ArrowUpOutlined, CloudServerOutlined, DeleteOutlined, EditOutlined, WindowsOutlined,
+  AlertOutlined, ArrowDownOutlined, ArrowUpOutlined, DeleteOutlined, EditOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Server } from '../api/servers';
+import PlatformIcon from './PlatformIcon';
+import { platformClass } from '../utils/platform';
 import { AlertEvent } from '../api/alerts';
 import { availabilityColor } from '../api/uptime';
 import { formatBytes, formatUptime, getExpirationInfo, percentOf, severityColor } from '../utils/format';
@@ -68,8 +70,8 @@ export default function ServerTable({
       width: 240,
       render: (_: unknown, server: Server) => (
         <div className="table-identity">
-          <span className={`table-platform ${server.server_type === 'windows' ? 'windows' : 'linux'}`}>
-            {server.server_type === 'windows' ? <WindowsOutlined /> : <CloudServerOutlined />}
+          <span className={`table-platform ${platformClass(server.server_type)}`}>
+            <PlatformIcon serverType={server.server_type} />
           </span>
           <div>
             <strong>
@@ -214,6 +216,12 @@ export default function ServerTable({
       loading={loading}
       pagination={false}
       scroll={{ x: selecting ? 1240 : 1180 }}
+      // The columns add up to ~1500px, so on anything short of a wide monitor
+      // the last few are off to the right — and the only hint of that was a
+      // scrollbar beneath 24 rows, far below the fold. Sticky pins both the
+      // header and that scrollbar to the viewport. 72 clears the app header,
+      // which is itself sticky; below 640px it shrinks and index.css follows.
+      sticky={{ offsetHeader: 72 }}
       rowSelection={selecting ? {
         selectedRowKeys: selectedIds,
         onChange: (keys) => onSelectionChange?.(keys as string[]),

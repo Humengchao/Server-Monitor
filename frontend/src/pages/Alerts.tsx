@@ -419,10 +419,16 @@ export default function Alerts() {
                 {event.resolved_at ? <CheckCircleOutlined /> : <AlertOutlined />}
               </span>
               <span className="alert-entry-body">
+                {/* Host first. One rule fires across the whole fleet, so leading
+                    with the rule name gave every row the same bold heading and
+                    buried the only part that differs — which host — in small
+                    grey text. The rule follows as the qualifier. */}
                 <span className="alert-entry-title">
-                  <strong>{event.rule_name || t('alerts.deletedRule')}</strong>
+                  <strong>{event.server_name || event.rule_name || t('alerts.deletedRule')}</strong>
                   <Tag className="metric-chip" variant="filled">{t(`alerts.metric.${event.metric}`)}</Tag>
-                  {event.server_name && <Text type="secondary">{event.server_name}</Text>}
+                  {event.server_name && (
+                    <Text type="secondary">{event.rule_name || t('alerts.deletedRule')}</Text>
+                  )}
                 </span>
                 <span className="alert-entry-message">{describeEvent(event, t)}</span>
               </span>

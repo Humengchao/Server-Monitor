@@ -342,7 +342,11 @@ button, input, textarea, select { font: inherit; }
 
 /* Existing rich views */
 .app-content .ant-card:not(.server-card):not(.overview-card):not(.auth-card) { border-color: var(--border); box-shadow: var(--shadow-sm); }
-.app-content .ant-table-wrapper { border-radius: 14px; overflow: hidden; }
+/* `clip`, not `hidden`: both round off the corners, but `hidden` makes the
+   wrapper a scroll container, and a position:sticky descendant sticks to its
+   nearest scrollport. That silently disabled the table's sticky header — it
+   scrolled away with the wrapper instead of pinning to the viewport. */
+.app-content .ant-table-wrapper { border-radius: 14px; overflow: clip; }
 .app-content .ant-descriptions { overflow: hidden; border-radius: 12px; }
 
 .xterm-viewport::-webkit-scrollbar { width: 8px; }
@@ -477,7 +481,13 @@ button, input, textarea, select { font: inherit; }
 .server-card:focus-within .server-card-actions { opacity: 1; transform: none; }
 .server-card.is-offline { opacity: .84; }
 .server-card.is-offline .server-platform { filter: grayscale(.5); }
-.location-tag.ant-tag { color: var(--muted); background: var(--surface-soft); }
+/* A datacentre name is free text, so it can be a sentence. Capped at half the
+   card so it cannot push every real tag off the row; the full value stays
+   available as the tag's title attribute. */
+.location-tag.ant-tag {
+  color: var(--muted); background: var(--surface-soft);
+  max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 
 /* Dense list view */
 .server-table .ant-table { background: transparent; }
@@ -502,6 +512,14 @@ button, input, textarea, select { font: inherit; }
 .server-table .ant-table-tbody > tr:hover > td.ant-table-cell-fix-start,
 .server-table .ant-table-tbody > tr:hover > td.ant-table-cell-fix-end { background: var(--surface-soft); }
 .server-table .status-pill { width: fit-content; }
+/* The sticky header sits under the app header, which is itself sticky and
+   translucent — without an opaque backdrop the rows scroll through it. antd
+   writes the offset inline from the `sticky` prop, so the narrow-screen value
+   has to be forced. */
+.server-table .ant-table-sticky-holder { background: var(--surface); }
+@media (max-width: 640px) {
+  .server-table .ant-table-sticky-holder { top: 64px !important; }
+}
 .table-identity { display: flex; align-items: center; gap: 10px; }
 .table-identity > div { min-width: 0; display: flex; flex-direction: column; }
 .table-identity strong { color: var(--text); font-size: 13px; }
@@ -752,6 +770,17 @@ button, input, textarea, select { font: inherit; }
 .service-actions .ant-btn { padding: 0 5px; font-size: 12px; }
 .port-cell { display: inline-flex; align-items: baseline; gap: 7px; }
 .port-cell small { color: var(--muted); font-size: 10px; letter-spacing: .2px; }
+
+/* Tall form modals scroll their body, not the whole dialog.
+   The add/edit-server form is ~1490px: on any normal laptop the title and the
+   confirm button both sat off-screen, so submitting meant scrolling a dialog
+   twice the height of the viewport and hoping you had filled everything in.
+   Capping the body keeps the header and the footer buttons pinned. The cap is
+   only a maximum, so short dialogs are untouched. Safe for every dialog here:
+   they are all forms, and their Select/DatePicker popups portal to <body>
+   rather than into the scrolling body, so nothing gets clipped. The terminal
+   and log panes, which size themselves, live in Drawers and are unaffected. */
+.ant-modal-body { max-height: calc(100vh - 240px); overflow-y: auto; overscroll-behavior: contain; }
 
 .kill-confirm { display: flex; flex-direction: column; gap: 10px; }
 .kill-confirm code {

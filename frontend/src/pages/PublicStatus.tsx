@@ -23,9 +23,9 @@ import {
   TranslationOutlined,
   WarningFilled,
   WifiOutlined,
-  WindowsOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import PlatformIcon from '../components/PlatformIcon';
 import { convertCurrency, currencySymbol, useExchangeRates } from '../hooks/useExchangeRates';
 import { availabilityColor } from '../api/uptime';
 import { usePolling } from '../hooks/usePolling';
@@ -304,7 +304,7 @@ function ProbeNodeCard({
   return (
     <article className={`glass-node-card ${node.status}`}>
       <header className="glass-node-head">
-        <span className="node-system-icon">{node.server_type === 'windows' ? <WindowsOutlined /> : <CloudServerOutlined />}</span>
+        <span className="node-system-icon"><PlatformIcon serverType={node.server_type} /></span>
         <div className="node-title"><h2>{node.name || node.alias}</h2><small><EnvironmentOutlined /> {node.location || t('probe.locationUnset')}<b>·</b>{node.server_type === 'windows' ? 'Windows' : 'Linux'}</small></div>
         <span className={`node-online ${node.status}`}><i /> {t(`probe.nodeStatus.${node.status}`)}</span>
       </header>

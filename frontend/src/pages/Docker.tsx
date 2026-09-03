@@ -8,6 +8,8 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import { useTranslation } from 'react-i18next';
 import { serversApi, Server, DockerContainer } from '../api/servers';
+import PlatformIcon from '../components/PlatformIcon';
+import { platformClass } from '../utils/platform';
 import { Terminal } from 'xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import 'xterm/css/xterm.css';
@@ -596,11 +598,15 @@ export default function Docker() {
         <div style={{ textAlign: 'center', padding: 80 }}><Spin size="large" /></div>
       ) : (
         <>
-          {servers.length === 0 ? (
+          {/* The empty state is suppressed when the undetected list is about to
+              render: "no server has Docker" directly above a list of every
+              server reads as a contradiction, and the section below already
+              explains the situation and offers the re-probe. */}
+          {servers.length === 0 ? (undetected.length === 0 && (
             <Card className="panel-card">
               <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('docker.noServers')} />
             </Card>
-          ) : (
+          )) : (
             <Collapse
               className="docker-hosts"
               activeKey={activeKeys}
@@ -624,7 +630,7 @@ export default function Docker() {
               <div className="docker-undetected-list">
                 {undetected.map((server) => (
                   <div key={server.id} className="docker-undetected-row">
-                    <span className={`server-platform ${server.server_type === 'windows' ? 'windows' : 'linux'}`}><CloudServerOutlined /></span>
+                    <span className={`server-platform ${platformClass(server.server_type)}`}><PlatformIcon serverType={server.server_type} /></span>
                     <div className="docker-host-identity">
                       <strong>{server.name}</strong>
                       <span>{server.host}</span>

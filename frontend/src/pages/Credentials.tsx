@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import {
   Table, Button, Modal, Form, Input, Select, Space, Typography, Popconfirm, App, Tag, Card,
 } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, KeyOutlined, WindowsOutlined, AppleOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, KeyOutlined, WindowsOutlined, LinuxOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { credentialsApi, Credential } from '../api/credentials';
 
@@ -92,7 +92,7 @@ export default function Credentials() {
       dataIndex: 'credential_type',
       key: 'credential_type',
       width: 90,
-      render: (v: string) => v === 'windows' ? <Tag icon={<WindowsOutlined />}>Windows</Tag> : <Tag icon={<AppleOutlined />}>Linux</Tag>,
+      render: (v: string) => v === 'windows' ? <Tag icon={<WindowsOutlined />}>Windows</Tag> : <Tag icon={<LinuxOutlined />}>Linux</Tag>,
     },
     {
       title: t('credential.sshUsername'),
@@ -191,7 +191,7 @@ export default function Credentials() {
           </Form.Item>
           <Form.Item name="credential_type" label={t('common.type')} initialValue="linux">
             <Select>
-              <Select.Option value="linux"><AppleOutlined /> Linux</Select.Option>
+              <Select.Option value="linux"><LinuxOutlined /> Linux</Select.Option>
               <Select.Option value="windows"><WindowsOutlined /> Windows</Select.Option>
             </Select>
           </Form.Item>
