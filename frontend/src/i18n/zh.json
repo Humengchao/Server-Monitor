@@ -298,6 +298,7 @@
   "probe.listView": "列表视图",
   "probe.searchPlaceholder": "搜索服务器、位置或标签",
   "probe.locationUnset": "位置未设置",
+  "probe.neverMeasured": "尚未采集到该节点的数据",
   "probe.noMatches": "没有匹配的节点",
   "probe.noMatchesHint": "换个筛选条件或搜索词试试。",
   "probe.uptime": "在线",

@@ -300,6 +300,9 @@ function ProbeNodeCard({
   );
   const totalTraffic = node.network_rx_total_bytes + node.network_tx_total_bytes;
   const expiryText = node.expires_at ? new Date(node.expires_at).toLocaleDateString() : t('probe.notConfigured');
+  // The collector fills memory_total on its first successful poll, so a zero
+  // here means the host has never been reached — not that it has no memory.
+  const measured = node.memory_total > 0;
 
   return (
     <article className={`glass-node-card ${node.status}`}>
@@ -310,23 +313,40 @@ function ProbeNodeCard({
       </header>
 
       <div className="node-plan-row">
-        <span><DashboardOutlined /> {t('probe.uptime')} <strong>{formatUptime(node.uptime_seconds, zh)}</strong></span>
+        <span><DashboardOutlined /> {t('probe.uptime')} <strong>{measured ? formatUptime(node.uptime_seconds, zh) : '—'}</strong></span>
         {node.billing_price > 0 && <span><DollarOutlined /> <strong>{symbol}{node.billing_price.toFixed(2)}</strong> / {cycleLabel}</span>}
       </div>
 
-      <div className="resource-stack">
-        <ResourceBar label="CPU" percent={node.cpu_percent} detail={`${node.cpu_cores || '—'} ${t('card.core')}`} tone="purple" extra={<span className="load-averages">{t('probe.load')}: {node.load_1.toFixed(2)} / {node.load_5.toFixed(2)} / {node.load_15.toFixed(2)}</span>} />
-        <ResourceBar label={t('card.memory')} percent={node.memory_percent} detail={`${formatBytes(node.memory_used)} / ${formatBytes(node.memory_total)}`} tone="green" />
-        <ResourceBar label={t('card.disk')} percent={node.disk_percent} detail={`${formatBytes(node.disk_used)} / ${formatBytes(node.disk_total)}`} tone="blue" />
-        <ResourceBar label={t('probe.traffic')} percent={node.traffic_percent} detail={node.traffic_limit_bytes > 0 ? `${formatBytes(totalTraffic)} / ${formatBytes(node.traffic_limit_bytes)}` : `${formatBytes(totalTraffic)} / ${t('probe.unlimited')}`} tone="pink" />
-      </div>
+      {/*
+        A node the collector has never reached reports 0 for every figure, and
+        drawing those as measurements — 0% CPU, "0 B / 0 B" of memory and disk,
+        0 B/s of traffic — describes an idle machine with no hardware. This page
+        is read by people who cannot check the host themselves, so it says it has
+        no reading rather than inventing one. The rows below survive: expiry,
+        packet loss and availability are all knowable without ever connecting.
+      */}
+      {measured ? (
+        <>
+          <div className="resource-stack">
+            <ResourceBar label="CPU" percent={node.cpu_percent} detail={`${node.cpu_cores || '—'} ${t('card.core')}`} tone="purple" extra={<span className="load-averages">{t('probe.load')}: {node.load_1.toFixed(2)} / {node.load_5.toFixed(2)} / {node.load_15.toFixed(2)}</span>} />
+            <ResourceBar label={t('card.memory')} percent={node.memory_percent} detail={`${formatBytes(node.memory_used)} / ${formatBytes(node.memory_total)}`} tone="green" />
+            <ResourceBar label={t('card.disk')} percent={node.disk_percent} detail={`${formatBytes(node.disk_used)} / ${formatBytes(node.disk_total)}`} tone="blue" />
+            <ResourceBar label={t('probe.traffic')} percent={node.traffic_percent} detail={node.traffic_limit_bytes > 0 ? `${formatBytes(totalTraffic)} / ${formatBytes(node.traffic_limit_bytes)}` : `${formatBytes(totalTraffic)} / ${t('probe.unlimited')}`} tone="pink" />
+          </div>
 
-      <div className="traffic-detail-grid">
-        <MetricCell icon={<ArrowUpOutlined />} label={t('probe.realtimeUpload')} value={formatRate(node.network_tx_bytes)} tone="pink" />
-        <MetricCell icon={<ArrowDownOutlined />} label={t('probe.realtimeDownload')} value={formatRate(node.network_rx_bytes)} tone="green" />
-        <MetricCell icon={<ArrowUpOutlined />} label={t('probe.totalUpload')} value={formatBytes(node.network_tx_total_bytes)} tone="purple" />
-        <MetricCell icon={<ArrowDownOutlined />} label={t('probe.totalDownload')} value={formatBytes(node.network_rx_total_bytes)} tone="blue" />
-      </div>
+          <div className="traffic-detail-grid">
+            <MetricCell icon={<ArrowUpOutlined />} label={t('probe.realtimeUpload')} value={formatRate(node.network_tx_bytes)} tone="pink" />
+            <MetricCell icon={<ArrowDownOutlined />} label={t('probe.realtimeDownload')} value={formatRate(node.network_rx_bytes)} tone="green" />
+            <MetricCell icon={<ArrowUpOutlined />} label={t('probe.totalUpload')} value={formatBytes(node.network_tx_total_bytes)} tone="purple" />
+            <MetricCell icon={<ArrowDownOutlined />} label={t('probe.totalDownload')} value={formatBytes(node.network_rx_total_bytes)} tone="blue" />
+          </div>
+        </>
+      ) : (
+        <div className="node-unmeasured">
+          <WarningFilled />
+          <span>{t('probe.neverMeasured')}</span>
+        </div>
+      )}
 
       <div className="node-bottom-grid">
         <div><CalendarOutlined /><span>{t('probe.expiry')}<strong>{expiryText}{node.remaining_days > 0 ? ` · ${node.remaining_days} ${t('probe.days')}` : ''}</strong></span></div>

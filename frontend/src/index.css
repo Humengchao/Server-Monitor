@@ -1048,7 +1048,7 @@ button, input, textarea, select { font: inherit; }
   .probe-section-heading { align-items: flex-start; }
   .probe-section-heading h2 { font-size: 25px; }
   .probe-section-heading p { max-width: 230px; }
-  .probe-section-heading .ant-btn span:not(.anticon) { display: none; }
+  .probe-section-heading .ant-btn > span:not(.ant-btn-icon) { display: none; }
   .probe-node-grid { grid-template-columns: 1fr; }
   .probe-privacy-note { padding: 23px; grid-template-columns: 46px 1fr; }
   .privacy-mascot { width: 46px; height: 46px; border-radius: 14px; }
@@ -1151,7 +1151,12 @@ button, input, textarea, select { font: inherit; }
 .summary-icon.amber { color: #ffd28b; background: rgba(210,149,57,.17); }
 .glass-summary-card > div { min-width: 0; display: flex; flex-direction: column; }
 .glass-summary-card small { overflow: hidden; color: rgba(222,228,250,.62); font-size: 11px; letter-spacing: .3px; text-overflow: ellipsis; white-space: nowrap; }
-.glass-summary-card strong { margin-top: 6px; color: #fff; font-size: 16px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* No nowrap: a value like "90.6 GB / 195.8 GB" is wider than a summary card
+   from ~640px down, and nowrap clipped it mid-unit instead of wrapping. Normal
+   wrapping only breaks at the spaces already in the string, so the numbers
+   themselves stay intact, and at desktop widths there is room to fit on one
+   line regardless. */
+.glass-summary-card strong { margin-top: 6px; color: #fff; font-size: 16px; font-variant-numeric: tabular-nums; }
 
 .glass-toolbar { margin: 22px 0 15px; padding: 10px; display: flex; align-items: center; justify-content: space-between; gap: 15px; border: 1px solid rgba(255,255,255,.11); border-radius: 15px; background: rgba(13,18,35,.52); box-shadow: inset 0 1px rgba(255,255,255,.04); backdrop-filter: blur(22px); }
 .glass-filter-list { display: flex; align-items: center; gap: 4px; overflow-x: auto; scrollbar-width: none; }
@@ -1193,6 +1198,16 @@ button, input, textarea, select { font: inherit; }
 .node-plan-row span { display: flex; align-items: center; gap: 5px; }
 .node-plan-row strong { color: rgba(246,248,255,.85); font-weight: 600; }
 .resource-stack { display: grid; gap: 8px; }
+/* Stands in for the resource bars and traffic grid on a node that has never
+   been reached. Sized to roughly what it replaces so a mixed fleet does not
+   turn into a ragged grid of tall and short cards. */
+.node-unmeasured {
+  min-height: 178px;
+  display: flex; align-items: center; justify-content: center; gap: 9px;
+  border: 1px dashed rgba(255,255,255,.14); border-radius: 13px;
+  color: rgba(226,231,247,.5); font-size: 13px;
+}
+.node-unmeasured .anticon { color: rgba(244,189,95,.72); }
 .resource-row > div:first-child { margin-bottom: 6px; display: flex; align-items: center; gap: 9px; color: rgba(229,233,250,.68); font-size: 11px; }
 .resource-row strong { margin-left: auto; color: rgba(248,249,255,.94); font-size: 12px; font-variant-numeric: tabular-nums; }
 .resource-row strong small { margin-left: 7px; color: rgba(221,226,247,.54); font-size: 10px; font-weight: 400; }
@@ -1248,7 +1263,12 @@ button, input, textarea, select { font: inherit; }
 
 @media (max-width: 820px) {
   .glass-header { grid-template-columns: 1fr auto; }
-  .glass-header-status { display: none; }
+  /* The overall state is the headline of a status page — hiding it left phone
+     visitors with an all-but-empty header bar. It was the "updated at" stamp
+     that made the pill too wide to sit beside the actions, so that goes
+     instead and the pill itself stays. */
+  .glass-header-status { padding: 7px 12px; font-size: 11px; }
+  .glass-header-status small { display: none; }
   .glass-intro { align-items: flex-start; flex-direction: column; }
   .privacy-seal { min-width: 0; }
   .glass-node-grid { grid-template-columns: 1fr; }
@@ -1259,11 +1279,19 @@ button, input, textarea, select { font: inherit; }
   .probe-bg { background-position: 66% center; }
   .glass-header, .glass-shell { width: calc(100% - 22px); }
   .glass-header { margin-top: 10px; padding: 10px; border-radius: 15px; }
-  .glass-brand small, .glass-header-actions .ant-btn span:not(.anticon), .glass-admin-link { display: none; }
+  .glass-brand small, .glass-admin-link { display: none; }
+  /* Drops the button labels, keeping the icons. The selector must be
+     `> span:not(.ant-btn-icon)`, not `span:not(.anticon)`: antd wraps a
+     button's icon in its own <span class="ant-btn-icon">, which the looser
+     form matched, and hiding that wrapper took the icon inside it too. The
+     language and theme toggles were 75px of invisible-but-clickable header on
+     every phone. */
+  .glass-header-actions .ant-btn > span:not(.ant-btn-icon) { display: none; }
   .glass-shell { padding-top: 34px; }
   .glass-intro h1 { font-size: 34px; }
   .glass-summary-grid { grid-template-columns: repeat(2, 1fr); }
   .glass-summary-card { min-height: 72px; padding: 11px; }
+  .glass-summary-card strong { font-size: 14px; }
   .summary-icon { width: 32px; height: 32px; flex-basis: 32px; }
   .glass-tools { display: grid; grid-template-columns: auto 1fr auto; }
   .glass-tools .ant-input-affix-wrapper { width: 100%; }

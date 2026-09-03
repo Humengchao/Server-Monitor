@@ -298,6 +298,7 @@
   "probe.listView": "List view",
   "probe.searchPlaceholder": "Search server, location, or tag",
   "probe.locationUnset": "Location not set",
+  "probe.neverMeasured": "No readings collected from this node yet",
   "probe.noMatches": "No matching nodes",
   "probe.noMatchesHint": "Try another filter or search term.",
   "probe.uptime": "Uptime",
