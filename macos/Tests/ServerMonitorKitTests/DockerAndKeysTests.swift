@@ -3,6 +3,7 @@ import Testing
 @testable import ServerMonitorKit
 
 @Suite("Docker summary")
+@MainActor
 struct DockerSummaryTests {
 
     @Test func parsesInfoLine() {
@@ -38,6 +39,7 @@ struct DockerSummaryTests {
 }
 
 @Suite("SSH key manager")
+@MainActor
 struct SSHKeyManagerTests {
 
     @Test func acceptsOrdinaryNames() {
@@ -87,6 +89,7 @@ struct SSHKeyManagerTests {
 }
 
 @Suite("Machine groups")
+@MainActor
 struct MachineGroupTests {
 
     @Test func groupSurvivesItsMembersAndViceVersa() throws {
@@ -121,6 +124,7 @@ struct MachineGroupTests {
 }
 
 @Suite("Docker summary from the metrics batch")
+@MainActor
 struct DockerBatchSummaryTests {
 
     @Test func dockerVersionSurvivesTheWidenedFormat() {
@@ -184,6 +188,7 @@ struct DockerBatchSummaryTests {
 }
 
 @Suite("Docker resource listings")
+@MainActor
 struct DockerResourceTests {
     static let separator = "\u{1F}"
 
@@ -270,6 +275,7 @@ struct DockerResourceTests {
 }
 
 @Suite("Compose projects")
+@MainActor
 struct DockerComposeTests {
 
     static let realOutput = """

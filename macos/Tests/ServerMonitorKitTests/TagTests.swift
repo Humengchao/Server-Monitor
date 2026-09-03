@@ -4,6 +4,7 @@ import Testing
 @testable import ServerMonitorKit
 
 @Suite("Machine tags")
+@MainActor
 struct TagTests {
 
     @Test func tagsRoundTripThroughTheStoredString() {

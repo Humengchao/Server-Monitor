@@ -3,6 +3,7 @@ import Testing
 @testable import ServerMonitorKit
 
 @Suite("SFTP listing")
+@MainActor
 struct SFTPClientTests {
 
     @Test func parsesLongIsoListing() {
@@ -78,6 +79,7 @@ struct SFTPClientTests {
 }
 
 @Suite("SSH key scanner")
+@MainActor
 struct SSHKeyScannerTests {
 
     @Test func parsesKeygenOutput() {
@@ -103,6 +105,7 @@ struct SSHKeyScannerTests {
 }
 
 @Suite("Session history")
+@MainActor
 struct SessionHistoryTests {
 
     @Test func durationFormatting() {
@@ -141,6 +144,7 @@ struct SessionHistoryTests {
 }
 
 @Suite("Toolbox storage")
+@MainActor
 struct ToolboxStorageTests {
 
     @Test func snippetUseCountIncrements() throws {
@@ -175,6 +179,7 @@ struct ToolboxStorageTests {
 }
 
 @Suite("SSH key encryption detection")
+@MainActor
 struct SSHKeyEncryptionTests {
 
     private func write(_ contents: String) throws -> String {
