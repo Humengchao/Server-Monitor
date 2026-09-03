@@ -1,6 +1,7 @@
 import Foundation
 import Network
 import SwiftUI
+import os
 
 /// Whether the last collection attempt for a server succeeded.
 public enum ServerStatus: Equatable, Sendable {
@@ -312,6 +313,10 @@ public final class MonitorService: ObservableObject {
         pathMonitor?.cancel()
         pathMonitor = nil
         networkWasSatisfied = nil
+        tickCapTask?.cancel()
+        tickCapTask = nil
+        tickOpen = false
+        tickMembers.removeAll()
         if let pollingActivity {
             ProcessInfo.processInfo.endActivity(pollingActivity)
             self.pollingActivity = nil
@@ -323,6 +328,60 @@ public final class MonitorService: ObservableObject {
     /// to answer is polled once, not once per tick, so a stall cannot pile up
     /// a queue of ssh processes behind it.
     private(set) var inFlight: Set<UUID> = []
+
+    static let log = Logger(subsystem: "com.hmchxd.ServerMonitor", category: "polling")
+
+    // MARK: - One tick, one publish
+
+    /// Servers launched by the tick in progress whose polls have not returned.
+    private(set) var tickMembers: Set<UUID> = []
+    /// True from the moment a tick launches its polls until the last of them
+    /// returns or `tickCap` elapses. Results arriving meanwhile are held.
+    private(set) var tickOpen = false
+    private var tickCapTask: Task<Void, Never>?
+
+    /// Longest a tick's results are held for a straggler before what has
+    /// arrived is shown anyway. Measured spread between the first and last
+    /// host finishing one tick: p50 1.0 s, p95 1.6 s. A host that has gone
+    /// away takes the full 10 s connect timeout, so the cap is what keeps one
+    /// dead host from delaying eight live ones.
+    var tickCap: Duration = .seconds(2)
+
+    /// Holds publishing until every poll this tick launched has answered.
+    ///
+    /// The 250 ms window on its own gave 3.4 publishes per tick, measured
+    /// over 221 ticks: hosts finish about a second apart (latency differs by
+    /// 200 ms and the script itself samples twice, 0.5 s apart), so the first
+    /// result opened a window, the next few closed it, and the stragglers each
+    /// opened another. Every publish is a full dashboard pass, so that was
+    /// three layouts to show one tick's numbers. The tick knows exactly which
+    /// polls it started; waiting for those turns it into one.
+    private func openTick(members: Set<UUID>) {
+        tickMembers.formUnion(members)
+        guard !tickOpen else { return }
+        tickOpen = true
+        tickCapTask = Task { [weak self] in
+            try? await Task.sleep(for: self?.tickCap ?? .seconds(2))
+            guard let self, !Task.isCancelled else { return }
+            self.closeTick(reason: "cap")
+        }
+    }
+
+    private func pollFinished(_ serverID: UUID) {
+        inFlight.remove(serverID)
+        tickMembers.remove(serverID)
+        if tickOpen && tickMembers.isEmpty { closeTick(reason: "complete") }
+    }
+
+    private func closeTick(reason: StaticString) {
+        tickOpen = false
+        tickCapTask?.cancel()
+        tickCapTask = nil
+        Self.log.debug("tick closed (\(reason, privacy: .public)), \(self.pending.count) results held")
+        // Hidden: leave them queued for `setUIVisible(true)`, exactly as a
+        // result arriving outside a tick would be.
+        if uiIsVisible { flushPending() }
+    }
 
     // MARK: - Failure backoff
 
@@ -406,17 +465,23 @@ public final class MonitorService: ObservableObject {
     /// those tasks without waiting for them. Each host runs on its own clock.
     @discardableResult
     func pollDue(ignoringBackoff: Bool = false, now: Date = Date()) -> [Task<Void, Never>] {
-        servers.compactMap { server in
+        var launched: Set<UUID> = []
+        let tasks: [Task<Void, Never>] = servers.compactMap { server in
             guard !inFlight.contains(server.id) else { return nil }
             if !ignoringBackoff, let due = retryAfter[server.id], isStillWaiting(until: due, now: now) {
                 return nil
             }
             inFlight.insert(server.id)
+            launched.insert(server.id)
             return Task { [weak self] in
                 await self?.poll(server)
-                self?.inFlight.remove(server.id)
+                self?.pollFinished(server.id)
             }
         }
+        // The tasks above start at the next suspension point, so the tick is
+        // open before the first of them can report.
+        if !launched.isEmpty { openTick(members: launched) }
+        return tasks
     }
 
     /// One pass over every server, waited for — the manual refresh. Hosts with
@@ -447,22 +512,20 @@ public final class MonitorService: ObservableObject {
             // sample insert would fail its foreign key anyway.
             guard servers.contains(where: { $0.id == server.id }) else { return }
 
-            // Durable writes go straight to the store; they publish nothing.
-            try database.insert(MetricSample(serverID: server.id, snapshot: snapshot))
-            try database.updateHostFacts(
-                serverID: server.id,
-                cores: snapshot.cores,
-                memoryTotal: snapshot.memoryTotal,
-                diskTotal: snapshot.diskTotal,
-                dockerVersion: snapshot.dockerVersion
-            )
             // Remember a probed OS so later polls skip straight to the right
-            // script instead of trying Linux every time. One column, not the
-            // whole row: `server` here is the copy this poll started with, and
-            // saving it back would overwrite a name or tags the user edited
-            // while the poll was running.
+            // script instead of trying Linux every time.
             let detected = server.osKind == .auto ? snapshot.detectedOS : nil
-            if let detected { try? database.updateOSKind(serverID: server.id, osKind: detected) }
+            // Durable writes go straight to the store; they publish nothing.
+            // One transaction, and not on this actor: three separate writes
+            // per host per poll were running on the thread that draws, and
+            // `Database.inTransaction` was 1% of main-thread time for it.
+            let database = self.database
+            let serverID = server.id
+            try await Task.detached(priority: .utility) {
+                try database.recordPoll(serverID: serverID, snapshot: snapshot, detectedOS: detected)
+            }.value
+            // The write suspended us; the server may be gone by now.
+            guard servers.contains(where: { $0.id == server.id }) else { return }
 
             // Everything the UI observes, in one batch.
             let now = Date()
@@ -489,6 +552,7 @@ public final class MonitorService: ObservableObject {
             if error is CancellationError { return }
             guard servers.contains(where: { $0.id == server.id }) else { return }
             noteFailure(serverID: server.id)
+            Self.log.info("\(server.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
             let failure = ServerStatus.offline(reason: error.localizedDescription)
             commit(for: server.id) { self.status[server.id] = failure }
             alerts?.evaluate(server: server, status: failure, snapshot: nil)
@@ -537,11 +601,9 @@ public final class MonitorService: ObservableObject {
         // `pollAll` apply it. The menu bar reads `peakCPU`/`offlineServers`,
         // which are computed from this same state, so it catches up then too —
         // it is a summary of a few numbers, not a view worth 11% of a core.
-        guard uiIsVisible else {
-            pending.append((serverID, apply))
-            return
-        }
-        if flushScheduled {
+        // Hidden, mid-tick, or inside a window: queue it. A lone result with
+        // none of those in force is applied on the spot.
+        if !uiIsVisible || tickOpen || flushScheduled {
             pending.append((serverID, apply))
             return
         }
@@ -553,8 +615,15 @@ public final class MonitorService: ObservableObject {
         flushScheduled = true
         Task { [weak self] in
             try? await Task.sleep(for: Self.publishWindow)
-            self?.flushPending()
+            self?.windowElapsed()
         }
+    }
+
+    /// The 250 ms window ran out. Mid-tick the tick's own close will publish,
+    /// so applying here would only split one tick's results in two.
+    private func windowElapsed() {
+        flushScheduled = false
+        if !tickOpen { flushPending() }
     }
 
     /// Applies everything queued, as one change. Results for a server deleted
@@ -578,6 +647,7 @@ public final class MonitorService: ObservableObject {
         for item in batch where servers.contains(where: { $0.id == item.serverID }) {
             item.apply()
         }
+        Self.log.debug("published \(batch.count) results")
         // A burst still arriving gets another window rather than an immediate
         // publish per result — but not while hidden, where nothing should be
         // waking up every 250 ms.

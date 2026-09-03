@@ -403,6 +403,28 @@ public final class Database: @unchecked Sendable {
         try queue.write { db in try value.insert(db) }
     }
 
+    /// Everything a successful poll writes, as one transaction: the sample,
+    /// the host facts when they changed, and a probed OS when there is one.
+    ///
+    /// These were three separate `write`s — three commits per host per poll —
+    /// and they ran on the main actor. The row is fetched fresh inside the
+    /// transaction rather than saved from the poll's copy, so a name or tags
+    /// the user edited while the poll ran are kept.
+    public func recordPoll(serverID: UUID, snapshot: MetricSnapshot, detectedOS: OSKind?) throws {
+        var sample = MetricSample(serverID: serverID, snapshot: snapshot)
+        try queue.write { db in
+            try sample.insert(db)
+            guard var server = try Server.fetchOne(db, key: ["id": serverID]) else { return }
+            var changed = false
+            if server.cores != snapshot.cores { server.cores = snapshot.cores; changed = true }
+            if server.memoryTotal != snapshot.memoryTotal { server.memoryTotal = snapshot.memoryTotal; changed = true }
+            if server.diskTotal != snapshot.diskTotal { server.diskTotal = snapshot.diskTotal; changed = true }
+            if server.dockerVersion != snapshot.dockerVersion { server.dockerVersion = snapshot.dockerVersion; changed = true }
+            if let detectedOS, server.osKind != detectedOS { server.osKind = detectedOS; changed = true }
+            if changed { try server.update(db) }
+        }
+    }
+
     /// History thinned to at most `maxPoints` time buckets, aggregated inside
     /// SQLite so only the buckets cross into Swift.
     ///

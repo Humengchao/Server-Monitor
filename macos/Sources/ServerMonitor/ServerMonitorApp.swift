@@ -6,9 +6,17 @@ import SwiftUI
 struct ServerMonitorApp: App {
     @StateObject private var localization = Localization()
     @StateObject private var settings: AppSettings
-    @StateObject private var monitor: MonitorService
-    @StateObject private var sessions: SessionManager
-    @StateObject private var alerts: AlertService
+    // Plain stored properties, not @StateObject. A @StateObject subscribes the
+    // App's own body to the object, and MonitorService publishes on every
+    // poll — so every 5 s the scene tree was re-evaluated and the window's
+    // root view replaced (`AppKitWindowController.updateRootView` was the
+    // single largest item in the profile). The App only needs to hand these
+    // down; the views that show them observe them themselves. `App.init` runs
+    // once per process, so a `let` here lives exactly as long as a
+    // @StateObject would.
+    private let monitor: MonitorService
+    private let sessions: SessionManager
+    private let alerts: AlertService
     /// Non-nil when the store could not be opened; the app then shows why
     /// instead of launching into an empty window that silently drops writes.
     private let startupFailure: String?
@@ -34,10 +42,9 @@ struct ServerMonitorApp: App {
             database = scratch
         }
         _settings = StateObject(wrappedValue: settings)
-        _monitor = StateObject(wrappedValue: MonitorService(database: database, settings: settings))
-        _sessions = StateObject(wrappedValue: SessionManager(database: database))
-        let alertService = AlertService(settings: settings)
-        _alerts = StateObject(wrappedValue: alertService)
+        monitor = MonitorService(database: database, settings: settings)
+        sessions = SessionManager(database: database)
+        alerts = AlertService(settings: settings)
         startupFailure = failure
     }
 

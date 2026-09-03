@@ -23,11 +23,16 @@ public final class Localization: ObservableObject {
         language = stored.flatMap(AppLanguage.init(rawValue:)) ?? .system
     }
 
+    /// What `.system` means on this Mac. Read once: a process's preferred
+    /// languages are fixed at launch, and `t()` runs for every label on every
+    /// render — the CFBundle lookup behind `Locale.preferredLanguages` was
+    /// showing up in the profile for a value that never changes.
+    private let systemLanguage: AppLanguage =
+        (Locale.preferredLanguages.first ?? "en").hasPrefix("zh") ? .zh : .en
+
     /// Resolved language: `.system` follows the user's preferred languages.
     public var resolved: AppLanguage {
-        guard language == .system else { return language }
-        let preferred = Locale.preferredLanguages.first ?? "en"
-        return preferred.hasPrefix("zh") ? .zh : .en
+        language == .system ? systemLanguage : language
     }
 
     public func t(_ key: String) -> String {

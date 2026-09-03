@@ -4,7 +4,12 @@ import SwiftUI
 /// is actually used: an overview, the resources you configure, tools, and the
 /// live sessions you have open.
 public struct RootView: View {
-    @EnvironmentObject private var monitor: MonitorService
+    // Deliberately not `monitor`. This view is the frame around everything —
+    // split view, sidebar, toolbar, sheets — and MonitorService publishes on
+    // every poll. With the service observed here, each poll re-evaluated the
+    // whole frame and diffed the NavigationSplitView for rows and buttons that
+    // had not changed. The parts that show live data are their own views
+    // further down, so a poll re-evaluates a row, not the window.
     @EnvironmentObject private var sessions: SessionManager
     @EnvironmentObject private var loc: Localization
 
@@ -72,7 +77,7 @@ public struct RootView: View {
     private var selectionActions: some View {
         switch selection {
         case .dashboard, nil:
-            refreshButton
+            RefreshButton()
             importButton
             addServerButton
 
@@ -85,7 +90,7 @@ public struct RootView: View {
             addServerButton
 
         case .server(let id):
-            serverActions(id)
+            ServerToolbarActions(id: id, editingServer: $editingServer)
 
         case .identities:
             newItemButton(loc.t("identity.new")) { creatingIdentity = true }
@@ -104,7 +109,7 @@ public struct RootView: View {
             .help(loc.t("common.refresh"))
 
         case .docker:
-            refreshButton
+            RefreshButton()
 
         case .history:
             Button(role: .destructive) { clearingHistory = true } label: {
@@ -123,49 +128,11 @@ public struct RootView: View {
         }
     }
 
-    @ViewBuilder
-    private func serverActions(_ id: UUID) -> some View {
-        let server = monitor.servers.first { $0.id == id }
-
-        Button {
-            if let server { sessions.open(server: server, kind: .terminal) }
-        } label: {
-            Label(loc.t("nav.terminal"), systemImage: "terminal")
-        }
-        .help(loc.t("nav.terminal"))
-        .disabled(server == nil)
-
-        Button {
-            if let server { sessions.open(server: server, kind: .sftp) }
-        } label: {
-            Label("SFTP", systemImage: "folder")
-        }
-        .help("SFTP")
-        .disabled(server == nil)
-
-        Button { editingServer = server } label: {
-            Label(loc.t("common.edit"), systemImage: "pencil")
-        }
-        .help(loc.t("common.edit"))
-        .disabled(server == nil)
-
-        refreshButton
-    }
-
     private func newItemButton(_ label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Label(label, systemImage: "plus")
         }
         .help(label)
-    }
-
-    private var refreshButton: some View {
-        Button {
-            Task { await monitor.pollAll() }
-        } label: {
-            Label(loc.t("common.refresh"), systemImage: "arrow.clockwise")
-        }
-        .help(loc.t("common.refresh"))
     }
 
     private var importButton: some View {
@@ -206,15 +173,7 @@ public struct RootView: View {
             }
 
             Section(loc.t("nav.servers")) {
-                if monitor.servers.isEmpty {
-                    Text(loc.t("nav.noServers"))
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                } else {
-                    ForEach(monitor.servers) { server in
-                        serverRow(server).tag(Selection.server(server.id))
-                    }
-                }
+                SidebarServerRows()
             }
 
             Section(loc.t("nav.terminal")) {
@@ -264,7 +223,118 @@ public struct RootView: View {
         }
     }
 
-    private func serverRow(_ server: Server) -> some View {
+    // MARK: - Detail
+
+    @ViewBuilder
+    private var detail: some View {
+        switch selection {
+        case .dashboard, nil:
+            DashboardView(search: $search, onSelect: { selection = .server($0) })
+        case .machines:
+            MachinesView(search: $search, creatingGroup: $creatingGroup, onOpen: { selection = .server($0) })
+        case .identities:
+            IdentitiesView(search: $search, creating: $creatingIdentity)
+        case .sshKeys:
+            SSHKeysView(search: $search, reloadToken: $keyScanToken, generating: $generatingKey)
+        case .snippets:
+            SnippetsView(search: $search, creating: $creatingSnippet)
+        case .docker:
+            DockerOverviewView(search: $search, onOpen: { selection = .server($0) })
+        case .server(let id):
+            ServerDetailHost(id: id)
+        case .history:
+            SessionHistoryView(search: $search, clearing: $clearingHistory)
+        case .session(let id):
+            SessionHost(id: id)
+        }
+    }
+}
+
+// MARK: - Live parts
+
+// Each of these observes MonitorService so that RootView does not have to.
+
+/// The window-level refresh, wherever the toolbar offers one.
+private struct RefreshButton: View {
+    @EnvironmentObject private var monitor: MonitorService
+    @EnvironmentObject private var loc: Localization
+
+    var body: some View {
+        Button {
+            Task { await monitor.pollAll() }
+        } label: {
+            Label(loc.t("common.refresh"), systemImage: "arrow.clockwise")
+        }
+        .help(loc.t("common.refresh"))
+    }
+}
+
+/// Terminal, SFTP, edit and refresh for the selected machine.
+private struct ServerToolbarActions: View {
+    let id: UUID
+    @Binding var editingServer: Server?
+
+    @EnvironmentObject private var monitor: MonitorService
+    @EnvironmentObject private var sessions: SessionManager
+    @EnvironmentObject private var loc: Localization
+
+    var body: some View {
+        let server = monitor.servers.first { $0.id == id }
+
+        Button {
+            if let server { sessions.open(server: server, kind: .terminal) }
+        } label: {
+            Label(loc.t("nav.terminal"), systemImage: "terminal")
+        }
+        .help(loc.t("nav.terminal"))
+        .disabled(server == nil)
+
+        Button {
+            if let server { sessions.open(server: server, kind: .sftp) }
+        } label: {
+            Label("SFTP", systemImage: "folder")
+        }
+        .help("SFTP")
+        .disabled(server == nil)
+
+        Button { editingServer = server } label: {
+            Label(loc.t("common.edit"), systemImage: "pencil")
+        }
+        .help(loc.t("common.edit"))
+        .disabled(server == nil)
+
+        RefreshButton()
+    }
+}
+
+/// The sidebar's server list. Sits inside the sidebar `List`, so its rows'
+/// tags still drive the selection.
+private struct SidebarServerRows: View {
+    @EnvironmentObject private var monitor: MonitorService
+    @EnvironmentObject private var loc: Localization
+
+    var body: some View {
+        if monitor.servers.isEmpty {
+            Text(loc.t("nav.noServers"))
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        } else {
+            ForEach(monitor.servers) { server in
+                SidebarServerRow(server: server)
+                    .tag(RootView.Selection.server(server.id))
+            }
+        }
+    }
+}
+
+/// Status dot, flag, name, and one line of live detail.
+private struct SidebarServerRow: View {
+    let server: Server
+
+    @EnvironmentObject private var monitor: MonitorService
+    @EnvironmentObject private var loc: Localization
+
+    var body: some View {
         HStack(spacing: 8) {
             StatusDot(status: monitor.status[server.id] ?? .unknown)
             if !server.flag.isEmpty {
@@ -292,48 +362,47 @@ public struct RootView: View {
             }
         }
     }
+}
 
-    // MARK: - Detail
+/// The machine screen for a selected server, or a placeholder once it is gone.
+private struct ServerDetailHost: View {
+    let id: UUID
 
-    @ViewBuilder
-    private var detail: some View {
-        switch selection {
-        case .dashboard, nil:
-            DashboardView(search: $search, onSelect: { selection = .server($0) })
-        case .machines:
-            MachinesView(search: $search, creatingGroup: $creatingGroup, onOpen: { selection = .server($0) })
-        case .identities:
-            IdentitiesView(search: $search, creating: $creatingIdentity)
-        case .sshKeys:
-            SSHKeysView(search: $search, reloadToken: $keyScanToken, generating: $generatingKey)
-        case .snippets:
-            SnippetsView(search: $search, creating: $creatingSnippet)
-        case .docker:
-            DockerOverviewView(search: $search, onOpen: { selection = .server($0) })
-        case .server(let id):
-            if let server = monitor.servers.first(where: { $0.id == id }) {
-                // Keyed on the server so switching hosts starts a fresh screen:
-                // without it the same view instance was reused and kept the
-                // previous host's history, looked-up location and containers
-                // until each of its timers came round.
-                ServerDetailView(server: server).id(server.id)
-            } else {
-                ContentUnavailableView(loc.t("dashboard.emptyTitle"), systemImage: "server.rack")
+    @EnvironmentObject private var monitor: MonitorService
+    @EnvironmentObject private var loc: Localization
+
+    var body: some View {
+        if let server = monitor.servers.first(where: { $0.id == id }) {
+            // Keyed on the server so switching hosts starts a fresh screen:
+            // without it the same view instance was reused and kept the
+            // previous host's history, looked-up location and containers
+            // until each of its timers came round.
+            ServerDetailView(server: server).id(server.id)
+        } else {
+            ContentUnavailableView(loc.t("dashboard.emptyTitle"), systemImage: "server.rack")
+        }
+    }
+}
+
+/// A terminal or SFTP session, or a placeholder once it has been closed.
+private struct SessionHost: View {
+    let id: UUID
+
+    @EnvironmentObject private var monitor: MonitorService
+    @EnvironmentObject private var sessions: SessionManager
+    @EnvironmentObject private var loc: Localization
+
+    var body: some View {
+        if let session = sessions.active.first(where: { $0.id == id }),
+           let server = monitor.servers.first(where: { $0.id == session.serverID }) {
+            switch session.kind {
+            case .terminal:
+                TerminalPane(server: server, sessionID: session.id).id(session.id)
+            case .sftp:
+                SFTPView(server: server).id(session.id)
             }
-        case .history:
-            SessionHistoryView(search: $search, clearing: $clearingHistory)
-        case .session(let id):
-            if let session = sessions.active.first(where: { $0.id == id }),
-               let server = monitor.servers.first(where: { $0.id == session.serverID }) {
-                switch session.kind {
-                case .terminal:
-                    TerminalPane(server: server, sessionID: session.id).id(session.id)
-                case .sftp:
-                    SFTPView(server: server).id(session.id)
-                }
-            } else {
-                ContentUnavailableView(loc.t("nav.noSessions"), systemImage: "terminal")
-            }
+        } else {
+            ContentUnavailableView(loc.t("nav.noSessions"), systemImage: "terminal")
         }
     }
 }
