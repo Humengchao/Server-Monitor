@@ -260,3 +260,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_alert_events_open ON alert_events(rule_id,
 -- last_seen_at was never written; liveness comes from
 -- server_latest_metrics.recorded_at instead.
 ALTER TABLE servers DROP COLUMN IF EXISTS last_seen_at;
+
+-- Per-user preferences. Kept out of `users` so adding a preference does not
+-- widen the row every auth lookup reads.
+CREATE TABLE IF NOT EXISTS user_settings (
+    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    -- Alert rules that carry no webhook of their own fall back to this, so a
+    -- destination is configured once instead of pasted into every rule.
+    default_webhook_url TEXT NOT NULL DEFAULT '',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

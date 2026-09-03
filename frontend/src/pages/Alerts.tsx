@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { alertsApi, AlertEvent, AlertMetric, AlertRule, METRIC_UNITS, PERCENT_METRICS } from '../api/alerts';
 import { serversApi, Server } from '../api/servers';
+import { settingsApi } from '../api/settings';
 import { usePolling } from '../hooks/usePolling';
 
 const { Title, Text } = Typography;
@@ -95,6 +96,8 @@ export default function Alerts() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingRule, setEditingRule] = useState<AlertRule | null>(null);
   const [testing, setTesting] = useState(false);
+  // The account default a rule falls back to when it carries no webhook.
+  const [defaultWebhook, setDefaultWebhook] = useState('');
   const [form] = Form.useForm();
   const watchedMetric = Form.useWatch('metric', form) as AlertMetric | undefined;
 
@@ -121,6 +124,9 @@ export default function Alerts() {
 
   useEffect(() => {
     serversApi.list().then((res) => setServers(res.data || [])).catch(() => undefined);
+    // Only used to label the notify column; a failure leaves it reading as
+    // "no destination", which is the safe way to be wrong.
+    settingsApi.get().then((res) => setDefaultWebhook(res.data.default_webhook_url || '')).catch(() => undefined);
   }, []);
 
   const activeEvents = useMemo(() => events.filter((e) => !e.resolved_at), [events]);
@@ -296,12 +302,32 @@ export default function Alerts() {
     {
       title: t('alerts.notify'),
       key: 'webhook',
-      width: 110,
-      render: (_: unknown, rule: AlertRule) => (
-        rule.webhook_url
-          ? <Tooltip title={rule.webhook_url}><Tag color="blue" variant="filled"><ApiOutlined /> Webhook</Tag></Tooltip>
-          : <Text type="secondary">—</Text>
-      ),
+      width: 118,
+      // Three distinct states, and the old "—" collapsed two of them: a rule
+      // with no address of its own now inherits the account default, and only
+      // a rule with neither notifies nobody. Saying "—" for both left people
+      // believing alerts were being delivered when they were not.
+      render: (_: unknown, rule: AlertRule) => {
+        if (rule.webhook_url) {
+          return (
+            <Tooltip title={rule.webhook_url}>
+              <Tag color="blue" variant="filled"><ApiOutlined /> Webhook</Tag>
+            </Tooltip>
+          );
+        }
+        if (defaultWebhook) {
+          return (
+            <Tooltip title={t('alerts.notifyDefaultHint', { url: defaultWebhook })}>
+              <Tag variant="filled"><ApiOutlined /> {t('alerts.notifyDefault')}</Tag>
+            </Tooltip>
+          );
+        }
+        return (
+          <Tooltip title={t('alerts.notifyNoneHint')}>
+            <Text type="secondary">{t('alerts.notifyNone')}</Text>
+          </Tooltip>
+        );
+      },
     },
     {
       title: t('alerts.enabled'),

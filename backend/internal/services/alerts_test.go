@@ -248,3 +248,41 @@ func parseTestIP(t *testing.T, raw string) net.IP {
 	}
 	return ip
 }
+
+func TestApplyDefaultWebhooks(t *testing.T) {
+	alice, bob := uuid.New(), uuid.New()
+	defaults := map[uuid.UUID]string{alice: "https://hooks.example.com/alice"}
+
+	rules := []models.AlertRule{
+		{Name: "inherits", UserID: alice, WebhookURL: ""},
+		{Name: "keeps its own", UserID: alice, WebhookURL: "https://hooks.example.com/override"},
+		// Whitespace is not a webhook; the rule form trims, but a value written
+		// straight to the API would otherwise suppress the default silently.
+		{Name: "blank is not a value", UserID: alice, WebhookURL: "   "},
+		// Bob has no default, so his empty rule must stay empty rather than
+		// picking up another user's destination.
+		{Name: "no default for owner", UserID: bob, WebhookURL: ""},
+	}
+	ApplyDefaultWebhooks(rules, defaults)
+
+	want := []string{
+		"https://hooks.example.com/alice",
+		"https://hooks.example.com/override",
+		"https://hooks.example.com/alice",
+		"",
+	}
+	for i, w := range want {
+		if rules[i].WebhookURL != w {
+			t.Errorf("rule %q: webhook = %q, want %q", rules[i].Name, rules[i].WebhookURL, w)
+		}
+	}
+}
+
+func TestApplyDefaultWebhooksNoDefaults(t *testing.T) {
+	owner := uuid.New()
+	rules := []models.AlertRule{{UserID: owner, WebhookURL: ""}}
+	ApplyDefaultWebhooks(rules, nil)
+	if rules[0].WebhookURL != "" {
+		t.Errorf("webhook = %q, want empty", rules[0].WebhookURL)
+	}
+}

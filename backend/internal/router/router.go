@@ -79,6 +79,7 @@ func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, noti
 	credH := handlers.NewCredentialHandler()
 	publicStatusH := handlers.NewPublicStatusHandler()
 	alertH := handlers.NewAlertHandler(notifier)
+	settingsH := handlers.NewSettingsHandler(notifier)
 
 	rateLimit := middleware.RateLimit(5, 1*time.Minute)
 
@@ -143,6 +144,12 @@ func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, noti
 		ws := api.Group("/ws", middleware.WSAuthRequired(cfg))
 		{
 			ws.GET("/servers/:id/docker/containers/:containerId/exec", dockerH.ContainerExec)
+		}
+
+		settings := api.Group("/settings", middleware.AuthRequired(cfg))
+		{
+			settings.GET("", settingsH.Get)
+			settings.PUT("", settingsH.Update)
 		}
 
 		tags := api.Group("/tags", middleware.AuthRequired(cfg))

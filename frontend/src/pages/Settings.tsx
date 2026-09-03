@@ -4,11 +4,14 @@ import {
   Tooltip, Typography,
 } from 'antd';
 import {
-  DeleteOutlined, EditOutlined, LockOutlined, PlusOutlined, SafetyCertificateOutlined, TagsOutlined,
+  BellOutlined, DeleteOutlined, EditOutlined, ExperimentOutlined, LockOutlined, PlusOutlined,
+  SafetyCertificateOutlined, TagsOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { tagsApi, Tag } from '../api/servers';
+import { alertsApi } from '../api/alerts';
 import { authApi } from '../api/auth';
+import { settingsApi } from '../api/settings';
 import { useAuthStore } from '../store/authStore';
 
 const { Title, Text } = Typography;
@@ -36,6 +39,10 @@ export default function Settings() {
   const [form] = Form.useForm();
   const [passwordForm] = Form.useForm<PasswordFormValues>();
   const [savingPassword, setSavingPassword] = useState(false);
+  const [webhook, setWebhook] = useState('');
+  const [savedWebhook, setSavedWebhook] = useState('');
+  const [savingWebhook, setSavingWebhook] = useState(false);
+  const [testingWebhook, setTestingWebhook] = useState(false);
 
   const loadTags = async () => {
     setLoading(true);
@@ -48,11 +55,49 @@ export default function Settings() {
     setLoading(false);
   };
 
+  const loadSettings = async () => {
+    try {
+      const res = await settingsApi.get();
+      setWebhook(res.data.default_webhook_url || '');
+      setSavedWebhook(res.data.default_webhook_url || '');
+    } catch {
+      message.error(t('settings.loadSettingsFailed'));
+    }
+  };
+
   useEffect(() => {
     // Deferred so the first fetch doesn't set state synchronously in the effect.
-    const initial = window.setTimeout(() => loadTags(), 0);
+    const initial = window.setTimeout(() => { loadTags(); loadSettings(); }, 0);
     return () => window.clearTimeout(initial);
   }, []);
+
+  const handleSaveWebhook = async () => {
+    setSavingWebhook(true);
+    try {
+      const res = await settingsApi.update(webhook.trim());
+      setSavedWebhook(res.data.default_webhook_url || '');
+      setWebhook(res.data.default_webhook_url || '');
+      message.success(res.data.default_webhook_url
+        ? t('settings.webhookSaved')
+        : t('settings.webhookCleared'));
+    } catch (err: unknown) {
+      // The server's own words name the reason — an unreachable scheme, a
+      // private address — and beat any message this page could compose.
+      message.error(apiError(err, t('settings.webhookSaveFailed')));
+    }
+    setSavingWebhook(false);
+  };
+
+  const handleTestWebhook = async () => {
+    setTestingWebhook(true);
+    try {
+      await alertsApi.testWebhook(webhook.trim());
+      message.success(t('settings.webhookTestSent'));
+    } catch (err: unknown) {
+      message.error(apiError(err, t('settings.webhookTestFailed')));
+    }
+    setTestingWebhook(false);
+  };
 
   // antd's ColorPicker hands the form an AggregationColor object (not a hex
   // string) once the user picks a color; sending it raw makes the backend's
@@ -211,6 +256,47 @@ export default function Settings() {
               loading={loading}
               pagination={false}
             />
+          </Card>
+
+          {/* Alert rules each carried their own webhook, so a fleet with ten
+              rules meant pasting the same URL ten times and editing all ten to
+              change it. A rule that leaves its own field blank now inherits
+              this. */}
+          <Card
+            className="panel-card settings-notify-card"
+            title={<Space><BellOutlined />{t('settings.notifications')}</Space>}
+          >
+            <Text type="secondary" className="card-hint">{t('settings.webhookHint')}</Text>
+            <Input
+              value={webhook}
+              onChange={(event) => setWebhook(event.target.value)}
+              placeholder="https://hooks.example.com/alerts"
+              allowClear
+              onPressEnter={handleSaveWebhook}
+            />
+            <Space className="settings-notify-actions" wrap>
+              <Button
+                type="primary"
+                loading={savingWebhook}
+                disabled={webhook.trim() === savedWebhook}
+                onClick={handleSaveWebhook}
+              >
+                {t('common.save')}
+              </Button>
+              <Button
+                icon={<ExperimentOutlined />}
+                loading={testingWebhook}
+                // Testing an unsaved URL is the point — you check it works
+                // before committing to it.
+                disabled={!webhook.trim()}
+                onClick={handleTestWebhook}
+              >
+                {t('alerts.testWebhook')}
+              </Button>
+              {!savedWebhook && (
+                <Text type="secondary">{t('settings.webhookUnset')}</Text>
+              )}
+            </Space>
           </Card>
         </Col>
 

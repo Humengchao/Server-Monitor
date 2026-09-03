@@ -140,6 +140,13 @@ func (e *AlertEngine) evaluateOnce(now time.Time) {
 		log.Printf("alerts: load snapshots: %v", err)
 		return
 	}
+	// A lookup failure only means this cycle notifies through per-rule URLs
+	// alone; it must not stop evaluation.
+	if defaults, err := models.GetDefaultWebhooks(e.db); err != nil {
+		log.Printf("alerts: load default webhooks: %v", err)
+	} else {
+		ApplyDefaultWebhooks(rules, defaults)
+	}
 	live := make(map[alertKey]struct{})
 	for _, rule := range rules {
 		for _, snap := range snapshots {
@@ -371,6 +378,25 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dm", int(d.Minutes()))
 	}
 	return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
+}
+
+// ApplyDefaultWebhooks fills in each rule's owner default where the rule
+// carries no webhook of its own, in place.
+//
+// Resolved here rather than in the rule query so the API keeps reporting what
+// a rule actually stores: the UI distinguishes "inherits the default" from
+// "has its own", and a join would erase that. A rule whose own URL is set
+// always wins — the default is a fallback, never an override.
+func ApplyDefaultWebhooks(rules []models.AlertRule, defaults map[uuid.UUID]string) {
+	if len(defaults) == 0 {
+		return
+	}
+	for i := range rules {
+		if strings.TrimSpace(rules[i].WebhookURL) != "" {
+			continue
+		}
+		rules[i].WebhookURL = defaults[rules[i].UserID]
+	}
 }
 
 // WebhookNotifier delivers alert transitions to a user-configured URL.
