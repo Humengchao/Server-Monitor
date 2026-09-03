@@ -21,6 +21,13 @@ public actor MetricsCollector {
     /// Looked up with `lscpu` once — it is a fixed fact, and `lscpu` is not
     /// cheap on an 80-core ARM box — then carried into every later snapshot.
     private var cpuModelCache: [UUID: String] = [:]
+    /// Docker engine facts per server, and when they were last asked for.
+    /// `docker info` costs the host ~90 ms of CPU and its answer changes when
+    /// an image is pulled or a container starts — not every five seconds — so
+    /// it is sampled every `dockerInterval` and carried forward in between.
+    private var dockerCache: [UUID: (version: String, summary: DockerSummary?)] = [:]
+    private var dockerSampledAt: [UUID: Date] = [:]
+    static let dockerInterval: TimeInterval = 30
     /// Hosts already asked, so one that cannot answer is not asked every poll.
     private var cpuModelLookedUp: Set<UUID> = []
 
@@ -28,7 +35,12 @@ public actor MetricsCollector {
         self.runner = runner
     }
 
-    public func collect(target: SSHTarget, osKind: OSKind = .auto) async throws -> MetricSnapshot {
+    /// `processes`: whether to fetch the process list. Only the machine screen
+    /// shows it, and `ps` over every process costs the host ~30 ms per poll, so
+    /// the dashboard's polls leave it out.
+    public func collect(
+        target: SSHTarget, osKind: OSKind = .auto, processes: Bool = true
+    ) async throws -> MetricSnapshot {
         // Kick the ICMP probe off alongside the SSH round trip when it is due,
         // so latency costs no extra wall-clock time.
         async let icmp = pingIfDue(target: target)
@@ -41,7 +53,7 @@ public actor MetricsCollector {
         case .windows:
             snapshot = try await collectWindows(target: target)
         case .linux:
-            (snapshot, elapsed, clocks) = try await collectLinux(target: target)
+            (snapshot, elapsed, clocks) = try await collectLinux(target: target, processes: processes)
         case .auto:
             // Probe with one cheap command rather than speculatively running a
             // whole collection. The Linux batch contains `sleep` and several
@@ -49,7 +61,7 @@ public actor MetricsCollector {
             // until the timeout — a detection should cost a moment, not 30s.
             let detected = try await detectOS(target: target)
             if detected == .linux {
-                (snapshot, elapsed, clocks) = try await collectLinux(target: target)
+                (snapshot, elapsed, clocks) = try await collectLinux(target: target, processes: processes)
             } else {
                 snapshot = try await collectWindows(target: target)
             }
@@ -120,11 +132,20 @@ public actor MetricsCollector {
     }
 
     /// Returns the snapshot plus what the latency calculation needs.
+    /// Whether this poll should ask the engine again. Always when nothing is
+    /// cached — a first poll, or a host that has just gained Docker.
+    static func shouldSampleDocker(lastSampled: Date?, now: Date) -> Bool {
+        guard let lastSampled else { return true }
+        return now.timeIntervalSince(lastSampled) >= dockerInterval
+    }
+
     private func collectLinux(
-        target: SSHTarget
+        target: SSHTarget, processes: Bool
     ) async throws -> (MetricSnapshot, TimeInterval, (start: String, end: String)) {
         let started = Date()
-        let output = try await runner.run(ProcParsers.linuxMetricsCommand, on: target)
+        let askDocker = Self.shouldSampleDocker(lastSampled: dockerSampledAt[target.serverID], now: started)
+        let command = ProcParsers.linuxMetricsCommand(processes: processes, docker: askDocker)
+        let output = try await runner.run(command, on: target)
         let elapsed = Date().timeIntervalSince(started)
 
         let sections = ProcParsers.splitSections(output, want: ProcParsers.Section.allCases.count)
@@ -140,13 +161,24 @@ public actor MetricsCollector {
         (snapshot.diskUsed, snapshot.diskTotal) = ProcParsers.diskUsage(section(.diskUsage))
         snapshot.uptimeSeconds = ProcParsers.uptime(section(.uptime))
         snapshot.cores = ProcParsers.cores(section(.nproc))
-        snapshot.dockerVersion = ProcParsers.dockerVersion(section(.docker))
-        if !snapshot.dockerVersion.isEmpty {
+        if askDocker {
+            snapshot.dockerVersion = ProcParsers.dockerVersion(section(.docker))
+            dockerSampledAt[target.serverID] = started
+        } else if let cached = dockerCache[target.serverID] {
+            // Between samples the last answer stands; an empty version here
+            // would read as "Docker was removed" and hide the card.
+            snapshot.dockerVersion = cached.version
+            snapshot.dockerSummary = cached.summary
+        }
+        if askDocker, !snapshot.dockerVersion.isEmpty {
             let summary = DockerClient.parseSummary(section(.docker))
             // parseSummary needs the pipe-separated form; a host that answered
             // with a bare version leaves the counts at zero, which would read
             // as "no containers" rather than "not reported".
             if !summary.engineVersion.isEmpty { snapshot.dockerSummary = summary }
+        }
+        if askDocker {
+            dockerCache[target.serverID] = (snapshot.dockerVersion, snapshot.dockerSummary)
         }
 
         // Detail for the machine screen. Most of this comes from output the

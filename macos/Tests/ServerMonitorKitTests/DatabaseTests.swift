@@ -252,6 +252,41 @@ struct PollingActivityTests {
         #expect(monitor.inFlight.isEmpty)
     }
 
+    @Test func openingAMachineScreenPollsItAtOnceWithProcesses() async throws {
+        let monitor = try service()
+        try monitor.addServer(refusingServer())
+        let id = monitor.servers[0].id
+        #expect(!monitor.detailedServers.contains(id))
+
+        // Rather than waiting out the interval, the screen opening starts a
+        // poll of its own; it is outside any tick, so its verdict lands on return.
+        let task = try #require(monitor.setDetailVisible(id, true))
+        #expect(monitor.detailedServers.contains(id))
+        #expect(monitor.inFlight.contains(id))
+        await task.value
+        #expect(monitor.inFlight.isEmpty)
+        #expect(monitor.status[id] != nil)
+
+        #expect(monitor.setDetailVisible(id, true) != nil, "not in flight any more: polls again")
+        monitor.setDetailVisible(id, false)
+        #expect(!monitor.detailedServers.contains(id))
+        for task in monitor.pollDue() { await task.value }
+    }
+
+    @Test func reorderingPersistsAndIsWhatTheViewsDraw() throws {
+        let monitor = try service()
+        for name in ["a", "b", "c"] {
+            try monitor.addServer(Server(name: name, host: "127.0.0.1", port: 1, username: "u", authKind: .agent,
+                                         sortIndex: try monitor.database.nextSortIndex()))
+        }
+        #expect(monitor.servers.map(\.name) == ["a", "b", "c"])
+        try monitor.moveServers(fromOffsets: IndexSet(integer: 2), toOffset: 0)
+        #expect(monitor.servers.map(\.name) == ["c", "a", "b"], "the in-memory order the sidebar draws")
+        // And what a relaunch would read back.
+        let reopened = MonitorService(database: monitor.database, settings: AppSettings())
+        #expect(reopened.servers.map(\.name) == ["c", "a", "b"])
+    }
+
     @Test func aPollThatFinishesAfterItsServerWasDeletedRecordsNothing() async throws {
         // The poll started with a copy of the server; if it wrote its result
         // back, the deleted host reappeared in `status`/`latest` and the sample

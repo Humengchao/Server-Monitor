@@ -41,4 +41,12 @@ struct OSProbeTests {
         // answer; only the throwing paths above mean "no evidence".
         #expect(MetricsCollector.osKind(fromUname: "") == .windows)
     }
+
+    @Test func dockerIsSampledOnASlowCadence() {
+        let now = Date()
+        #expect(MetricsCollector.shouldSampleDocker(lastSampled: nil, now: now), "nothing cached yet")
+        #expect(!MetricsCollector.shouldSampleDocker(lastSampled: now.addingTimeInterval(-5), now: now))
+        #expect(MetricsCollector.shouldSampleDocker(lastSampled: now.addingTimeInterval(-31), now: now))
+        #expect(MetricsCollector.dockerInterval == 30)
+    }
 }

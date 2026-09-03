@@ -99,6 +99,12 @@ full handshake.
   minutes, cleared by any answer, by editing the host, and by the network
   coming back (`NWPathMonitor`), since nine hosts failing at once is almost
   always this machine's link. A manual refresh always means "try now".
+- **Light on the hosts it watches.** Measured on a 16-core host, the full
+  collection script cost it ~142 ms of CPU per poll — `docker info` 89 ms of
+  that (a Go CLI starting up), `ps` over every process 30 ms. So Docker is
+  asked every 30 s and the answer carried forward, and the process list is
+  fetched only for the host whose machine screen is open (opening one polls it
+  at once). A dashboard poll now costs the host ~30 ms.
 - **Low Power Mode is honoured.** With it on, polls run a third as often; the
   moment it is off, the configured interval is back. Nine ssh round trips every
   five seconds is exactly the kind of background work that switch is about.

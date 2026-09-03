@@ -131,6 +131,15 @@ public final class MonitorService {
         reload()
     }
 
+    /// Reorders the sidebar and the dashboard together: both draw `servers` in
+    /// `sortIndex` order, and that order is persisted so it survives a relaunch.
+    public func moveServers(fromOffsets source: IndexSet, toOffset destination: Int) throws {
+        var reordered = servers
+        reordered.move(fromOffsets: source, toOffset: destination)
+        try database.reorderServers(reordered.map(\.id))
+        reload()
+    }
+
     public func deleteServer(_ server: Server) throws {
         let target = try? target(for: server)
         try database.deleteServer(id: server.id)
@@ -140,6 +149,7 @@ public final class MonitorService {
         alerts?.forget(serverID: server.id)
         latest.removeValue(forKey: server.id)
         status.removeValue(forKey: server.id)
+        detailedServers.remove(server.id)
         failureStreak.removeValue(forKey: server.id)
         retryAfter.removeValue(forKey: server.id)
         pending.removeAll { $0.serverID == server.id }
@@ -380,6 +390,36 @@ public final class MonitorService {
     /// a queue of ssh processes behind it.
     @ObservationIgnored private(set) var inFlight: Set<UUID> = []
 
+    /// Servers whose machine screen is on screen. Only they get the process
+    /// list, the one part of a poll the dashboard never shows and the host
+    /// pays ~30 ms of CPU for.
+    @ObservationIgnored private(set) var detailedServers: Set<UUID> = []
+
+    /// Called by the machine screen as it appears and disappears. Opening one
+    /// polls the host at once, so the process card fills in about a second
+    /// rather than waiting out the rest of the current interval.
+    @discardableResult
+    public func setDetailVisible(_ serverID: UUID, _ visible: Bool) -> Task<Void, Never>? {
+        if visible {
+            detailedServers.insert(serverID)
+            return pollNow(serverID)
+        }
+        detailedServers.remove(serverID)
+        return nil
+    }
+
+    /// One host, now, outside the tick — for a screen that has just opened.
+    /// Nothing if it is already being polled; that poll is seconds from done.
+    @discardableResult
+    func pollNow(_ serverID: UUID) -> Task<Void, Never>? {
+        guard let server = server(id: serverID), !inFlight.contains(serverID) else { return nil }
+        inFlight.insert(serverID)
+        return Task { [weak self] in
+            await self?.poll(server)
+            self?.pollFinished(serverID)
+        }
+    }
+
     static let log = Logger(subsystem: "com.hmchxd.ServerMonitor", category: "polling")
 
     // MARK: - One tick, one publish
@@ -594,7 +634,9 @@ public final class MonitorService {
         }
         do {
             let target = try target(for: server)
-            let snapshot = try await collector.collect(target: target, osKind: server.osKind)
+            let snapshot = try await collector.collect(
+                target: target, osKind: server.osKind, processes: detailedServers.contains(server.id)
+            )
             // Deleted while this poll was in flight: nothing to record, and the
             // sample insert would fail its foreign key anyway.
             guard hasServer(server.id) else { return }

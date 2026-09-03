@@ -355,6 +355,15 @@ public final class Database: @unchecked Sendable {
         Keychain.deletePassword(serverID: id)
     }
 
+    /// Writes `sortIndex` 0…n-1 in the given order, in one transaction.
+    public func reorderServers(_ ids: [UUID]) throws {
+        try queue.write { db in
+            for (index, id) in ids.enumerated() {
+                try db.execute(sql: "UPDATE server SET sortIndex = ? WHERE id = ?", arguments: [index, id])
+            }
+        }
+    }
+
     public func nextSortIndex() throws -> Int {
         try queue.read { db in
             let maximum = try Int.fetchOne(db, sql: "SELECT MAX(sortIndex) FROM server") ?? 0

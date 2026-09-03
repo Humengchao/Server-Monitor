@@ -27,7 +27,18 @@ public enum ProcParsers {
     /// per file, which matters on high-latency links. The second `/proc/stat`
     /// read is delayed *remotely* so CPU usage still comes from two samples
     /// half a second apart without a second round trip.
-    public static let linuxMetricsCommand: String = {
+    public static let linuxMetricsCommand: String = linuxMetricsCommand(processes: true, docker: true)
+
+    /// The collection script with its two expensive sections optional.
+    ///
+    /// Measured on a 16-core host: the whole script costs it ~142 ms of CPU per
+    /// poll, of which `docker info` is 89 ms (a Go CLI starting up; the daemon's
+    /// share is 7 ms) and `ps` over every process is 30 ms. Everything else
+    /// together is ~23 ms. Every five seconds, on every host, that is the
+    /// monitor's whole footprint on the machines it watches — so the two are
+    /// asked for only when something will show them. A skipped section still
+    /// emits its separator, so the parser's section count never moves.
+    public static func linuxMetricsCommand(processes: Bool, docker: Bool) -> String {
         let commands = [
             "date +%s%N",
             "cat /proc/stat",
@@ -43,7 +54,7 @@ public enum ProcParsers {
             "df -P -B1 \(pseudoFilesystemExclusions) 2>/dev/null || df -P -B1",
             // Sorted by CPU share, trimmed here rather than locally so the
             // round trip stays small on a busy host.
-            "ps -eo pid=,user=,pcpu=,pmem=,rss=,args= --sort=-pcpu 2>/dev/null | head -n 30",
+            processes ? "ps -eo pid=,user=,pcpu=,pmem=,rss=,args= --sort=-pcpu 2>/dev/null | head -n 30" : "true",
             // key=value rather than one fact per line: `lines()` drops empty lines,
             // so a host where any of these produced nothing shifted every later
             // field up — the CPU model would arrive as the IP address list.
@@ -55,11 +66,13 @@ public enum ProcParsers {
             // The engine counts cost nothing extra here — this call was already
             // being made for the version alone, and asking for all four fields
             // saves the machine screen and the Docker page a round trip each.
-            "D=\"{{.ServerVersion}}|{{.Images}}|{{.ContainersRunning}}|{{.ContainersStopped}}|{{.ContainersPaused}}\"; docker info --format \"$D\" || sudo -n docker info --format \"$D\" || true",
+            docker
+                ? "D=\"{{.ServerVersion}}|{{.Images}}|{{.ContainersRunning}}|{{.ContainersStopped}}|{{.ContainersPaused}}\"; docker info --format \"$D\" || sudo -n docker info --format \"$D\" || true"
+                : "true",
             "date +%s%N",
         ]
         return commands.joined(separator: "; echo \(sectionSeparator); ")
-    }()
+    }
 
     /// Splits batched output on separator lines. A truncated run leaves the
     /// trailing sections empty rather than misaligning the ones that arrived.

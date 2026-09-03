@@ -70,6 +70,9 @@ public struct ServerDetailView: View {
         }
         .navigationTitle(server.name)
         .navigationSubtitle(server.displayTarget)
+        // The process list is fetched only while this screen is up.
+        .onAppear { monitor.setDetailVisible(server.id, true) }
+        .onDisappear { monitor.setDetailVisible(server.id, false) }
         // A task keyed on the server, rather than a Timer: the timer's closure
         // captured a copy of this struct — and with it the server it was made
         // for — so it kept reloading that host's history after the view had

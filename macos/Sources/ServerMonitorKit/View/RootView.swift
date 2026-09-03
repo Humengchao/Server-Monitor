@@ -412,6 +412,11 @@ private struct SidebarServerRows: View {
                 SidebarServerRow(server: server)
                     .tag(RootView.Selection.server(server.id))
             }
+            // Drag to reorder. The order is the stored sortIndex, so the
+            // dashboard follows and it survives a relaunch.
+            .onMove { source, destination in
+                try? monitor.moveServers(fromOffsets: source, toOffset: destination)
+            }
         }
     }
 }

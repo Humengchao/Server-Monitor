@@ -421,6 +421,19 @@ struct HostDetailParserTests {
         #expect(arm.cpuModel == "Neoverse-N1")
     }
 
+    @Test func skippedSectionsKeepTheirSeparators() {
+        // The parser splits on a fixed section count. Leaving `ps` and
+        // `docker info` out must not shift the sections after them.
+        let full = ProcParsers.linuxMetricsCommand(processes: true, docker: true)
+        let lean = ProcParsers.linuxMetricsCommand(processes: false, docker: false)
+        let separators = { (s: String) in s.components(separatedBy: ProcParsers.sectionSeparator).count }
+        #expect(separators(full) == separators(lean))
+        #expect(separators(full) == ProcParsers.Section.allCases.count)
+        #expect(full.contains("ps -eo") && full.contains("docker info"))
+        #expect(!lean.contains("ps -eo") && !lean.contains("docker info"))
+        #expect(ProcParsers.linuxMetricsCommand == full, "the full script is the default")
+    }
+
     @Test func theCollectionLineDoesNotRunLscpuEveryPoll() {
         // `lscpu` walks every core's sysfs topology; on an 80-core ARM box that
         // is tens of milliseconds per tick for a string that never changes.
