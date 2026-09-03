@@ -1,4 +1,4 @@
-import React, { useContext, useMemo } from 'react';
+import React, { useContext, useMemo, useState } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { useTranslation } from 'react-i18next';
 import { MetricPoint } from '../api/servers';
@@ -52,10 +52,16 @@ interface ChartTooltipProps {
   label?: string;
   unit: string;
   dark: boolean;
+  /**
+   * False on the panels the pointer is not over. syncId makes recharts mark
+   * every synced chart active at once, which would stack four tooltips on
+   * screen; the crosshair is what those panels are for.
+   */
+  visible?: boolean;
 }
 
-function ChartTooltip({ active, payload, label, unit, dark }: ChartTooltipProps) {
-  if (!active || !payload?.length) return null;
+function ChartTooltip({ active, payload, label, unit, dark, visible }: ChartTooltipProps) {
+  if (!active || !visible || !payload?.length) return null;
   return (
     <div className={`chart-tooltip${dark ? ' dark' : ''}`}>
       <span className="chart-tooltip-time">{label}</span>
@@ -74,7 +80,7 @@ function ChartTooltip({ active, payload, label, unit, dark }: ChartTooltipProps)
 type ChartRow = { time: string } & Record<string, string | number>;
 
 function MetricPanel({
-  title, data, series, unit, dark, domain,
+  title, data, series, unit, dark, domain, syncId, hovered, onHover,
 }: {
   title: string;
   data: ChartRow[];
@@ -82,6 +88,9 @@ function MetricPanel({
   unit: string;
   dark: boolean;
   domain?: [number, number];
+  syncId: string;
+  hovered: boolean;
+  onHover: (hovered: boolean) => void;
 }) {
   const grid = dark ? 'rgba(255,255,255,.08)' : 'rgba(24,32,51,.07)';
   const axis = dark ? 'rgba(226,232,248,.5)' : 'rgba(85,95,120,.75)';
@@ -96,11 +105,17 @@ function MetricPanel({
           ))}
         </div>
       </header>
-      <div className="chart-canvas">
+      {/* Hover is tracked on the wrapper rather than on the chart: recharts'
+          own onMouseLeave fires when the pointer crosses internal elements. */}
+      <div
+        className="chart-canvas"
+        onMouseEnter={() => onHover(true)}
+        onMouseLeave={() => onHover(false)}
+      >
         <ResponsiveContainer width="100%" height={210}>
           {/* The top margin leaves room for the highest Y tick label, which
               recharts otherwise clips against the container edge. */}
-          <AreaChart data={data} margin={{ top: 12, right: 10, left: 0, bottom: 0 }}>
+          <AreaChart data={data} syncId={syncId} margin={{ top: 12, right: 10, left: 0, bottom: 0 }}>
             <defs>
               {series.map((s) => (
                 <linearGradient key={s.key} id={`grad-${s.key}`} x1="0" y1="0" x2="0" y2="1">
@@ -130,7 +145,7 @@ function MetricPanel({
             <Tooltip
               cursor={{ stroke: dark ? 'rgba(255,255,255,.22)' : 'rgba(24,32,51,.16)', strokeWidth: 1 }}
               wrapperStyle={{ position: 'absolute', pointerEvents: 'none', outline: 'none' }}
-              content={<ChartTooltip unit={unit} dark={dark} />}
+              content={<ChartTooltip unit={unit} dark={dark} visible={hovered} />}
             />
             <Legend content={() => null} />
             {series.map((s) => (
@@ -154,9 +169,27 @@ function MetricPanel({
   );
 }
 
+// One sync group for the whole page: hovering any panel puts the crosshair on
+// the same instant in all of them, which is how you tell whether a CPU spike
+// and a disk-I/O spike were the same event. Every panel plots the same `rows`,
+// so index-based syncing lines up exactly.
+const SYNC_ID = 'server-metrics';
+
 function MetricsChart({ history }: Props) {
   const { t } = useTranslation();
   const dark = useContext(DarkModeContext);
+  const [hoveredPanel, setHoveredPanel] = useState<string | null>(null);
+
+  const hoverProps = (id: string) => ({
+    syncId: SYNC_ID,
+    hovered: hoveredPanel === id,
+    onHover: (isOver: boolean) => setHoveredPanel((current) => {
+      if (isOver) return id;
+      // Only clear if this panel is still the one recorded: the enter of the
+      // next panel can land before this one's leave.
+      return current === id ? null : current;
+    }),
+  });
 
   const { rows, netUnit, diskUnit, hasLatency } = useMemo(() => {
     if (!history || history.length === 0) {
@@ -201,6 +234,7 @@ function MetricsChart({ history }: Props) {
         title={t('metrics.cpuMemory')}
         data={rows}
         dark={dark}
+        {...hoverProps('cpu')}
         unit="%"
         domain={[0, 100]}
         series={[
@@ -212,6 +246,7 @@ function MetricsChart({ history }: Props) {
         title={t('metrics.networkTraffic')}
         data={rows}
         dark={dark}
+        {...hoverProps('net')}
         unit={` ${netUnit.suffix}`}
         series={[
           { key: 'rx', label: t('metrics.download'), color: '#39b8a4' },
@@ -222,6 +257,7 @@ function MetricsChart({ history }: Props) {
         title={t('metrics.diskIO')}
         data={rows}
         dark={dark}
+        {...hoverProps('disk')}
         unit={` ${diskUnit.suffix}`}
         series={[
           { key: 'read', label: t('metrics.read'), color: '#e8944a' },
@@ -232,6 +268,7 @@ function MetricsChart({ history }: Props) {
         title={t('metrics.loadAverage')}
         data={rows}
         dark={dark}
+        {...hoverProps('load')}
         unit=""
         series={[
           { key: 'load1', label: t('metrics.load1'), color: '#6f8cf5' },
@@ -243,6 +280,7 @@ function MetricsChart({ history }: Props) {
           title={t('metrics.latency')}
           data={rows}
           dark={dark}
+          {...hoverProps('latency')}
           unit=" ms"
           series={[{ key: 'latency', label: t('metrics.latency'), color: '#4bb3d6' }]}
         />
