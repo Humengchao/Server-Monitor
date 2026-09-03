@@ -404,8 +404,8 @@
   "alerts.metric.load1": "Load (1 min)",
   "alerts.metric.latency": "Latency",
   "alerts.metric.offline": "Offline",
-  "alerts.messageThreshold": "{{server}} {{metric}} is {{value}} — {{comparator}} {{threshold}} for {{duration}}",
-  "alerts.messageOffline": "{{server}} has not reported for {{duration}}",
+  "alerts.messageThreshold": "{{metric}} {{value}}, {{comparator}} {{threshold}} for {{duration}}",
+  "alerts.messageOffline": "Unreachable for {{duration}}",
   "alerts.aboveInline": "above",
   "alerts.belowInline": "below",
   "process.title": "Processes",
@@ -613,5 +613,9 @@
   "credential.eyebrow": "Access",
   "credential.subtitle": "Reusable SSH logins. Servers linked to a credential pick up changes automatically.",
   "loginHistory.eyebrow": "Security",
-  "loginHistory.subtitle": "Successful sign-ins to this account, newest first."
+  "loginHistory.subtitle": "Successful sign-ins to this account, newest first.",
+  "alerts.filterActive": "Firing",
+  "alerts.filterResolved": "Resolved",
+  "alerts.filterAll": "All",
+  "alerts.noActiveEvents": "Nothing is firing right now."
 }

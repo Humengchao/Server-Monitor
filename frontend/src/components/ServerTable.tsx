@@ -1,11 +1,12 @@
 import React from 'react';
 import { Button, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import {
-  ArrowDownOutlined, ArrowUpOutlined, CloudServerOutlined, DeleteOutlined, EditOutlined, WindowsOutlined,
+  AlertOutlined, ArrowDownOutlined, ArrowUpOutlined, CloudServerOutlined, DeleteOutlined, EditOutlined, WindowsOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Server } from '../api/servers';
+import { AlertEvent } from '../api/alerts';
 import { availabilityColor } from '../api/uptime';
 import { formatBytes, formatUptime, getExpirationInfo, percentOf, severityColor } from '../utils/format';
 
@@ -22,6 +23,8 @@ interface Props {
   onSelectionChange?: (ids: string[]) => void;
   /** Observed 24h availability keyed by server ID. */
   availability?: Map<string, number | undefined>;
+  /** Currently-firing alert events keyed by server ID. */
+  firing?: Map<string, AlertEvent[]>;
 }
 
 function MiniBar({ percent, hue, label }: { percent: number; hue: 'blue' | 'green' | 'violet'; label?: string }) {
@@ -46,7 +49,7 @@ function MiniBar({ percent, hue, label }: { percent: number; hue: 'blue' | 'gree
  * fleet fits on a single screen.
  */
 export default function ServerTable({
-  servers, observedAt, loading, onEdit, onDelete, selectedIds, onSelectionChange, availability,
+  servers, observedAt, loading, onEdit, onDelete, selectedIds, onSelectionChange, availability, firing,
 }: Props) {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
@@ -69,7 +72,16 @@ export default function ServerTable({
             {server.server_type === 'windows' ? <WindowsOutlined /> : <CloudServerOutlined />}
           </span>
           <div>
-            <strong>{server.name}</strong>
+            <strong>
+              {server.name}
+              {!!firing?.get(server.id)?.length && (
+                <Tooltip title={firing.get(server.id)!.map((e) => e.rule_name).filter(Boolean).join('\n') || undefined}>
+                  <span className="alert-pill table-alert-pill">
+                    <AlertOutlined />&nbsp;{firing.get(server.id)!.length}
+                  </span>
+                </Tooltip>
+              )}
+            </strong>
             <Text type="secondary">{server.host}</Text>
           </div>
         </div>

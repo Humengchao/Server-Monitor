@@ -7,7 +7,10 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:8080',
+        // Overridable because 8080 is a popular port: a developer whose 8080 is
+        // already taken had no way to run the dev server without editing this
+        // file. VITE_API_PROXY=http://localhost:8099 npm run dev
+        target: process.env.VITE_API_PROXY || 'http://localhost:8080',
         changeOrigin: true,
         ws: true,
       },

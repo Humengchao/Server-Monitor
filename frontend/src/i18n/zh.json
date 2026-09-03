@@ -404,8 +404,8 @@
   "alerts.metric.load1": "负载（1 分钟）",
   "alerts.metric.latency": "网络延迟",
   "alerts.metric.offline": "服务器离线",
-  "alerts.messageThreshold": "{{server}} 的{{metric}}为 {{value}}，已持续 {{duration}}{{comparator}} {{threshold}}",
-  "alerts.messageOffline": "{{server}} 已失联 {{duration}}",
+  "alerts.messageThreshold": "{{metric}} {{value}}，{{comparator}} {{threshold}} 持续 {{duration}}",
+  "alerts.messageOffline": "已失联 {{duration}}",
   "alerts.aboveInline": "高于",
   "alerts.belowInline": "低于",
   "process.title": "进程",
@@ -613,5 +613,9 @@
   "credential.eyebrow": "访问",
   "credential.subtitle": "可复用的 SSH 登录信息。关联到凭据的服务器会自动跟随其变更。",
   "loginHistory.eyebrow": "安全",
-  "loginHistory.subtitle": "本账号的成功登录记录，最新的在前。"
+  "loginHistory.subtitle": "本账号的成功登录记录，最新的在前。",
+  "alerts.filterActive": "进行中",
+  "alerts.filterResolved": "已恢复",
+  "alerts.filterAll": "全部",
+  "alerts.noActiveEvents": "当前没有进行中的告警。"
 }

@@ -20,6 +20,7 @@ import CredentialSelect from '../components/CredentialSelect';
 import { serversApi, Server, Tag } from '../api/servers';
 import { convertCurrency, currencySymbol, useExchangeRates } from '../hooks/useExchangeRates';
 import { useFleetUptime, windowPercent } from '../hooks/useFleetUptime';
+import { useFiringAlerts } from '../hooks/useFiringAlerts';
 import { availabilityColor } from '../api/uptime';
 import { monthlyCost, percentOf } from '../utils/format';
 import { usePolling } from '../hooks/usePolling';
@@ -78,6 +79,7 @@ export default function Dashboard() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const ratesPerEUR = useExchangeRates();
   const uptime = useFleetUptime();
+  const firing = useFiringAlerts();
 
   useEffect(() => { localStorage.setItem('dashboard_view', view); }, [view]);
   useEffect(() => { localStorage.setItem('dashboard_sort', sortKey); }, [sortKey]);
@@ -520,6 +522,7 @@ export default function Dashboard() {
           selectedIds={selecting ? selectedIds : undefined}
           onSelectionChange={setSelectedIds}
           availability={availability}
+          firing={firing.byServer}
         />
       ) : (
         <Row gutter={[18, 18]}>
@@ -534,6 +537,7 @@ export default function Dashboard() {
                 selected={selectedIds.includes(s.id)}
                 onToggleSelect={toggleSelect}
                 availability={availability.get(s.id)}
+                firing={firing.byServer.get(s.id)}
               />
             </Col>
           ))}
