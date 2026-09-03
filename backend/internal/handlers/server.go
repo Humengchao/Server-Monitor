@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -19,10 +20,54 @@ import (
 
 type ServerHandler struct {
 	sshCache *services.SSHConnCache
+	// collector is the background poll loop; PollRetry borrows it so an
+	// on-demand attempt shares the same connection pool and backoff state
+	// rather than opening a second, competing path to the host.
+	collector *services.Collector
 }
 
-func NewServerHandler(sshCache *services.SSHConnCache) *ServerHandler {
-	return &ServerHandler{sshCache: sshCache}
+func NewServerHandler(sshCache *services.SSHConnCache, collector *services.Collector) *ServerHandler {
+	return &ServerHandler{sshCache: sshCache, collector: collector}
+}
+
+// PollRetry collects from one host immediately instead of waiting out the
+// backoff. The panel's failure banner tells the reader what to fix; this is how
+// they find out whether the fix worked.
+func (h *ServerHandler) PollRetry(c *gin.Context) {
+	userID := c.MustGet("user_id").(uuid.UUID)
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	db := c.MustGet("db").(*models.DB)
+	// Scoped to the owner and carrying decrypted secrets, so this cannot be
+	// used to make the panel connect to another user's host.
+	server, err := models.GetServerByIDAndUser(db, id, userID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
+		return
+	}
+	if err := server.ResolveCredentials(db); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load credential"})
+		return
+	}
+
+	if err := h.collector.PollNow(server); err != nil {
+		if errors.Is(err, services.ErrPollInFlight) {
+			// Not a failure of the host: the scheduled loop got there first and
+			// its result will land on its own.
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"ok":    false,
+			"kind":  string(services.ClassifyPollError(err)),
+			"error": services.TrimPollErrorDetail(err),
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 type CreateServerRequest struct {

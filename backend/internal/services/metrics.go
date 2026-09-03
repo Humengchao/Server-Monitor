@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -265,15 +266,19 @@ func (c *Collector) pollAll() {
 			}
 			m, err := c.collectOne(&s, fingerprint)
 			if err != nil {
-				delay := c.recordPollFailure(s.ID, fingerprint, err, time.Now())
+				delay, attempts := c.recordPollFailure(s.ID, fingerprint, err, time.Now())
 				log.Printf("collector: poll %s failed: %v; retry in %s", s.Name, err, delay)
-				c.persistPollError(s.ID, s.Name, err)
+				if attempts >= minFailuresToSurface {
+					c.persistPollError(s.ID, s.Name, err)
+				}
 				return
 			}
 			if err := models.SaveMetric(c.db.Raw, s.ID, m); err != nil {
-				delay := c.recordPollFailure(s.ID, fingerprint, err, time.Now())
+				delay, attempts := c.recordPollFailure(s.ID, fingerprint, err, time.Now())
 				log.Printf("collector: save metric for %s failed: %v; retry in %s", s.Name, err, delay)
-				c.persistPollError(s.ID, s.Name, fmt.Errorf("save metric: %w", err))
+				if attempts >= minFailuresToSurface {
+					c.persistPollError(s.ID, s.Name, fmt.Errorf("save metric: %w", err))
+				}
 				return
 			}
 			c.clearPollFailure(s.ID)
@@ -406,7 +411,9 @@ func isSSHAuthenticationFailure(err error) bool {
 		strings.Contains(message, "unable to authenticate")
 }
 
-func (c *Collector) recordPollFailure(serverID uuid.UUID, fingerprint [32]byte, pollErr error, now time.Time) time.Duration {
+// recordPollFailure advances the circuit breaker and returns how long to wait
+// before retrying, plus how many consecutive failures this host has now had.
+func (c *Collector) recordPollFailure(serverID uuid.UUID, fingerprint [32]byte, pollErr error, now time.Time) (time.Duration, int) {
 	c.pollMu.Lock()
 	defer c.pollMu.Unlock()
 	state := c.failures[serverID]
@@ -427,8 +434,62 @@ func (c *Collector) recordPollFailure(serverID uuid.UUID, fingerprint [32]byte, 
 	}
 	state.retryAt = now.Add(delay)
 	c.failures[serverID] = state
-	return delay
+	return delay, state.attempts
 }
+
+// minFailuresToSurface is how many consecutive failures a host needs before the
+// panel shows a reason. A pooled SSH connection torn down between ticks fails
+// once and redials fine on the next, and flashing "cannot reach this host" for
+// three seconds over that is noise on a page people watch. A real outage still
+// surfaces within about twenty seconds.
+const minFailuresToSurface = 2
+
+// PollNow runs one collection attempt immediately, outside the tick schedule,
+// and reports what happened.
+//
+// This exists because the backoff that protects a dark host is measured in
+// minutes — up to 15 for a network failure and an hour for a rejected
+// credential. That is right for the background loop, but it strands the
+// person acting on the panel's advice: they open the firewall or start sshd,
+// and nothing on the host changes the poll fingerprint, so the panel would sit
+// unchanged for a quarter of an hour with no way to ask again.
+//
+// The attempt is synchronous so the caller can show the outcome rather than a
+// promise, and it clears the backoff first so a success is not immediately
+// re-suppressed. beginPoll still guards it: if the scheduled loop happens to
+// be mid-poll for this host, ErrPollInFlight comes back instead of two
+// concurrent SSH sessions on one pooled connection.
+func (c *Collector) PollNow(s *models.Server) error {
+	fingerprint := serverPollFingerprint(s)
+	c.clearPollFailure(s.ID)
+	if !c.beginPoll(s.ID, fingerprint) {
+		return ErrPollInFlight
+	}
+	defer c.endPoll(s.ID)
+
+	m, err := c.collectOne(s, fingerprint)
+	if err == nil {
+		err = models.SaveMetric(c.db.Raw, s.ID, m)
+		if err != nil {
+			err = fmt.Errorf("save metric: %w", err)
+		}
+	}
+	if err != nil {
+		// Restore the circuit breaker: a manual attempt that fails must not
+		// leave the host polling flat-out on every tick. Unlike the scheduled
+		// loop this records on the first failure — the reader asked for this
+		// attempt, so its result is not noise.
+		c.recordPollFailure(s.ID, fingerprint, err, time.Now())
+		c.persistPollError(s.ID, s.Name, err)
+		return err
+	}
+	c.persistPollError(s.ID, s.Name, nil)
+	return nil
+}
+
+// ErrPollInFlight reports that the scheduled loop is already polling this host,
+// so an on-demand attempt would collide with it.
+var ErrPollInFlight = errors.New("a poll for this server is already running")
 
 // persistPollError mirrors the poll outcome onto the server row so the panel
 // can say why a host is dark instead of only that it is. Pass nil to clear.

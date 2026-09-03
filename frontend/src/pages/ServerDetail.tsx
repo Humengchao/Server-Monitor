@@ -373,7 +373,7 @@ export default function ServerDetail() {
 
       {/* Directly under the hero, above the tiles: the tiles are the figures
           this explains the absence of. */}
-      <PollErrorNotice server={server} />
+      <PollErrorNotice server={server} onRetried={loadServer} />
 
       <div className="stat-tile-grid">
         {/* `metrics ? … : '—'` throughout: a host with no sample has no

@@ -73,7 +73,7 @@ func main() {
 	sshCache := services.NewSSHConnCache()
 
 	log.Printf("Server starting on :%s", cfg.ServerPort)
-	r, err := router.Setup(db, cfg, sshCache, notifier)
+	r, err := router.Setup(db, cfg, sshCache, notifier, collector)
 	if err != nil {
 		exitWithError(exitConfigError, "Router setup failed", err)
 	}

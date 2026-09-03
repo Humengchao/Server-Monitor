@@ -181,6 +181,15 @@ export const serversApi = {
   setTags: (id: string, tag_ids: string[]) =>
     client.put(`/servers/${id}/tags`, { tag_ids }),
 
+  /**
+   * Collects from the host right now instead of waiting out the backoff, which
+   * runs to 15 minutes for a network failure and an hour for a rejected
+   * credential. Resolves with the outcome; a 409 means the scheduled loop got
+   * there first, which is not a failure.
+   */
+  pollNow: (id: string) =>
+    client.post<{ ok: boolean; kind?: PollErrorKind; error?: string }>(`/servers/${id}/poll`),
+
   getLatestMetrics: (id: string) =>
     client.get<MetricPoint>(`/servers/${id}/metrics/latest`),
 

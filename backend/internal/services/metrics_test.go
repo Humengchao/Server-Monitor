@@ -83,7 +83,7 @@ func TestCollectorPollFailureState(t *testing.T) {
 	}
 	collector.endPoll(serverID)
 
-	firstDelay := collector.recordPollFailure(serverID, fingerprint, errors.New("dial failed"), now)
+	firstDelay, firstAttempts := collector.recordPollFailure(serverID, fingerprint, errors.New("dial failed"), now)
 	if firstDelay != pollFailureBase {
 		t.Fatalf("first recordPollFailure() delay = %s, want %s", firstDelay, pollFailureBase)
 	}
@@ -93,6 +93,15 @@ func TestCollectorPollFailureState(t *testing.T) {
 	}
 	if firstState.attempts != 1 {
 		t.Fatalf("first failure attempts = %d, want 1", firstState.attempts)
+	}
+	// The returned count is what gates surfacing a reason in the UI, so it has
+	// to track the stored state rather than being derived separately.
+	if firstAttempts != firstState.attempts {
+		t.Fatalf("returned attempts = %d, want %d", firstAttempts, firstState.attempts)
+	}
+	if firstAttempts >= minFailuresToSurface {
+		t.Fatalf("a single failure (attempts = %d) must stay below the surfacing threshold of %d",
+			firstAttempts, minFailuresToSurface)
 	}
 	if want := now.Add(firstDelay); !firstState.retryAt.Equal(want) {
 		t.Fatalf("first retryAt = %s, want %s", firstState.retryAt, want)
@@ -106,12 +115,17 @@ func TestCollectorPollFailureState(t *testing.T) {
 	collector.endPoll(serverID)
 
 	secondNow := firstState.retryAt
-	secondDelay := collector.recordPollFailure(serverID, fingerprint, errors.New("dial failed"), secondNow)
+	secondDelay, secondAttempts := collector.recordPollFailure(serverID, fingerprint, errors.New("dial failed"), secondNow)
 	if secondDelay != 2*pollFailureBase {
 		t.Fatalf("second recordPollFailure() delay = %s, want %s", secondDelay, 2*pollFailureBase)
 	}
 	if got := collector.failures[serverID].attempts; got != 2 {
 		t.Fatalf("second failure attempts = %d, want 2", got)
+	}
+	// Two consecutive failures is where the panel starts showing a reason.
+	if secondAttempts < minFailuresToSurface {
+		t.Fatalf("second failure attempts = %d, want at least the surfacing threshold %d",
+			secondAttempts, minFailuresToSurface)
 	}
 
 	collector.clearPollFailure(serverID)
@@ -151,13 +165,13 @@ func TestCollectorSSHAuthenticationFailureUsesCircuitBreaker(t *testing.T) {
 	now := time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC)
 	authErr := errors.New("ssh handshake: ssh: unable to authenticate")
 
-	if got := collector.recordPollFailure(serverID, fingerprint, authErr, now); got != securityFailureBase {
+	if got, _ := collector.recordPollFailure(serverID, fingerprint, authErr, now); got != securityFailureBase {
 		t.Fatalf("authentication failure delay = %s, want %s", got, securityFailureBase)
 	}
 	// Once authentication trouble is detected, a subsequent connection reset
 	// remains on the conservative circuit-breaker schedule.
 	resetErr := errors.New("ssh handshake: read: connection reset by peer")
-	if got := collector.recordPollFailure(serverID, fingerprint, resetErr, now.Add(securityFailureBase)); got != 2*securityFailureBase {
+	if got, _ := collector.recordPollFailure(serverID, fingerprint, resetErr, now.Add(securityFailureBase)); got != 2*securityFailureBase {
 		t.Fatalf("connection reset delay = %s, want %s", got, 2*securityFailureBase)
 	}
 	if !collector.failures[serverID].securityFailure {
@@ -172,7 +186,7 @@ func TestCollectorConnectionResetAloneUsesNormalBackoff(t *testing.T) {
 	now := time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC)
 	resetErr := errors.New("ssh handshake: read: connection reset by peer")
 
-	if got := collector.recordPollFailure(serverID, fingerprint, resetErr, now); got != pollFailureBase {
+	if got, _ := collector.recordPollFailure(serverID, fingerprint, resetErr, now); got != pollFailureBase {
 		t.Fatalf("first connection reset delay = %s, want %s", got, pollFailureBase)
 	}
 	if collector.failures[serverID].securityFailure {
@@ -189,7 +203,7 @@ func TestCollectorFirstAuthFailureResetsGenericAttempts(t *testing.T) {
 	collector.recordPollFailure(serverID, fingerprint, errors.New("dial failed again"), now.Add(time.Minute))
 
 	authErr := errors.New("ssh handshake: ssh: unable to authenticate")
-	if got := collector.recordPollFailure(serverID, fingerprint, authErr, now.Add(2*time.Minute)); got != securityFailureBase {
+	if got, _ := collector.recordPollFailure(serverID, fingerprint, authErr, now.Add(2*time.Minute)); got != securityFailureBase {
 		t.Fatalf("first auth failure after generic failures = %s, want %s", got, securityFailureBase)
 	}
 	if got := collector.failures[serverID].attempts; got != 1 {

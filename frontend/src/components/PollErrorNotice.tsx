@@ -1,11 +1,11 @@
-import React from 'react';
-import { Alert, Tooltip, Typography } from 'antd';
+import React, { useState } from 'react';
+import { Alert, App, Button, Tooltip, Typography } from 'antd';
 import {
   ApiOutlined, DatabaseOutlined, DisconnectOutlined, HourglassOutlined,
-  KeyOutlined, SafetyCertificateOutlined, WarningOutlined,
+  KeyOutlined, ReloadOutlined, SafetyCertificateOutlined, WarningOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import { PollErrorKind, Server } from '../api/servers';
+import { PollErrorKind, Server, serversApi } from '../api/servers';
 import { pollErrorKind } from '../utils/pollError';
 
 const { Text } = Typography;
@@ -31,12 +31,48 @@ const KIND_ICON: Record<PollErrorKind, React.ReactNode> = {
  *
  * Full-width explanation for the detail page, where there is room for advice.
  */
-export default function PollErrorNotice({ server }: { server: Server }) {
+export default function PollErrorNotice({ server, onRetried }: {
+  server: Server;
+  /** Called after a retry so the page can refetch and reflect the outcome. */
+  onRetried?: () => void;
+}) {
   const { t } = useTranslation();
+  const { message } = App.useApp();
+  const [retrying, setRetrying] = useState(false);
   const kind = pollErrorKind(server);
   if (!kind) return null;
 
   const at = server.last_error_at ? new Date(server.last_error_at).toLocaleString() : null;
+
+  const retry = async () => {
+    setRetrying(true);
+    try {
+      const res = await serversApi.pollNow(server.id);
+      if (res.data.ok) {
+        message.success(t('pollError.retrySucceeded'));
+      } else {
+        // Still failing. Name the new reason rather than repeating the old
+        // banner: the fix may have moved the problem rather than solved it.
+        const nextKind = res.data.kind && res.data.kind !== kind
+          ? t(`pollError.${res.data.kind}.title`)
+          : t(`pollError.${kind}.title`);
+        message.warning(t('pollError.retryStillFailing', { reason: nextKind }));
+      }
+      onRetried?.();
+    } catch (err: unknown) {
+      // 409 is the scheduled loop having got there first — good news, not a
+      // failure, and its result will arrive on its own.
+      if ((err as { response?: { status?: number } })?.response?.status === 409) {
+        message.info(t('pollError.retryInFlight'));
+        onRetried?.();
+        return;
+      }
+      message.error(t('pollError.retryFailed'));
+    } finally {
+      setRetrying(false);
+    }
+  };
+
   return (
     <Alert
       className="poll-error-notice"
@@ -44,6 +80,13 @@ export default function PollErrorNotice({ server }: { server: Server }) {
       showIcon
       icon={KIND_ICON[kind]}
       title={t(`pollError.${kind}.title`)}
+      // The banner says what to fix; this is how the reader finds out whether
+      // the fix worked, instead of waiting out a backoff of up to an hour.
+      action={
+        <Button size="small" icon={<ReloadOutlined />} loading={retrying} onClick={retry}>
+          {t('pollError.retry')}
+        </Button>
+      }
       description={
         <div className="poll-error-body">
           <span>{t(`pollError.${kind}.hint`)}</span>
