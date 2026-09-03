@@ -142,6 +142,17 @@ struct PollBackoffTests {
         #expect(monitor.retryAfter[id] != nil)
     }
 
+    @Test func wakingFromSleepClearsEveryBackoff() throws {
+        let monitor = try service()
+        let a = UUID(), b = UUID()
+        for _ in 1...10 { monitor.noteFailure(serverID: a); monitor.noteFailure(serverID: b) }
+        // Unlike the network path, a wake needs no prior state: the lid
+        // opening is itself the transition.
+        monitor.systemDidWake()
+        #expect(monitor.retryAfter.isEmpty)
+        #expect(monitor.failureStreak.isEmpty)
+    }
+
     @Test func deletingAServerForgetsItsBackoff() throws {
         let monitor = try service()
         let server = Server(name: "gone", host: "10.255.255.1", username: "root", authKind: .agent)

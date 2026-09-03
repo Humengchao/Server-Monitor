@@ -6,13 +6,13 @@ import PackageDescription
 // annotation noise around the AppKit and GRDB types that are not Sendable.
 let package = Package(
     name: "ServerMonitor",
-    // 15.0 rather than 14.0: Citadel's interactive PTY API is macOS 15+.
     // Spelled as a string because `.v15` needs swift-tools-version 6.
     platforms: [.macOS("15.0")],
     dependencies: [
-        // Pure-Swift SSH (SwiftNIO). Keeps the app self-contained: no libssh2,
-        // no shelling out to /usr/bin/ssh, and password auth works directly.
-        .package(url: "https://github.com/orlandos-nl/Citadel.git", from: "0.7.0"),
+        // SSH is the system /usr/bin/ssh, driven as a subprocess — see
+        // SSHRunner. A pure-Swift client (Citadel) was tried first and dropped:
+        // its RSA is SHA-1 only, which modern sshd refuses, and it cost the
+        // build the whole SwiftNIO tree for nothing the system client lacks.
         // Terminal emulator with an AppKit view, used for the SSH console.
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0"),
         // SQLite persistence. SwiftData is not an option here: its @Model
@@ -23,7 +23,7 @@ let package = Package(
     targets: [
         .target(
             name: "ServerMonitorKit",
-            dependencies: ["Citadel", "SwiftTerm", .product(name: "GRDB", package: "GRDB.swift")],
+            dependencies: ["SwiftTerm", .product(name: "GRDB", package: "GRDB.swift")],
             path: "Sources/ServerMonitorKit"
         ),
         .executableTarget(

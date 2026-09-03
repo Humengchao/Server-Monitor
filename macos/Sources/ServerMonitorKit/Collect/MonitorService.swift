@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Network
 import SwiftUI
@@ -47,6 +48,7 @@ public final class MonitorService: ObservableObject {
     private var pollTask: Task<Void, Never>?
     private var maintenanceTask: Task<Void, Never>?
     private var pathMonitor: NWPathMonitor?
+    private var wakeTask: Task<Void, Never>?
     /// Nil until the first path update, so starting up is not mistaken for a
     /// network that just came back.
     private var networkWasSatisfied: Bool?
@@ -290,6 +292,7 @@ public final class MonitorService: ObservableObject {
             reason: "Polling monitored servers"
         )
         watchNetworkPath()
+        watchWake()
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
@@ -327,6 +330,8 @@ public final class MonitorService: ObservableObject {
         pathMonitor?.cancel()
         pathMonitor = nil
         networkWasSatisfied = nil
+        wakeTask?.cancel()
+        wakeTask = nil
         tickCapTask?.cancel()
         tickCapTask = nil
         tickMembers.removeAll()
@@ -472,6 +477,34 @@ public final class MonitorService: ObservableObject {
             Task { @MainActor in self?.networkPathChanged(satisfied: satisfied) }
         }
         monitor.start(queue: DispatchQueue(label: "com.hmc.ServerMonitor.network"))
+    }
+
+    /// Watches for the Mac waking from sleep.
+    ///
+    /// The network path is often "satisfied" before anything actually routes
+    /// — the link is up, DHCP and DNS are not — so the first ticks after a
+    /// lid-open fail without the path monitor ever seeing a transition to
+    /// clear the backoff they build. Waking is its own signal: the fleet
+    /// almost certainly did not go down while the lid was shut.
+    private func watchWake() {
+        guard wakeTask == nil else { return }
+        wakeTask = Task { [weak self] in
+            let wakes = NotificationCenter.default.notifications(named: NSWorkspace.didWakeNotification)
+            for await _ in wakes {
+                guard let self else { return }
+                self.systemDidWake()
+            }
+        }
+    }
+
+    /// Forgets every backoff and polls at once, so the dashboard is current a
+    /// few seconds after the lid opens rather than after the longest backoff
+    /// runs out.
+    func systemDidWake() {
+        Self.log.info("woke from sleep; retrying the whole fleet")
+        failureStreak.removeAll()
+        retryAfter.removeAll()
+        _ = pollDue()
     }
 
     /// Clears every backoff when the network returns, and polls at once.
