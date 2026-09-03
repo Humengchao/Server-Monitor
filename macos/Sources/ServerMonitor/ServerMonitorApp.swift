@@ -109,9 +109,7 @@ struct ServerMonitorApp: App {
                     RootView()
                 }
             }
-            .environmentObject(monitor)
-            // The same instance, un-observed, for views that only call it.
-            .environment(\.monitorService, monitor)
+            .environment(monitor)
             .environmentObject(sessions)
             .environmentObject(alerts)
             .environmentObject(localization)
@@ -149,12 +147,11 @@ struct ServerMonitorApp: App {
         // client over a web page.
         MenuBarExtra {
             MenuBarPanel()
-                .environmentObject(monitor)
-                .environment(\.monitorService, monitor)
+                .environment(monitor)
                 .environmentObject(localization)
         } label: {
             MenuBarLabel()
-                .environmentObject(monitor)
+                .environment(monitor)
         }
         .menuBarExtraStyle(.window)
 

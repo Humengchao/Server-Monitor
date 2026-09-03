@@ -4,20 +4,18 @@ import SwiftUI
 /// is actually used: an overview, the resources you configure, tools, and the
 /// live sessions you have open.
 public struct RootView: View {
-    // Deliberately not `monitor`. This view is the frame around everything —
-    // split view, sidebar, toolbar, sheets — and MonitorService publishes on
-    // every poll. With the service observed here, each poll re-evaluated the
-    // whole frame and diffed the NavigationSplitView for rows and buttons that
-    // had not changed. The parts that show live data are their own views
-    // further down, so a poll re-evaluates a row, not the window.
+    // This view is the frame around everything — split view, sidebar,
+    // toolbar, sheets. Its body reads nothing from the service, so a poll
+    // re-evaluates the rows and buttons below that do, not the window.
     @EnvironmentObject private var sessions: SessionManager
     @EnvironmentObject private var loc: Localization
 
     /// Restored with the window, so the app reopens where it was left; see
     /// `validateRestoredSelection` for what a stored value may point at.
     @SceneStorage("sidebarSelection") private var selection: Selection?
-    // Un-observed: only consulted once, to check a restored selection.
-    @Environment(\.monitorService) private var monitorService
+    // Read in `onAppear` only, to check a restored selection; a read outside
+    // `body` records no dependency.
+    @Environment(MonitorService.self) private var monitor
     @State private var addingServer = false
     @State private var importing = false
     // Owned here rather than in the child views so the toolbar, which belongs
@@ -135,7 +133,7 @@ public struct RootView: View {
         switch selection {
         case .none:
             selection = .dashboard
-        case .server(let id)? where monitorService?.server(id: id) == nil:
+        case .server(let id)? where monitor.server(id: id) == nil:
             selection = .dashboard
         case .session(let id)? where !sessions.active.contains(where: { $0.id == id }):
             selection = .dashboard
@@ -345,7 +343,7 @@ public struct RootView: View {
 
 /// The window-level refresh, wherever the toolbar offers one.
 private struct RefreshButton: View {
-    @EnvironmentObject private var monitor: MonitorService
+    @Environment(MonitorService.self) private var monitor
     @EnvironmentObject private var loc: Localization
 
     var body: some View {
@@ -363,7 +361,7 @@ private struct ServerToolbarActions: View {
     let id: UUID
     @Binding var editingServer: Server?
 
-    @EnvironmentObject private var monitor: MonitorService
+    @Environment(MonitorService.self) private var monitor
     @EnvironmentObject private var sessions: SessionManager
     @EnvironmentObject private var loc: Localization
 
@@ -401,7 +399,7 @@ private struct ServerToolbarActions: View {
 /// The sidebar's server list. Sits inside the sidebar `List`, so its rows'
 /// tags still drive the selection.
 private struct SidebarServerRows: View {
-    @EnvironmentObject private var monitor: MonitorService
+    @Environment(MonitorService.self) private var monitor
     @EnvironmentObject private var loc: Localization
 
     var body: some View {
@@ -422,7 +420,7 @@ private struct SidebarServerRows: View {
 private struct SidebarServerRow: View {
     let server: Server
 
-    @EnvironmentObject private var monitor: MonitorService
+    @Environment(MonitorService.self) private var monitor
     @EnvironmentObject private var loc: Localization
 
     var body: some View {
@@ -459,7 +457,7 @@ private struct SidebarServerRow: View {
 private struct ServerDetailHost: View {
     let id: UUID
 
-    @EnvironmentObject private var monitor: MonitorService
+    @Environment(MonitorService.self) private var monitor
     @EnvironmentObject private var loc: Localization
 
     var body: some View {
@@ -479,7 +477,7 @@ private struct ServerDetailHost: View {
 private struct SessionHost: View {
     let id: UUID
 
-    @EnvironmentObject private var monitor: MonitorService
+    @Environment(MonitorService.self) private var monitor
     @EnvironmentObject private var sessions: SessionManager
     @EnvironmentObject private var loc: Localization
 

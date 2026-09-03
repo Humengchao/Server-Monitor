@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Adopts hosts from ~/.ssh/config in one pass.
 struct ImportSSHConfigView: View {
-    @EnvironmentObject private var monitor: MonitorService
+    @Environment(MonitorService.self) private var monitor
     @EnvironmentObject private var loc: Localization
     @Environment(\.dismiss) private var dismiss
 

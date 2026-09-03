@@ -4,7 +4,7 @@ import SwiftUI
 struct DockerPane: View {
     let server: Server
 
-    @Environment(\.monitorService) private var monitor
+    @Environment(MonitorService.self) private var monitor
     @EnvironmentObject private var loc: Localization
 
     @State private var containers: [DockerContainer] = []
@@ -268,7 +268,6 @@ struct DockerPane: View {
         loading = true
         defer { loading = false }
         do {
-            let monitor = try monitor.required
             let target = try monitor.target(for: server)
             let docker = monitor.docker
             containers = try await docker.listContainers(target: target)
@@ -290,7 +289,6 @@ struct DockerPane: View {
         busy.insert(container.id)
         defer { busy.remove(container.id) }
         do {
-            let monitor = try monitor.required
             let target = try monitor.target(for: server)
             try await monitor.docker.perform(action, containerID: container.id, target: target)
             await reload()
@@ -301,7 +299,6 @@ struct DockerPane: View {
 
     private func showLogs(_ container: DockerContainer) async {
         do {
-            let monitor = try monitor.required
             let target = try monitor.target(for: server)
             let text = try await monitor.docker.logs(containerID: container.id, target: target)
             logs = LogsSheet(id: container.id, title: container.name, text: text)

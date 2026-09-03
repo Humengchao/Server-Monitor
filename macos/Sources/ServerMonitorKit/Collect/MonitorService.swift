@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Network
+import Observation
 import SwiftUI
 import os
 
@@ -22,12 +23,21 @@ public enum ServerStatus: Equatable, Sendable {
 /// Everything published here is touched only on the main actor; the SSH and
 /// SQLite work happens in the collector actor and on the database queue, so the
 /// UI never blocks on a slow or unreachable host.
+///
+/// `@Observable` rather than `ObservableObject`: a view depends only on the
+/// properties its body actually reads. With `ObservableObject`, one change
+/// notification per poll re-evaluated every view holding the service — the
+/// window frame, the toolbar, panes that only ever *call* it — and keeping
+/// them quiet took a second, un-observed injection channel and a comment in
+/// each file. Now the compiler does it: a view that reads `servers` is left
+/// alone when `latest` changes, and one that reads nothing never re-runs.
+@Observable
 @MainActor
-public final class MonitorService: ObservableObject {
-    @Published public private(set) var servers: [Server] = []
+public final class MonitorService {
+    public private(set) var servers: [Server] = []
     /// Newest snapshot per server, for the dashboard tiles.
-    @Published public private(set) var latest: [UUID: MetricSnapshot] = [:]
-    @Published public private(set) var status: [UUID: ServerStatus] = [:]
+    public private(set) var latest: [UUID: MetricSnapshot] = [:]
+    public private(set) var status: [UUID: ServerStatus] = [:]
 
     public let database: Database
     public let settings: AppSettings
@@ -36,26 +46,26 @@ public final class MonitorService: ObservableObject {
     public let geo = GeoLookup()
     public let sftp: SFTPClient
     /// Set by the app so poll results can raise notifications.
-    public weak var alerts: AlertService?
+    @ObservationIgnored public weak var alerts: AlertService?
     /// Shared logins, refreshed alongside the server list.
-    @Published public private(set) var identities: [Identity] = []
-    @Published public private(set) var groups: [MachineGroup] = []
+    public private(set) var identities: [Identity] = []
+    public private(set) var groups: [MachineGroup] = []
     /// Engine summary per Docker host, for the overview cards.
-    @Published public private(set) var dockerSummaries: [UUID: DockerSummary] = [:]
+    public private(set) var dockerSummaries: [UUID: DockerSummary] = [:]
 
     private let runner: SSHRunner
     private let collector: MetricsCollector
-    private var pollTask: Task<Void, Never>?
-    private var maintenanceTask: Task<Void, Never>?
-    private var pathMonitor: NWPathMonitor?
-    private var wakeTask: Task<Void, Never>?
+    @ObservationIgnored private var pollTask: Task<Void, Never>?
+    @ObservationIgnored private var maintenanceTask: Task<Void, Never>?
+    @ObservationIgnored private var pathMonitor: NWPathMonitor?
+    @ObservationIgnored private var wakeTask: Task<Void, Never>?
     /// Nil until the first path update, so starting up is not mistaken for a
     /// network that just came back.
-    private var networkWasSatisfied: Bool?
+    @ObservationIgnored private var networkWasSatisfied: Bool?
     /// Held while polling, to keep macOS App Nap from freezing the poll loop's
     /// timer when the window is in the background. Exposed only so a test can
     /// assert the start/stop contract.
-    private(set) var pollingActivity: NSObjectProtocol?
+    @ObservationIgnored private(set) var pollingActivity: NSObjectProtocol?
 
     public init(database: Database, settings: AppSettings) {
         self.database = database
@@ -74,6 +84,7 @@ public final class MonitorService: ObservableObject {
         do {
             identities = (try? database.allIdentities()) ?? []
             groups = (try? database.allGroups()) ?? []
+            reloadSnippets()
             servers = try database.allServers()
             // Seed tiles from history so a relaunch shows the last known values
             // instead of empty cards until the first poll lands.
@@ -170,24 +181,29 @@ public final class MonitorService: ObservableObject {
 
     // MARK: - Toolbox
 
-    public func snippets() -> [Snippet] {
-        (try? database.allSnippets()) ?? []
-    }
+    /// Saved commands. A stored, observed property rather than a query, so the
+    /// terminal's snippet menu sees a save or a delete the moment it happens.
+    public private(set) var snippets: [Snippet] = []
 
     public func save(_ snippet: Snippet) throws {
         try database.save(snippet)
-        objectWillChange.send()
+        reloadSnippets()
     }
 
     public func deleteSnippet(id: UUID) throws {
         try database.deleteSnippet(id: id)
-        objectWillChange.send()
+        reloadSnippets()
+    }
+
+    private func reloadSnippets() {
+        snippets = (try? database.allSnippets()) ?? []
     }
 
     /// Runs a snippet on a host and returns its combined output.
     public func run(snippet: Snippet, on server: Server) async throws -> String {
         let target = try target(for: server)
         try? database.markSnippetUsed(id: snippet.id)
+        reloadSnippets()
         return try await runner.run("\(snippet.command) 2>&1", on: target, timeout: 120)
     }
 
@@ -350,17 +366,17 @@ public final class MonitorService: ObservableObject {
     /// Servers whose previous poll has not returned yet. A host that is slow
     /// to answer is polled once, not once per tick, so a stall cannot pile up
     /// a queue of ssh processes behind it.
-    private(set) var inFlight: Set<UUID> = []
+    @ObservationIgnored private(set) var inFlight: Set<UUID> = []
 
     static let log = Logger(subsystem: "com.hmchxd.ServerMonitor", category: "polling")
 
     // MARK: - One tick, one publish
 
     /// Servers launched by the tick in progress whose polls have not returned.
-    private(set) var tickMembers: Set<UUID> = []
+    @ObservationIgnored private(set) var tickMembers: Set<UUID> = []
     /// Fires `tickCap` after the tick opened; nil whenever no tick is open,
     /// which is what `tickOpen` reads.
-    private var tickCapTask: Task<Void, Never>?
+    @ObservationIgnored private var tickCapTask: Task<Void, Never>?
     /// True from the moment a tick launches its polls until the last of them
     /// returns or `tickCap` elapses. Results arriving meanwhile are held.
     var tickOpen: Bool { tickCapTask != nil }
@@ -370,7 +386,7 @@ public final class MonitorService: ObservableObject {
     /// host finishing one tick: p50 1.0 s, p95 1.6 s. A host that has gone
     /// away takes the full 10 s connect timeout, so the cap is what keeps one
     /// dead host from delaying eight live ones.
-    var tickCap: Duration = .seconds(2)
+    @ObservationIgnored var tickCap: Duration = .seconds(2)
 
     /// Holds publishing until every poll this tick launched has answered.
     ///
@@ -415,9 +431,9 @@ public final class MonitorService: ObservableObject {
     // MARK: - Failure backoff
 
     /// Consecutive failed polls per server, reset by any success.
-    private(set) var failureStreak: [UUID: Int] = [:]
+    @ObservationIgnored private(set) var failureStreak: [UUID: Int] = [:]
     /// Earliest time `pollDue` will try a server again.
-    private(set) var retryAfter: [UUID: Date] = [:]
+    @ObservationIgnored private(set) var retryAfter: [UUID: Date] = [:]
 
     /// Longest a failing host waits between attempts. It still gets retried
     /// often enough that a recovery is noticed within a few minutes.
@@ -638,7 +654,7 @@ public final class MonitorService: ObservableObject {
     /// menu-bar mode) an append-only queue grew by one closure holding a full
     /// snapshot per host per poll — tens of megabytes an hour — until the
     /// window was next shown.
-    private(set) var pending: [(serverID: UUID, apply: () -> Void)] = []
+    @ObservationIgnored private(set) var pending: [(serverID: UUID, apply: () -> Void)] = []
 
     /// False while every window is hidden or fully covered.
     ///
@@ -649,7 +665,7 @@ public final class MonitorService: ObservableObject {
     /// results back while nothing is visible removes that; collection, the
     /// database and alerts are unaffected, and `setUIVisible(true)` applies
     /// whatever accumulated so the first frame shown is current.
-    private(set) var uiIsVisible = true
+    @ObservationIgnored private(set) var uiIsVisible = true
 
     /// Called from the app when window occlusion changes.
     public func setUIVisible(_ visible: Bool) {

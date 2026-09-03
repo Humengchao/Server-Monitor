@@ -10,7 +10,7 @@ public struct ServerEditorView: View {
 
     private let mode: Mode
 
-    @EnvironmentObject private var monitor: MonitorService
+    @Environment(MonitorService.self) private var monitor
     @EnvironmentObject private var loc: Localization
     @Environment(\.dismiss) private var dismiss
 

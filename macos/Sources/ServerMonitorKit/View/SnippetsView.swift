@@ -6,7 +6,7 @@ struct SnippetsView: View {
     /// Driven by the window toolbar, which owns this destination's actions.
     @Binding var creating: Bool
 
-    @EnvironmentObject private var monitor: MonitorService
+    @Environment(MonitorService.self) private var monitor
     @EnvironmentObject private var loc: Localization
 
     @State private var snippets: [Snippet] = []
@@ -106,7 +106,7 @@ struct SnippetsView: View {
     }
 
     private func reload() {
-        snippets = monitor.snippets()
+        snippets = monitor.snippets
     }
 }
 
@@ -115,7 +115,7 @@ private struct SnippetEditor: View {
     let snippet: Snippet?
     let onSave: () -> Void
 
-    @EnvironmentObject private var monitor: MonitorService
+    @Environment(MonitorService.self) private var monitor
     @EnvironmentObject private var loc: Localization
     @Environment(\.dismiss) private var dismiss
 
@@ -192,7 +192,7 @@ private struct SnippetEditor: View {
 private struct SnippetRunner: View {
     let snippet: Snippet
 
-    @EnvironmentObject private var monitor: MonitorService
+    @Environment(MonitorService.self) private var monitor
     @EnvironmentObject private var loc: Localization
     @Environment(\.dismiss) private var dismiss
 

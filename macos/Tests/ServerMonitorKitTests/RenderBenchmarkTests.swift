@@ -140,8 +140,7 @@ struct RenderBenchmarkTests {
                 server: server, snapshot: snapshot, samples: samples, isWindows: false, width: width
             )
                 .environmentObject(localization)
-                .environmentObject(monitor)
-                .environment(\.monitorService, monitor)
+                .environment(monitor)
         }
 
         print("\n── card grid (10 cards) ──")
@@ -160,7 +159,7 @@ struct RenderBenchmarkTests {
 
         func card<V: View>(_ label: String, _ make: () -> V) {
             Self.time(label, width: 420) {
-                make().environmentObject(localization).environmentObject(monitor)
+                make().environmentObject(localization).environment(monitor)
             }
         }
         print("\n── each card alone (width 420) ──")
@@ -408,8 +407,7 @@ struct RenderBenchmarkTests {
         func measure(_ label: String, history: [MetricSample], step: CGFloat, quantiseCharts: Bool = false) {
             let root = Root(make: { AnyView(overview(width: $0, history: history, step: step, quantiseCharts: quantiseCharts)) })
                 .environmentObject(localization)
-                .environmentObject(monitor)
-                .environment(\.monitorService, monitor)
+                .environment(monitor)
             let hosting = NSHostingView(rootView: root)
             hosting.frame = NSRect(x: 0, y: 0, width: 900, height: 900)
             hosting.layoutSubtreeIfNeeded()
@@ -545,8 +543,7 @@ struct RenderBenchmarkTests {
             await monitor.pollAll()
             let ms = Self.time("\(count) cards", width: 1200) {
                 DashboardView(search: .constant(""), onSelect: { _ in })
-                    .environmentObject(monitor)
-                    .environment(\.monitorService, monitor)
+                    .environment(monitor)
                     .environmentObject(localization)
             }
             // Publishes per second at a 5 s poll: count / 5. CPU share is what
@@ -677,8 +674,7 @@ struct RenderBenchmarkTests {
         Self.time("24 hourly bars", width: 420) {
             StatusTrafficCard(server: server, preloaded: CardRenderTests.sampleTraffic())
                 .environmentObject(localization)
-                .environmentObject(monitor)
-                .environment(\.monitorService, monitor)
+                .environment(monitor)
         }
     }
 }

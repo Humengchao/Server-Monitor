@@ -19,7 +19,7 @@ struct SSHKeysView: View {
     @State private var exporting: String?
     /// (server, message, isError) from the last export, shown as a banner.
     @State private var exportResult: (UUID, String, Bool)?
-    @EnvironmentObject private var monitor: MonitorService
+    @Environment(MonitorService.self) private var monitor
     @State private var failure: String?
     @State private var notice: String?
     @State private var pendingDelete: SSHKeyFile?

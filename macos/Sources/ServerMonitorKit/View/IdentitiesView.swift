@@ -6,7 +6,7 @@ struct IdentitiesView: View {
     @Binding var search: String
     @Binding var creating: Bool
 
-    @EnvironmentObject private var monitor: MonitorService
+    @Environment(MonitorService.self) private var monitor
     @EnvironmentObject private var loc: Localization
 
     @State private var editing: Identity?
@@ -96,7 +96,7 @@ struct IdentitiesView: View {
 private struct IdentityEditor: View {
     let identity: Identity?
 
-    @EnvironmentObject private var monitor: MonitorService
+    @Environment(MonitorService.self) private var monitor
     @EnvironmentObject private var loc: Localization
     @Environment(\.dismiss) private var dismiss
 

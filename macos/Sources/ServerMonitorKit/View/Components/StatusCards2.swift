@@ -234,7 +234,7 @@ struct StatusProcessCard: View {
 struct StatusDockerCard: View {
     let server: Server
     let snapshot: MetricSnapshot?
-    @Environment(\.monitorService) private var monitor
+    @Environment(MonitorService.self) private var monitor
     @EnvironmentObject private var loc: Localization
     @Environment(\.cardWidth) private var cardWidth
 
@@ -348,7 +348,6 @@ struct StatusDockerCard: View {
         containers = []
         stats = [:]
         do {
-            let monitor = try monitor.required
             let target = try monitor.target(for: server)
             containers = try await monitor.docker.listContainers(target: target)
             // Tolerated failing: without it the tiles still name every container

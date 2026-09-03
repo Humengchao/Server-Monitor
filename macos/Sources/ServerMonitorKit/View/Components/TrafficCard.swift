@@ -13,7 +13,7 @@ import SwiftUI
 struct StatusTrafficCard: View {
     let server: Server
 
-    @Environment(\.monitorService) private var monitor
+    @Environment(MonitorService.self) private var monitor
     @EnvironmentObject private var loc: Localization
 
     @State private var outcome: VnstatParser.Outcome?
@@ -175,7 +175,7 @@ struct StatusTrafficCard: View {
         installMessage = nil
         defer { probing = false }
         do {
-            let output = try await monitor.required.run(VnstatInstaller.probeCommand, on: server, timeout: 20)
+            let output = try await monitor.run(VnstatInstaller.probeCommand, on: server, timeout: 20)
             guard let plan = VnstatInstaller.plan(fromProbe: output) else {
                 installMessage = (loc.t("traffic.installNoPackageManager"), true, nil)
                 return
@@ -194,7 +194,7 @@ struct StatusTrafficCard: View {
         defer { installing = false }
         do {
             // apt-get update alone can take a minute on a slow mirror.
-            let output = try await monitor.required.run(VnstatInstaller.remoteScript(for: plan), on: server, timeout: 300)
+            let output = try await monitor.run(VnstatInstaller.remoteScript(for: plan), on: server, timeout: 300)
             switch VnstatInstaller.outcome(from: output) {
             case .installed:
                 installMessage = (loc.t("traffic.installed"), false, nil)
@@ -352,7 +352,7 @@ struct StatusTrafficCard: View {
         outcome = nil
         do {
             // vnstat --json can be a few hundred KB; give it longer than a poll.
-            let output = try await monitor.required.run(VnstatParser.command, on: server, timeout: 45)
+            let output = try await monitor.run(VnstatParser.command, on: server, timeout: 45)
             if let parsed = VnstatParser.parse(output) {
                 outcome = parsed
             } else {

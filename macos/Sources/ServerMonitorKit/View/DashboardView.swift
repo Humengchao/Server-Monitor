@@ -2,7 +2,7 @@ import SwiftUI
 
 /// All hosts at a glance: three counters over a grid of server cards.
 public struct DashboardView: View {
-    @EnvironmentObject private var monitor: MonitorService
+    @Environment(MonitorService.self) private var monitor
     @EnvironmentObject private var loc: Localization
     private let onSelect: (UUID) -> Void
 
@@ -95,7 +95,7 @@ struct ServerCard: View {
     let server: Server
     let onOpen: () -> Void
 
-    @EnvironmentObject private var monitor: MonitorService
+    @Environment(MonitorService.self) private var monitor
     @EnvironmentObject private var loc: Localization
     @State private var hovering = false
 
@@ -198,7 +198,7 @@ var cardBackground: some View {
 struct ServerCardHeader: View {
     let server: Server
 
-    @EnvironmentObject private var monitor: MonitorService
+    @Environment(MonitorService.self) private var monitor
     @EnvironmentObject private var loc: Localization
 
     private var status: ServerStatus { monitor.status[server.id] ?? .unknown }
@@ -260,7 +260,7 @@ struct ServerCardHeader: View {
 struct ServerFactsRow: View {
     let server: Server
 
-    @EnvironmentObject private var monitor: MonitorService
+    @Environment(MonitorService.self) private var monitor
     @EnvironmentObject private var loc: Localization
 
     /// A host we have never reached has zeroes in its row, not measurements.

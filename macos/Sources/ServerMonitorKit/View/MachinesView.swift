@@ -6,7 +6,7 @@ struct MachinesView: View {
     @Binding var creatingGroup: Bool
     let onOpen: (UUID) -> Void
 
-    @EnvironmentObject private var monitor: MonitorService
+    @Environment(MonitorService.self) private var monitor
     @EnvironmentObject private var loc: Localization
 
     @State private var editingServer: Server?
@@ -211,7 +211,7 @@ struct MachinesView: View {
 private struct GroupEditor: View {
     let group: MachineGroup?
 
-    @EnvironmentObject private var monitor: MonitorService
+    @Environment(MonitorService.self) private var monitor
     @EnvironmentObject private var loc: Localization
     @Environment(\.dismiss) private var dismiss
 

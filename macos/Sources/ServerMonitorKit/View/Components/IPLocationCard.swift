@@ -11,7 +11,7 @@ struct IPLocationCard: View {
     let server: Server
     let snapshot: MetricSnapshot?
 
-    @Environment(\.monitorService) private var monitor
+    @Environment(MonitorService.self) private var monitor
     @EnvironmentObject private var loc: Localization
 
     @State private var info: GeoInfo?
@@ -99,7 +99,6 @@ struct IPLocationCard: View {
         failure = nil
         defer { looking = false }
         do {
-            let monitor = try monitor.required
             let result = try await monitor.geo.lookup(endpoint)
             info = result
             // Persist just the country: the flag is what the dashboard and the

@@ -9,7 +9,7 @@ struct DockerOverviewView: View {
     @Binding var search: String
     let onOpen: (UUID) -> Void
 
-    @EnvironmentObject private var monitor: MonitorService
+    @Environment(MonitorService.self) private var monitor
     @EnvironmentObject private var loc: Localization
     @State private var loading = false
 
@@ -61,7 +61,7 @@ struct DockerHostCard: View {
     let server: Server
     let onOpen: () -> Void
 
-    @EnvironmentObject private var monitor: MonitorService
+    @Environment(MonitorService.self) private var monitor
     @EnvironmentObject private var loc: Localization
     @State private var hovering = false
 

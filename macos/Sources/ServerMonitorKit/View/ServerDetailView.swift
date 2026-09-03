@@ -28,7 +28,7 @@ public enum TimeRange: String, CaseIterable, Identifiable {
 public struct ServerDetailView: View {
     private let server: Server
 
-    @EnvironmentObject private var monitor: MonitorService
+    @Environment(MonitorService.self) private var monitor
     @EnvironmentObject private var loc: Localization
 
     @State private var tab: Tab = .overview

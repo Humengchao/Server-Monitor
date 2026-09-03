@@ -7,7 +7,7 @@ import SwiftUI
 /// glance without opening the app, and hands off to the window for anything
 /// that needs interaction.
 public struct MenuBarPanel: View {
-    @EnvironmentObject private var monitor: MonitorService
+    @Environment(MonitorService.self) private var monitor
     @EnvironmentObject private var loc: Localization
     @Environment(\.openWindow) private var openWindow
 
@@ -147,7 +147,7 @@ public struct MenuBarPanel: View {
 
 /// Compact status for the menu bar itself.
 public struct MenuBarLabel: View {
-    @EnvironmentObject private var monitor: MonitorService
+    @Environment(MonitorService.self) private var monitor
 
     public init() {}
 
