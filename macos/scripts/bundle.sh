@@ -10,7 +10,10 @@ cd "$(dirname "$0")/.."
 ROOT="$PWD"
 APP_NAME="Server Monitor"
 BUNDLE_ID="com.hmchxd.ServerMonitor"
-VERSION="${VERSION:-0.1.0}"
+# Defaults to the nearest tag plus commit ("0.1.0-3-gabc1234", "-dirty" with
+# uncommitted changes), so a locally built app still says which commit it is.
+# CI sets VERSION explicitly.
+VERSION="${VERSION:-$(git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo 0.1.0)}"
 CONFIG="${CONFIG:-release}"
 DIST="$ROOT/dist"
 APP="$DIST/$APP_NAME.app"

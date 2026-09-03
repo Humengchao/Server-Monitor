@@ -1,0 +1,146 @@
+name: macOS app
+
+# Builds, tests and packages the native app under macos/ on every push that
+# touches it, and publishes a GitHub Release when a version tag (v*) is pushed.
+# The web app's image build lives in deploy.yml and ignores macos/, so the two
+# never run for each other's changes.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'macos/**'
+      - '.github/workflows/macos-app.yml'
+    tags: ['v*']
+  workflow_dispatch:
+
+# A newer push to the same branch supersedes a build still running.
+concurrency:
+  group: macos-app-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build, test, package
+    runs-on: macos-15
+    defaults:
+      run:
+        # Explicit bash gets `-o pipefail`, so a failing `swift test | tail`
+        # fails the step; the implicit default shell does not.
+        shell: bash
+        working-directory: macos
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Tags and history, so the version string can come from `git describe`.
+          fetch-depth: 0
+
+      - name: Select Xcode
+        # Prefer the Xcode 26 line the app is developed against; fall back to
+        # the image default (16.4, Swift 6.1), which builds it too.
+        run: |
+          for candidate in /Applications/Xcode_26.3.app /Applications/Xcode_26.2.app /Applications/Xcode_26.1.1.app; do
+            if [ -d "$candidate" ]; then sudo xcode-select -s "$candidate"; break; fi
+          done
+          xcodebuild -version
+          swift --version
+
+      - name: Cache SwiftPM build
+        uses: actions/cache@v4
+        with:
+          path: macos/.build
+          key: swiftpm-${{ runner.os }}-${{ hashFiles('macos/Package.resolved') }}-${{ hashFiles('macos/Sources/**/*.swift', 'macos/Tests/**/*.swift') }}
+          restore-keys: |
+            swiftpm-${{ runner.os }}-${{ hashFiles('macos/Package.resolved') }}-
+            swiftpm-${{ runner.os }}-
+
+      - name: Prepare a keychain for the password-auth tests
+        # `Keychain.savePassword` writes a generic password; the runner's login
+        # keychain may be locked. A throwaway default keychain makes those tests
+        # exercise the real Security framework rather than being skipped.
+        run: |
+          security create-keychain -p "" ci.keychain-db
+          security default-keychain -s ci.keychain-db
+          security unlock-keychain -p "" ci.keychain-db
+          security set-keychain-settings ci.keychain-db   # no auto-lock
+
+      - name: Test
+        # Everything is offline: the live suites only run when SM_LIVE_ALIAS /
+        # SM_WIN_HOST are set, and nothing sets them here.
+        run: swift test 2>&1 | tail -n 40
+
+      - name: Version
+        id: version
+        # Tag v1.2.3 -> 1.2.3; anything else -> 0.1.0-dev+<short sha>, so a
+        # build downloaded from the Actions tab still says which commit it is.
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.1.0-dev+${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          MAKE_DMG: "1"
+        run: |
+          ./scripts/bundle.sh
+          cd dist
+          # ditto keeps the bundle's resource forks and signature intact; zip does not.
+          ditto -c -k --keepParent "Server Monitor.app" "Server-Monitor-${VERSION}.zip"
+          mv "Server Monitor-${VERSION}.dmg" "Server-Monitor-${VERSION}.dmg"
+          ls -la
+          {
+            echo "### Server Monitor ${VERSION}"
+            echo
+            echo "Ad-hoc signed (no Developer ID), so after downloading, either right-click"
+            echo "the app and choose Open, then allow it under System Settings > Privacy &"
+            echo "Security, or clear the quarantine flag:"
+            echo
+            echo '```'
+            echo 'xattr -dr com.apple.quarantine "Server Monitor.app"'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload app
+        uses: actions/upload-artifact@v4
+        with:
+          name: Server-Monitor-${{ steps.version.outputs.version }}
+          path: |
+            macos/dist/*.zip
+            macos/dist/*.dmg
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: Server-Monitor-*
+          merge-multiple: true
+          path: out
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          cat > notes.md <<EOF
+          Native macOS app, ${VERSION}. Requires macOS 15.
+
+          The app is ad-hoc signed (no Developer ID). After downloading, right-click it
+          and choose Open, then allow it under System Settings > Privacy & Security —
+          or clear the quarantine flag: \`xattr -dr com.apple.quarantine "Server Monitor.app"\`.
+          EOF
+          gh release create "v${VERSION}" out/* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "Server Monitor ${VERSION}" \
+            --notes-file notes.md

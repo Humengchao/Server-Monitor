@@ -113,7 +113,7 @@ full handshake.
 ```bash
 cd macos
 swift build            # compile
-swift test             # 270 tests, fully offline
+swift test             # 305 tests, fully offline
 ./scripts/bundle.sh    # -> dist/Server Monitor.app
 MAKE_DMG=1 ./scripts/bundle.sh   # also produce a .dmg
 
@@ -141,6 +141,25 @@ Tools, prefix builds with
 `xcodebuild` needs full Xcode. The icon is rasterised from `Resources/AppIcon.svg`
 with headless Chrome and packed by `iconutil`, because `actool` also ships only
 with Xcode. If Chrome is missing the app builds without an icon.
+
+### Continuous builds
+
+`.github/workflows/macos-app.yml` builds, tests and packages the app on every
+push to `main` that touches `macos/`. The `.zip` and `.dmg` are attached to the
+run as an artifact (kept 30 days) — Actions tab → the run → *Artifacts*. Pushing
+a tag `v1.2.3` additionally publishes a GitHub Release with both files.
+
+The app is ad-hoc signed — there is no Developer ID, so no notarisation — and
+Gatekeeper will refuse a copy that arrived through a browser. Either right-click
+it, choose *Open*, and allow it under *System Settings › Privacy & Security*, or
+clear the quarantine flag once:
+
+```bash
+xattr -dr com.apple.quarantine "Server Monitor.app"
+```
+
+Builds are versioned `<tag>` on a tag push and `0.1.0-dev+<short sha>` otherwise,
+so a download from the Actions tab still says which commit it is.
 
 ## Security notes
 
