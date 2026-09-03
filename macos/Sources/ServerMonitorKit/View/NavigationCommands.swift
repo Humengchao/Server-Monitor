@@ -29,20 +29,13 @@ public struct NavigationCommands: Commands {
 
     public var body: some Commands {
         CommandMenu(loc.t("nav.goTo")) {
-            item("nav.dashboard", .dashboard, "1")
-            item("nav.machines", .machines, "2")
-            item("nav.identities", .identities, "3")
-            item("nav.sshKeys", .sshKeys, "4")
-            item("nav.snippets", .snippets, "5")
-            item("nav.docker", .docker, "6")
-            item("nav.history", .history, "7")
+            // Numbered in sidebar order, from the one list the sidebar draws.
+            ForEach(Array(RootView.Selection.fixedDestinations.enumerated()), id: \.offset) { index, destination in
+                Button(loc.t(destination.titleKey)) { selection?.wrappedValue = destination }
+                    .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: .command)
+                    // No main window focused (the menu bar panel, Settings): nothing to move.
+                    .disabled(selection == nil)
+            }
         }
-    }
-
-    private func item(_ key: String, _ destination: RootView.Selection, _ digit: KeyEquivalent) -> some View {
-        Button(loc.t(key)) { selection?.wrappedValue = destination }
-            .keyboardShortcut(digit, modifiers: .command)
-            // No main window focused (the menu bar panel, Settings): nothing to move.
-            .disabled(selection == nil)
     }
 }

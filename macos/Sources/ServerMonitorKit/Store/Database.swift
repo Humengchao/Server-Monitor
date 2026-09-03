@@ -355,40 +355,6 @@ public final class Database: @unchecked Sendable {
         Keychain.deletePassword(serverID: id)
     }
 
-    /// Writes back the host facts a collection round discovered, but only when
-    /// they actually changed — otherwise every poll would dirty the row.
-    /// Records a probed OS without touching any other column.
-    public func updateOSKind(serverID: UUID, osKind: OSKind) throws {
-        try queue.write { db in
-            try db.execute(
-                sql: "UPDATE server SET osKind = ? WHERE id = ?",
-                arguments: [osKind.rawValue, serverID]
-            )
-        }
-    }
-
-    public func updateHostFacts(
-        serverID: UUID,
-        cores: Int,
-        memoryTotal: Int64,
-        diskTotal: Int64,
-        dockerVersion: String
-    ) throws {
-        try queue.write { db in
-            guard var server = try Server.fetchOne(db, key: ["id": serverID]) else { return }
-            guard server.cores != cores
-                || server.memoryTotal != memoryTotal
-                || server.diskTotal != diskTotal
-                || server.dockerVersion != dockerVersion
-            else { return }
-            server.cores = cores
-            server.memoryTotal = memoryTotal
-            server.diskTotal = diskTotal
-            server.dockerVersion = dockerVersion
-            try server.update(db)
-        }
-    }
-
     public func nextSortIndex() throws -> Int {
         try queue.read { db in
             let maximum = try Int.fetchOne(db, sql: "SELECT MAX(sortIndex) FROM server") ?? 0
@@ -404,24 +370,49 @@ public final class Database: @unchecked Sendable {
     }
 
     /// Everything a successful poll writes, as one transaction: the sample,
-    /// the host facts when they changed, and a probed OS when there is one.
+    /// and — only when the caller saw a fact move — the host facts and a
+    /// probed OS.
     ///
-    /// These were three separate `write`s — three commits per host per poll —
-    /// and they ran on the main actor. The row is fetched fresh inside the
-    /// transaction rather than saved from the poll's copy, so a name or tags
-    /// the user edited while the poll ran are kept.
-    public func recordPoll(serverID: UUID, snapshot: MetricSnapshot, detectedOS: OSKind?) throws {
-        var sample = MetricSample(serverID: serverID, snapshot: snapshot)
-        try queue.write { db in
-            try sample.insert(db)
-            guard var server = try Server.fetchOne(db, key: ["id": serverID]) else { return }
+    /// These were three separate `write`s, three commits per host per poll,
+    /// and they ran on the main actor. GRDB's async `write` suspends until
+    /// its own queue is free rather than parking a thread. The row is fetched
+    /// fresh inside the transaction rather than saved from the poll's copy, so
+    /// a name, tags, or an OS the user set while the poll ran are kept: the
+    /// probed OS only lands on a row still marked automatic.
+    public func recordPoll(
+        serverID: UUID,
+        snapshot: MetricSnapshot,
+        detectedOS: OSKind?,
+        updateFacts: Bool
+    ) async throws {
+        try await queue.write { db in
+            _ = try MetricSample(serverID: serverID, snapshot: snapshot).inserted(db)
+            guard updateFacts || detectedOS != nil,
+                  var server = try Server.fetchOne(db, key: ["id": serverID])
+            else { return }
             var changed = false
-            if server.cores != snapshot.cores { server.cores = snapshot.cores; changed = true }
-            if server.memoryTotal != snapshot.memoryTotal { server.memoryTotal = snapshot.memoryTotal; changed = true }
-            if server.diskTotal != snapshot.diskTotal { server.diskTotal = snapshot.diskTotal; changed = true }
-            if server.dockerVersion != snapshot.dockerVersion { server.dockerVersion = snapshot.dockerVersion; changed = true }
-            if let detectedOS, server.osKind != detectedOS { server.osKind = detectedOS; changed = true }
+            if updateFacts {
+                server.cores = snapshot.cores
+                server.memoryTotal = snapshot.memoryTotal
+                server.diskTotal = snapshot.diskTotal
+                server.dockerVersion = snapshot.dockerVersion
+                changed = true
+            }
+            if let detectedOS, server.osKind == .auto {
+                server.osKind = detectedOS
+                changed = true
+            }
             if changed { try server.update(db) }
+        }
+    }
+
+    /// One column, so a lookup finished a poll behind cannot undo the poll.
+    public func updateCountryCode(serverID: UUID, countryCode: String) throws {
+        try queue.write { db in
+            try db.execute(
+                sql: "UPDATE server SET countryCode = ? WHERE id = ?",
+                arguments: [countryCode, serverID]
+            )
         }
     }
 

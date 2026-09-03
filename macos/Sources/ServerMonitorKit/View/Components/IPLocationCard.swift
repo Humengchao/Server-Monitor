@@ -99,15 +99,16 @@ struct IPLocationCard: View {
         failure = nil
         defer { looking = false }
         do {
-            let result = try await monitor.required.geo.lookup(endpoint)
+            let monitor = try monitor.required
+            let result = try await monitor.geo.lookup(endpoint)
             info = result
             // Persist just the country: the flag is what the dashboard and the
             // sidebar show, and re-asking on every visit would be rude to a
             // free service.
+            // One column, not this view's copy of the row: the copy may be a
+            // poll behind, and saving it back undid that poll's facts.
             if !result.countryCode.isEmpty, result.countryCode != server.countryCode {
-                var updated = server
-                updated.countryCode = result.countryCode
-                try? monitor?.updateServer(updated)
+                try? monitor.updateCountryCode(serverID: server.id, countryCode: result.countryCode)
             }
         } catch {
             failure = error.localizedDescription

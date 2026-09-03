@@ -141,6 +141,7 @@ struct RenderBenchmarkTests {
             )
                 .environmentObject(localization)
                 .environmentObject(monitor)
+                .environment(\.monitorService, monitor)
         }
 
         print("\n── card grid (10 cards) ──")
@@ -408,6 +409,7 @@ struct RenderBenchmarkTests {
             let root = Root(make: { AnyView(overview(width: $0, history: history, step: step, quantiseCharts: quantiseCharts)) })
                 .environmentObject(localization)
                 .environmentObject(monitor)
+                .environment(\.monitorService, monitor)
             let hosting = NSHostingView(rootView: root)
             hosting.frame = NSRect(x: 0, y: 0, width: 900, height: 900)
             hosting.layoutSubtreeIfNeeded()
@@ -544,6 +546,7 @@ struct RenderBenchmarkTests {
             let ms = Self.time("\(count) cards", width: 1200) {
                 DashboardView(search: .constant(""), onSelect: { _ in })
                     .environmentObject(monitor)
+                    .environment(\.monitorService, monitor)
                     .environmentObject(localization)
             }
             // Publishes per second at a 5 s poll: count / 5. CPU share is what
@@ -675,6 +678,7 @@ struct RenderBenchmarkTests {
             StatusTrafficCard(server: server, preloaded: CardRenderTests.sampleTraffic())
                 .environmentObject(localization)
                 .environmentObject(monitor)
+                .environment(\.monitorService, monitor)
         }
     }
 }

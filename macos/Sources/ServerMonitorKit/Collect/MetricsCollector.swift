@@ -17,6 +17,12 @@ public actor MetricsCollector {
     /// rates. Lost on relaunch, which costs exactly one poll of rate data.
     private var baselines: [UUID: CounterBaseline] = [:]
     private var interfaceBaselines: [UUID: InterfaceBaseline] = [:]
+    /// CPU model per server, for hosts whose /proc/cpuinfo does not name it.
+    /// Looked up with `lscpu` once — it is a fixed fact, and `lscpu` is not
+    /// cheap on an 80-core ARM box — then carried into every later snapshot.
+    private var cpuModelCache: [UUID: String] = [:]
+    /// Hosts already asked, so one that cannot answer is not asked every poll.
+    private var cpuModelLookedUp: Set<UUID> = []
 
     public init(runner: SSHRunner = SSHRunner()) {
         self.runner = runner
@@ -100,6 +106,19 @@ public actor MetricsCollector {
         return text.contains("linux") ? .linux : .windows
     }
 
+    /// The parsed model when the host gave one; otherwise the cached answer,
+    /// or one `lscpu` round trip the first time.
+    private func cpuModel(parsed: String, target: SSHTarget) async -> String {
+        if !parsed.isEmpty { return parsed }
+        if let cached = cpuModelCache[target.serverID] { return cached }
+        guard !cpuModelLookedUp.contains(target.serverID) else { return "" }
+        cpuModelLookedUp.insert(target.serverID)
+        let answer = ((try? await runner.run(ProcParsers.cpuModelFallbackCommand, on: target, timeout: 15)) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !answer.isEmpty { cpuModelCache[target.serverID] = answer }
+        return answer
+    }
+
     /// Returns the snapshot plus what the latency calculation needs.
     private func collectLinux(
         target: SSHTarget
@@ -144,6 +163,9 @@ public actor MetricsCollector {
         snapshot.filesystems = ProcParsers.filesystems(section(.diskUsage))
         snapshot.processes = ProcParsers.processes(section(.processes))
         snapshot.identity = ProcParsers.hostIdentity(section(.hostInfo))
+        snapshot.identity.cpuModel = await cpuModel(
+            parsed: snapshot.identity.cpuModel, target: target
+        )
         snapshot.gpu = ProcParsers.gpuStatus(section(.gpu))
         snapshot.interfaces = ProcParsers.netInterfaces(section(.netDev))
 

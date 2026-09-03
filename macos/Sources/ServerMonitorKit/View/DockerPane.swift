@@ -194,8 +194,7 @@ struct DockerPane: View {
                     Image(systemName: "terminal")
                 }
                 .buttonStyle(.borderless)
-                .help(loc.t("nav.terminal"))
-                .accessibilityLabel(loc.t("nav.terminal"))
+                .hint(loc.t("nav.terminal"))
             }
         }
     }
@@ -211,8 +210,7 @@ struct DockerPane: View {
             Image(systemName: symbol)
         }
         .buttonStyle(.borderless)
-        .help(help)
-        .accessibilityLabel(help)
+        .hint(help)
     }
 
     private func logsView(_ sheet: LogsSheet) -> some View {
@@ -270,8 +268,9 @@ struct DockerPane: View {
         loading = true
         defer { loading = false }
         do {
-            let target = try monitor.required.target(for: server)
-            let docker = try monitor.required.docker
+            let monitor = try monitor.required
+            let target = try monitor.target(for: server)
+            let docker = monitor.docker
             containers = try await docker.listContainers(target: target)
             compose = (try? await docker.listComposeProjects(target: target)) ?? []
             images = try await docker.listImages(target: target)
@@ -291,8 +290,9 @@ struct DockerPane: View {
         busy.insert(container.id)
         defer { busy.remove(container.id) }
         do {
-            let target = try monitor.required.target(for: server)
-            try await monitor.required.docker.perform(action, containerID: container.id, target: target)
+            let monitor = try monitor.required
+            let target = try monitor.target(for: server)
+            try await monitor.docker.perform(action, containerID: container.id, target: target)
             await reload()
         } catch {
             failure = error.localizedDescription
@@ -301,8 +301,9 @@ struct DockerPane: View {
 
     private func showLogs(_ container: DockerContainer) async {
         do {
-            let target = try monitor.required.target(for: server)
-            let text = try await monitor.required.docker.logs(containerID: container.id, target: target)
+            let monitor = try monitor.required
+            let target = try monitor.target(for: server)
+            let text = try await monitor.docker.logs(containerID: container.id, target: target)
             logs = LogsSheet(id: container.id, title: container.name, text: text)
         } catch {
             failure = error.localizedDescription

@@ -348,11 +348,12 @@ struct StatusDockerCard: View {
         containers = []
         stats = [:]
         do {
-            let target = try monitor.required.target(for: server)
-            containers = try await monitor.required.docker.listContainers(target: target)
+            let monitor = try monitor.required
+            let target = try monitor.target(for: server)
+            containers = try await monitor.docker.listContainers(target: target)
             // Tolerated failing: without it the tiles still name every container
             // and simply show no figures, which beats an empty card.
-            stats = (try? await monitor.required.docker.stats(target: target)) ?? [:]
+            stats = (try? await monitor.docker.stats(target: target)) ?? [:]
         } catch {
             // Switching machines cancels this task; that is not a Docker fault
             // and must not leave the next host's card showing an error.

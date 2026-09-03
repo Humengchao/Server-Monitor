@@ -13,10 +13,11 @@ public struct RootView: View {
     @EnvironmentObject private var sessions: SessionManager
     @EnvironmentObject private var loc: Localization
 
-    /// Restored with the window, so the app reopens where it was left. A
-    /// session cannot be restored — its connection died with the process —
-    /// so a stored session decodes as nil, which is the dashboard.
+    /// Restored with the window, so the app reopens where it was left; see
+    /// `validateRestoredSelection` for what a stored value may point at.
     @SceneStorage("sidebarSelection") private var selection: Selection?
+    // Un-observed: only consulted once, to check a restored selection.
+    @Environment(\.monitorService) private var monitorService
     @State private var addingServer = false
     @State private var importing = false
     // Owned here rather than in the child views so the toolbar, which belongs
@@ -42,7 +43,32 @@ public struct RootView: View {
         case history
         case session(UUID)
 
-        // Stringly for @SceneStorage. Payload cases carry their id.
+        /// The sidebar's fixed rows, in sidebar order; the Go menu numbers
+        /// them ⌘1… in this order, so the two cannot drift apart.
+        static let fixedDestinations: [Selection] = [
+            .dashboard, .machines, .identities, .sshKeys, .snippets, .docker, .history,
+        ]
+
+        /// Localisation key of the row's title; the raw value doubles as the
+        /// key suffix for the fixed destinations.
+        var titleKey: String { "nav.\(rawValue)" }
+
+        var systemImage: String {
+            switch self {
+            case .dashboard: return "gauge.with.dots.needle.50percent"
+            case .machines: return "server.rack"
+            case .identities: return "person.badge.key"
+            case .sshKeys: return "key"
+            case .snippets: return "curlybraces"
+            case .docker: return "shippingbox"
+            case .history: return "clock.arrow.circlepath"
+            case .server: return "server.rack"
+            case .session: return "terminal"
+            }
+        }
+
+        // Stringly for @SceneStorage. Payload cases carry their id. The codec
+        // is total — what may be *restored* is decided by the view.
         public var rawValue: String {
             switch self {
             case .dashboard: return "dashboard"
@@ -67,10 +93,13 @@ public struct RootView: View {
             case "docker": self = .docker
             case "history": self = .history
             default:
-                guard rawValue.hasPrefix("server:"),
-                      let id = UUID(uuidString: String(rawValue.dropFirst("server:".count)))
-                else { return nil }
-                self = .server(id)
+                let parts = rawValue.split(separator: ":", maxSplits: 1).map(String.init)
+                guard parts.count == 2, let id = UUID(uuidString: parts[1]) else { return nil }
+                switch parts[0] {
+                case "server": self = .server(id)
+                case "session": self = .session(id)
+                default: return nil
+                }
             }
         }
     }
@@ -87,7 +116,7 @@ public struct RootView: View {
         .toolbar { toolbarContent }
         // Lets the Go menu (⌘1…⌘7) drive the sidebar; see NavigationCommands.
         .focusedSceneValue(\.sidebarSelection, $selection)
-        .onAppear { if selection == nil { selection = .dashboard } }
+        .onAppear(perform: validateRestoredSelection)
         .modifier(WindowSheets(
             addingServer: $addingServer,
             importing: $importing,
@@ -95,6 +124,23 @@ public struct RootView: View {
         ))
         .onChange(of: sessions.lastOpened) { _, opened in
             if let opened { selection = .session(opened) }
+        }
+    }
+
+    /// A restored selection must point at something that exists. A session's
+    /// connection died with the previous process, and a server may have been
+    /// deleted since; either would open on a placeholder. Both fall back to
+    /// the dashboard, as does a first launch.
+    private func validateRestoredSelection() {
+        switch selection {
+        case .none:
+            selection = .dashboard
+        case .server(let id)? where monitorService?.server(id: id) == nil:
+            selection = .dashboard
+        case .session(let id)? where !sessions.active.contains(where: { $0.id == id }):
+            selection = .dashboard
+        default:
+            break
         }
     }
 
@@ -196,23 +242,17 @@ public struct RootView: View {
 
     private var sidebar: some View {
         List(selection: $selection) {
-            Label(loc.t("nav.dashboard"), systemImage: "gauge.with.dots.needle.50percent")
-                .tag(Selection.dashboard)
+            destination(.dashboard)
 
             Section(loc.t("nav.resources")) {
-                Label(loc.t("nav.machines"), systemImage: "server.rack")
-                    .tag(Selection.machines)
-                Label(loc.t("nav.identities"), systemImage: "person.badge.key")
-                    .tag(Selection.identities)
-                Label(loc.t("nav.sshKeys"), systemImage: "key")
-                    .tag(Selection.sshKeys)
+                destination(.machines)
+                destination(.identities)
+                destination(.sshKeys)
             }
 
             Section(loc.t("nav.toolbox")) {
-                Label(loc.t("nav.snippets"), systemImage: "curlybraces")
-                    .tag(Selection.snippets)
-                Label(loc.t("nav.docker"), systemImage: "shippingbox")
-                    .tag(Selection.docker)
+                destination(.snippets)
+                destination(.docker)
             }
 
             Section(loc.t("nav.servers")) {
@@ -228,12 +268,18 @@ public struct RootView: View {
             }
 
             Section {
-                Label(loc.t("nav.history"), systemImage: "clock.arrow.circlepath")
-                    .tag(Selection.history)
+                destination(.history)
             }
         }
         .listStyle(.sidebar)
         .navigationSplitViewColumnWidth(min: 220, ideal: 250)
+    }
+
+    /// One fixed sidebar row. Title and icon come from the destination itself,
+    /// which is also what the Go menu reads.
+    private func destination(_ selection: Selection) -> some View {
+        Label(loc.t(selection.titleKey), systemImage: selection.systemImage)
+            .tag(selection)
     }
 
     /// Open sessions of one kind, or a muted placeholder when there are none.
@@ -259,8 +305,7 @@ public struct RootView: View {
                             .foregroundStyle(.tertiary)
                     }
                     .buttonStyle(.borderless)
-                    .help(loc.t("common.close"))
-                    .accessibilityLabel(loc.t("common.close"))
+                    .hint(loc.t("common.close"))
                 }
                 .tag(Selection.session(session.id))
             }

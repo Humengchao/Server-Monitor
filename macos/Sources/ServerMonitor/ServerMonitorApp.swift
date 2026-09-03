@@ -22,6 +22,10 @@ struct ServerMonitorApp: App {
     private let startupFailure: String?
 
     init() {
+        // One window, no tabs: the app has a single main window by design, and
+        // AppKit's automatic tabbing would otherwise add View > Show Tab Bar,
+        // whose ⇧⌘T is the SFTP shortcut.
+        NSWindow.allowsAutomaticWindowTabbing = false
         let settings = AppSettings()
         var failure: String?
         let database: Database
@@ -127,7 +131,11 @@ struct ServerMonitorApp: App {
         }
         .windowToolbarStyle(.unified)
         .commands {
-            CommandGroup(after: .newItem) {
+            // Replacing, not appending: WindowGroup's default File > New Window
+            // holds ⌘N, and a menu key equivalent beats a view's. It also has
+            // no place in a single-window app — a second main window would run
+            // a second occlusion observer over the same service.
+            CommandGroup(replacing: .newItem) {
                 Button(localization.t("common.refresh")) {
                     Task { await monitor.pollAll() }
                 }

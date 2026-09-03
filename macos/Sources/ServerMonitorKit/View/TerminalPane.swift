@@ -76,7 +76,7 @@ struct TerminalPane: View {
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
 
-            snippetMenu
+            SnippetMenu(session: session)
 
             Button(loc.t("terminal.reconnect"), systemImage: "arrow.clockwise") {
                 generation += 1
@@ -87,11 +87,32 @@ struct TerminalPane: View {
         .padding(.vertical, 6)
     }
 
-    /// Types a saved command into the running shell, without submitting it, so
-    /// the user can edit or confirm before it executes.
-    private var snippetMenu: some View {
+    private func resolve() {
+        do {
+            target = try monitor.required.target(for: server)
+            failure = nil
+        } catch {
+            failure = error.localizedDescription
+        }
+    }
+}
+
+/// Types a saved command into the running shell, without submitting it, so the
+/// user can edit or confirm before it executes.
+///
+/// Its own view, observing the service, because the pane itself does not:
+/// saving or deleting a snippet publishes, and this menu is the one part of
+/// the pane that has to see it. Re-evaluating a menu button per poll is
+/// nothing; re-evaluating the terminal was not.
+private struct SnippetMenu: View {
+    @ObservedObject var session: TerminalSession
+
+    @EnvironmentObject private var monitor: MonitorService
+    @EnvironmentObject private var loc: Localization
+
+    var body: some View {
         Menu {
-            let snippets = monitor?.snippets() ?? []
+            let snippets = monitor.snippets()
             if snippets.isEmpty {
                 Text(loc.t("terminal.noSnippets"))
             } else {
@@ -105,17 +126,7 @@ struct TerminalPane: View {
         .menuStyle(.borderlessButton)
         .fixedSize()
         .controlSize(.small)
-        .help(loc.t("terminal.snippets"))
-        .accessibilityLabel(loc.t("terminal.snippets"))
+        .hint(loc.t("terminal.snippets"))
         .disabled(session.state != .running)
-    }
-
-    private func resolve() {
-        do {
-            target = try monitor.required.target(for: server)
-            failure = nil
-        } catch {
-            failure = error.localizedDescription
-        }
     }
 }

@@ -39,6 +39,7 @@ struct CardRenderTests {
         .background(Color(nsColor: .windowBackgroundColor))
         .environmentObject(localization)
         .environmentObject(monitor)
+        .environment(\.monitorService, monitor)
         let renderer = ImageRenderer(content: view)
         renderer.scale = 1
         let image = try #require(renderer.nsImage)
@@ -63,6 +64,7 @@ struct CardRenderTests {
         .background(Color(nsColor: .windowBackgroundColor))
         .environmentObject(localization)
         .environmentObject(monitor)
+        .environment(\.monitorService, monitor)
         let renderer = ImageRenderer(content: view)
         renderer.scale = 1
         let image = try #require(renderer.nsImage)
@@ -92,6 +94,7 @@ struct CardRenderTests {
                 IPLocationCard(server: Self.locatedServer, snapshot: snapshot)
                     .frame(width: 360)
                     .environmentObject(monitor)
+                    .environment(\.monitorService, monitor)
             }
             StatusGPUCard(status: Self.sampleGPU()).frame(width: 480)
             // The traffic card in all three of its states.
@@ -99,9 +102,11 @@ struct CardRenderTests {
                 StatusTrafficCard(server: Self.sampleServer, preloaded: .notInstalled)
                     .frame(width: 360)
                     .environmentObject(monitor)
+                    .environment(\.monitorService, monitor)
                 StatusTrafficCard(server: Self.sampleServer, preloaded: Self.sampleTraffic())
                     .frame(width: 400)
                     .environmentObject(monitor)
+                    .environment(\.monitorService, monitor)
             }
             // The per-container tiles, which is what the Docker card is made of.
             HStack(alignment: .top, spacing: 10) {
@@ -115,6 +120,7 @@ struct CardRenderTests {
         .background(Color(nsColor: .windowBackgroundColor))
         .environmentObject(localization)
         .environmentObject(monitor)
+        .environment(\.monitorService, monitor)
 
         let renderer = ImageRenderer(content: view)
         renderer.scale = 2
@@ -147,6 +153,7 @@ struct CardRenderTests {
             .background(Color(nsColor: .windowBackgroundColor))
             .environmentObject(localization)
             .environmentObject(monitor)
+            .environment(\.monitorService, monitor)
         let renderer = ImageRenderer(content: view)
         renderer.scale = 2
         let image = try #require(renderer.nsImage)
@@ -358,6 +365,7 @@ struct FactsRowRenderTests {
                 ServerFactsRow(server: server)
                     .environmentObject(localization)
                     .environmentObject(monitor)
+                    .environment(\.monitorService, monitor)
             }
         }
 

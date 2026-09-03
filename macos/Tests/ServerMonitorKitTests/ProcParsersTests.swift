@@ -421,14 +421,22 @@ struct HostDetailParserTests {
         #expect(arm.cpuModel == "Neoverse-N1")
     }
 
-    @Test func theCollectionLineAsksLscpuOnlyAsAFallback() throws {
-        // Ordered so an x86 host, where /proc/cpuinfo answers, never pays for
-        // an extra process.
-        let command = ProcParsers.linuxMetricsCommand
-        let cpuinfo = try #require(command.range(of: "^model name"))
-        let lscpu = try #require(command.range(of: "lscpu"))
-        #expect(cpuinfo.lowerBound < lscpu.lowerBound)
-        #expect(command.contains("||"), "a fallback, not a second query")
+    @Test func theCollectionLineDoesNotRunLscpuEveryPoll() {
+        // `lscpu` walks every core's sysfs topology; on an 80-core ARM box that
+        // is tens of milliseconds per tick for a string that never changes.
+        // The collector asks once, with its own command, and caches.
+        #expect(!ProcParsers.linuxMetricsCommand.contains("lscpu"))
+        #expect(ProcParsers.cpuModelFallbackCommand.contains("lscpu"))
+        #expect(ProcParsers.cpuModelFallbackCommand.contains("model name"))
+    }
+
+    @Test func dfIsAskedToSkipExactlyWhatTheParserWouldDrop() {
+        // One list for both ends, so the next pseudo-filesystem cannot be added
+        // to one and forgotten in the other.
+        for type in ProcParsers.pseudoFilesystemTypes {
+            #expect(ProcParsers.linuxMetricsCommand.contains("-x \(type)"))
+            #expect(ProcParsers.isPseudoFilesystem(type))
+        }
     }
 
     @Test func cpuBreakdownSharesTheWholeWindow() {

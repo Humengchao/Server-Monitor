@@ -82,11 +82,9 @@ struct SnippetsView: View {
             Spacer()
             Button { runTarget = snippet } label: { Image(systemName: "play.fill") }
                 .buttonStyle(.borderless)
-                .help(loc.t("snippet.run"))
-                .accessibilityLabel(loc.t("snippet.run"))
+                .hint(loc.t("snippet.run"))
             Button { editing = snippet } label: { Image(systemName: "pencil") }
-                .help(loc.t("common.edit"))
-                .accessibilityLabel(loc.t("common.edit"))
+                .hint(loc.t("common.edit"))
                 .buttonStyle(.borderless)
             Button {
                 NSPasteboard.general.clearContents()
@@ -95,8 +93,7 @@ struct SnippetsView: View {
                 Image(systemName: "doc.on.doc")
             }
             .buttonStyle(.borderless)
-            .help(loc.t("snippet.copy"))
-            .accessibilityLabel(loc.t("snippet.copy"))
+            .hint(loc.t("snippet.copy"))
             Button(role: .destructive) {
                 failure = failureMessage { try monitor.deleteSnippet(id: snippet.id) }
                 reload()

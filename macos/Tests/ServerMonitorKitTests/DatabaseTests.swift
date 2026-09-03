@@ -65,22 +65,28 @@ struct DatabaseTests {
         #expect(try database.samples(serverID: server.id, since: .distantPast).count == 1)
     }
 
-    @Test func hostFactsOnlyWriteWhenChanged() throws {
+    @Test func aPollRecordsItsSampleAndOnlyTheFactsItWasToldMoved() async throws {
         let database = try Database(inMemory: true)
         let server = Server(name: "web-1", host: "10.0.0.1", username: "root", authKind: .sshConfigAlias)
         try database.save(server)
 
-        try database.updateHostFacts(
-            serverID: server.id, cores: 4, memoryTotal: 1024, diskTotal: 2048, dockerVersion: "24.0.7"
-        )
-        #expect(try database.allServers().first?.cores == 4)
-        #expect(try database.allServers().first?.dockerVersion == "24.0.7")
+        var snapshot = MetricSnapshot()
+        snapshot.cores = 4
+        snapshot.memoryTotal = 1024
+        snapshot.diskTotal = 2048
+        snapshot.dockerVersion = "24.0.7"
+        try await database.recordPoll(serverID: server.id, snapshot: snapshot, detectedOS: nil, updateFacts: true)
+        let stored = try #require(try database.allServers().first)
+        #expect(stored.cores == 4)
+        #expect(stored.dockerVersion == "24.0.7")
+        #expect(try database.samples(serverID: server.id, since: .distantPast).count == 1)
 
-        // A repeat with identical facts must be a no-op rather than an update.
-        try database.updateHostFacts(
-            serverID: server.id, cores: 4, memoryTotal: 1024, diskTotal: 2048, dockerVersion: "24.0.7"
-        )
-        #expect(try database.allServers().first?.cores == 4)
+        // The common case: the caller saw nothing move, so the row is not
+        // touched — only the sample lands.
+        snapshot.cores = 8
+        try await database.recordPoll(serverID: server.id, snapshot: snapshot, detectedOS: nil, updateFacts: false)
+        #expect(try database.allServers().first?.cores == 4, "facts are the caller's call")
+        #expect(try database.samples(serverID: server.id, since: .distantPast).count == 2)
     }
 
     @Test func snapshotRoundTripsThroughStorage() throws {
@@ -261,54 +267,59 @@ struct PollingActivityTests {
         #expect(monitor.inFlight.isEmpty)
     }
 
-    @Test func theFirstResultAppliesAtOnceAndABurstAppliesTogether() async throws {
+    @Test func aLoneResultIsNeverDelayedAndABurstAppliesTogether() async throws {
         // The whole point: a burst of N results must become one published
-        // change, not N — while a lone result is never delayed.
+        // change, not N — while a result with no tick open goes straight out.
         let monitor = try service()
         try monitor.addServer(refusingServer())
         let id = monitor.servers[0].id
+        await monitor.pollAll()                              // a verdict on screen
         var applied = 0
 
         monitor.commit(for: id) { applied += 1 }
-        #expect(applied == 1, "nothing was in flight; the first result must not wait")
+        #expect(applied == 1, "no tick open: the result must not wait")
 
+        monitor.openTick(members: [UUID()])                 // a tick another host holds open
         for _ in 0..<5 { monitor.commit(for: id) { applied += 1 } }
-        #expect(applied == 1, "results inside the window queue up")
-        #expect(monitor.pending.count == 5)
+        #expect(applied == 1, "results inside a tick are held")
+        #expect(monitor.pending.count == 1, "held results collapse to the newest per server on arrival")
 
-        try await Task.sleep(for: .milliseconds(400))      // past the 250 ms window
-        // One flush, and the queue is collapsed to the newest per server —
-        // five snapshots of one host are five layout passes to show the last.
-        #expect(applied == 2, "the flush applied the newest queued result")
+        monitor.flushPending()
+        // Five snapshots of one host are five layout passes to show the last.
+        #expect(applied == 2, "the flush applied the newest held result, once")
         #expect(monitor.pending.isEmpty)
     }
 
-    @Test func flushingByHandAppliesImmediately() throws {
+    @Test func flushingByHandAppliesWhatIsHeld() async throws {
         let monitor = try service()
         try monitor.addServer(refusingServer())
         let id = monitor.servers[0].id
+        await monitor.pollAll()
         var applied = 0
+        monitor.openTick(members: [UUID()])
         monitor.commit(for: id) { applied += 1 }
         monitor.commit(for: id) { applied += 1 }
-        #expect(applied == 1)
+        #expect(applied == 0)
         monitor.flushPending()
-        #expect(applied == 2, "pollAll relies on this to be deterministic")
+        #expect(applied == 1, "pollAll relies on this to be deterministic")
     }
 
-    @Test func queuedResultsForADeletedServerAreDropped() throws {
+    @Test func heldResultsForADeletedServerAreDropped() async throws {
         let monitor = try service()
         try monitor.addServer(refusingServer())
         try monitor.addServer(Server(name: "other", host: "127.0.0.1", port: 1, username: "u", authKind: .agent))
+        await monitor.pollAll()
         let doomed = monitor.servers[0]
         let kept = monitor.servers[1].id
         var doomedApplied = 0, keptApplied = 0
-        monitor.commit(for: kept) { keptApplied += 1 }          // opens the window
+        monitor.openTick(members: [UUID()])
+        monitor.commit(for: kept) { keptApplied += 1 }
         monitor.commit(for: doomed.id) { doomedApplied += 1 }
         monitor.commit(for: kept) { keptApplied += 1 }
         try monitor.deleteServer(doomed)
         monitor.flushPending()
-        #expect(doomedApplied == 0, "a deleted server's queued result must not resurrect it")
-        #expect(keptApplied == 2)
+        #expect(doomedApplied == 0, "a deleted server's held result must not resurrect it")
+        #expect(keptApplied == 1)
     }
 
     @Test func nothingIsPublishedWhileEveryWindowIsHidden() async throws {
@@ -323,9 +334,12 @@ struct PollingActivityTests {
         monitor.setUIVisible(false)
         for _ in 0..<4 { monitor.commit(for: id) { applied += 1 } }
         #expect(applied == 0, "hidden: nothing should reach the view tree")
-        #expect(monitor.pending.count == 4)
+        // Bounded by the fleet, not by how long the window has been closed: an
+        // append-only queue grew by a snapshot-holding closure per host per
+        // poll for as long as the app sat in the menu bar.
+        #expect(monitor.pending.count == 1)
 
-        // And no 250 ms timer running in the background for nothing.
+        // And no timer running in the background for nothing.
         try await Task.sleep(for: .milliseconds(400))
         #expect(applied == 0, "a flush fired while hidden")
 
@@ -390,7 +404,7 @@ struct PollingActivityTests {
 
 @Suite("Targeted OS update")
 struct UpdateOSKindTests {
-    @Test func recordingAProbedOSLeavesTheUsersEditsAlone() throws {
+    @Test func recordingAProbedOSLeavesTheUsersEditsAlone() async throws {
         // The scenario: a poll started with a copy of the row, the user renamed
         // and tagged the server while it ran, and the poll then persisted what it
         // learned. Saving its stale copy back would undo the edits.
@@ -402,12 +416,29 @@ struct UpdateOSKindTests {
         server.tags = ["prod"]
         try database.save(server)                       // the user's edit lands first
 
-        try database.updateOSKind(serverID: server.id, osKind: .linux)   // then the poll's
+        try await database.recordPoll(                  // then the poll's
+            serverID: server.id, snapshot: MetricSnapshot(), detectedOS: .linux, updateFacts: false
+        )
 
         let stored = try #require(try database.allServers().first { $0.id == server.id })
         #expect(stored.osKind == .linux)
         #expect(stored.name == "renamed", "the poll clobbered the rename")
         #expect(stored.tags == ["prod"], "the poll clobbered the tags")
+    }
+
+    @Test func aProbedOSNeverOverridesOneTheUserSet() async throws {
+        // The poll started while the row said automatic; the user chose
+        // Windows before it finished. The probe's opinion loses.
+        let database = try Database(inMemory: true)
+        var server = Server(name: "box", host: "h", username: "u", authKind: .agent, osKind: .auto)
+        try database.save(server)
+        server.osKind = .windows
+        try database.save(server)
+
+        try await database.recordPoll(
+            serverID: server.id, snapshot: MetricSnapshot(), detectedOS: .linux, updateFacts: false
+        )
+        #expect(try database.allServers().first?.osKind == .windows)
     }
 }
 
