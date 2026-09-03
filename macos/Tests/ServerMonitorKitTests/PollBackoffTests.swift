@@ -30,8 +30,7 @@ struct PollBackoffTests {
         #expect(monitor.backoffDelay(streak: 40) == MonitorService.maxBackoff)
     }
 
-    @Test func theCapKeepsRecoveryNoticeable() throws {
-        let monitor = try service()
+    @Test func theCapKeepsRecoveryNoticeable() {
         // The point of the cap: a host that comes back is seen within minutes,
         // not hours. Anything much larger turns the monitor into a stale panel.
         #expect(MonitorService.maxBackoff <= 300)

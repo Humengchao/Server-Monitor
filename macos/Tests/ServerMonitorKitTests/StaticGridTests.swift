@@ -4,6 +4,7 @@ import Testing
 @testable import ServerMonitorKit
 
 @Suite("Card layout")
+@MainActor
 struct StaticGridTests {
 
     private func grid(width: CGFloat, count: Int) -> StaticGrid<Text> {
