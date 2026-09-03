@@ -68,6 +68,7 @@ struct SFTPView: View {
             }
             .disabled(backStack.isEmpty)
             .help(loc.t("sftp.back"))
+            .accessibilityLabel(loc.t("sftp.back"))
 
             Button {
                 Task { await open(parentPath) }
@@ -76,6 +77,7 @@ struct SFTPView: View {
             }
             .disabled(path == "/" || path.isEmpty)
             .help(loc.t("sftp.up"))
+            .accessibilityLabel(loc.t("sftp.up"))
 
             Text(path.isEmpty ? "…" : path)
                 .font(.system(.caption, design: .monospaced))
@@ -102,20 +104,25 @@ struct SFTPView: View {
                     Image(systemName: "square.and.arrow.down.on.square")
                 }
                 .help(loc.t("sftp.downloadSelected"))
+                .accessibilityLabel(loc.t("sftp.downloadSelected"))
                 Button(role: .destructive) {
                     pendingBulkDelete = true
                 } label: {
                     Image(systemName: "trash")
                 }
                 .help(loc.t("common.delete"))
+                .accessibilityLabel(loc.t("common.delete"))
             }
 
             Button { Task { await reload() } } label: { Image(systemName: "arrow.clockwise") }
                 .help(loc.t("common.refresh"))
+                .accessibilityLabel(loc.t("common.refresh"))
             Button { Task { await newFolder() } } label: { Image(systemName: "folder.badge.plus") }
                 .help(loc.t("sftp.newFolder"))
+                .accessibilityLabel(loc.t("sftp.newFolder"))
             Button { Task { await upload() } } label: { Image(systemName: "square.and.arrow.up") }
                 .help(loc.t("sftp.upload"))
+                .accessibilityLabel(loc.t("sftp.upload"))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -170,12 +177,17 @@ struct SFTPView: View {
                             }
                             .buttonStyle(.borderless)
                             .help(loc.t("sftp.download"))
+                            .accessibilityLabel(loc.t("sftp.download"))
                         }
                         Button { renaming = file } label: { Image(systemName: "pencil") }
+                            .help(loc.t("sftp.rename"))
+                            .accessibilityLabel(loc.t("sftp.rename"))
                             .buttonStyle(.borderless)
                         Button(role: .destructive) { pendingDelete = file } label: {
                             Image(systemName: "trash")
                         }
+                        .help(loc.t("common.delete"))
+                        .accessibilityLabel(loc.t("common.delete"))
                         .buttonStyle(.borderless)
                     }
                 }

@@ -83,8 +83,12 @@ struct IdentitiesView: View {
                     .foregroundStyle(.tertiary)
             }
             Button { editing = identity } label: { Image(systemName: "pencil") }
+                .help(loc.t("common.edit"))
+                .accessibilityLabel(loc.t("common.edit"))
                 .buttonStyle(.borderless)
             Button(role: .destructive) { pendingDelete = identity } label: { Image(systemName: "trash") }
+                .help(loc.t("common.delete"))
+                .accessibilityLabel(loc.t("common.delete"))
                 .buttonStyle(.borderless)
         }
         .padding(.vertical, 3)

@@ -195,6 +195,7 @@ struct DockerPane: View {
                 }
                 .buttonStyle(.borderless)
                 .help(loc.t("nav.terminal"))
+                .accessibilityLabel(loc.t("nav.terminal"))
             }
         }
     }
@@ -211,6 +212,7 @@ struct DockerPane: View {
         }
         .buttonStyle(.borderless)
         .help(help)
+        .accessibilityLabel(help)
     }
 
     private func logsView(_ sheet: LogsSheet) -> some View {

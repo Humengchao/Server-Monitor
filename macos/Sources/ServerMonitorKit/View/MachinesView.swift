@@ -100,10 +100,14 @@ struct MachinesView: View {
             }
             Spacer(minLength: 4)
             Button { editingGroup = group } label: { Image(systemName: "pencil") }
+                .help(loc.t("common.edit"))
+                .accessibilityLabel(loc.t("common.edit"))
                 .buttonStyle(.borderless)
             Button(role: .destructive) { pendingGroupDelete = group } label: {
                 Image(systemName: "trash")
             }
+            .help(loc.t("common.delete"))
+            .accessibilityLabel(loc.t("common.delete"))
             .buttonStyle(.borderless)
         }
         .padding(12)
@@ -193,8 +197,11 @@ struct MachinesView: View {
             .menuStyle(.borderlessButton)
             .fixedSize()
             .help(loc.t("group.assign"))
+            .accessibilityLabel(loc.t("group.assign"))
 
             Button { editingServer = server } label: { Image(systemName: "pencil") }
+                .help(loc.t("common.edit"))
+                .accessibilityLabel(loc.t("common.edit"))
                 .buttonStyle(.borderless)
         }
         .padding(12)

@@ -195,6 +195,7 @@ struct SSHKeysView: View {
                 .fixedSize()
                 .controlSize(.small)
                 .help(loc.t("keys.exportHelp"))
+                .accessibilityLabel(loc.t("keys.exportHelp"))
                 .disabled(exporting != nil)
                 if exporting == key.path {
                     ProgressView().controlSize(.small)
@@ -207,10 +208,13 @@ struct SSHKeysView: View {
             }
             .buttonStyle(.borderless)
             .help(loc.t("keys.reveal"))
+            .accessibilityLabel(loc.t("keys.reveal"))
 
             Button(role: .destructive) { pendingDelete = key } label: {
                 Image(systemName: "trash")
             }
+            .help(loc.t("common.delete"))
+            .accessibilityLabel(loc.t("common.delete"))
             .buttonStyle(.borderless)
         }
         .padding(.vertical, 3)

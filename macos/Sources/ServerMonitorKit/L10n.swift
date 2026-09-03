@@ -58,6 +58,7 @@ public final class Localization: ObservableObject {
         "app.title": ("服务器监控", "Server Monitor"),
         "nav.servers": ("服务器", "Servers"),
         "nav.dashboard": ("仪表板", "Dashboard"),
+        "nav.goTo": ("前往", "Go"),
         "nav.resources": ("资源", "Resources"),
         "nav.machines": ("机器", "Machines"),
         "nav.identities": ("身份", "Identities"),

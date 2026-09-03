@@ -106,6 +106,7 @@ struct TerminalPane: View {
         .fixedSize()
         .controlSize(.small)
         .help(loc.t("terminal.snippets"))
+        .accessibilityLabel(loc.t("terminal.snippets"))
         .disabled(session.state != .running)
     }
 

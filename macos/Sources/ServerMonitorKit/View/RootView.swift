@@ -13,7 +13,10 @@ public struct RootView: View {
     @EnvironmentObject private var sessions: SessionManager
     @EnvironmentObject private var loc: Localization
 
-    @State private var selection: Selection? = .dashboard
+    /// Restored with the window, so the app reopens where it was left. A
+    /// session cannot be restored — its connection died with the process —
+    /// so a stored session decodes as nil, which is the dashboard.
+    @SceneStorage("sidebarSelection") private var selection: Selection?
     @State private var addingServer = false
     @State private var importing = false
     // Owned here rather than in the child views so the toolbar, which belongs
@@ -28,7 +31,7 @@ public struct RootView: View {
     @State private var keyScanToken = 0
     @State private var search = ""
 
-    enum Selection: Hashable {
+    public enum Selection: Hashable, RawRepresentable {
         case dashboard
         case machines
         case identities
@@ -38,6 +41,38 @@ public struct RootView: View {
         case server(UUID)
         case history
         case session(UUID)
+
+        // Stringly for @SceneStorage. Payload cases carry their id.
+        public var rawValue: String {
+            switch self {
+            case .dashboard: return "dashboard"
+            case .machines: return "machines"
+            case .identities: return "identities"
+            case .sshKeys: return "sshKeys"
+            case .snippets: return "snippets"
+            case .docker: return "docker"
+            case .history: return "history"
+            case .server(let id): return "server:\(id.uuidString)"
+            case .session(let id): return "session:\(id.uuidString)"
+            }
+        }
+
+        public init?(rawValue: String) {
+            switch rawValue {
+            case "dashboard": self = .dashboard
+            case "machines": self = .machines
+            case "identities": self = .identities
+            case "sshKeys": self = .sshKeys
+            case "snippets": self = .snippets
+            case "docker": self = .docker
+            case "history": self = .history
+            default:
+                guard rawValue.hasPrefix("server:"),
+                      let id = UUID(uuidString: String(rawValue.dropFirst("server:".count)))
+                else { return nil }
+                self = .server(id)
+            }
+        }
     }
 
     public init() {}
@@ -50,6 +85,9 @@ public struct RootView: View {
         }
         .searchable(text: $search, placement: .toolbar, prompt: loc.t("common.search"))
         .toolbar { toolbarContent }
+        // Lets the Go menu (⌘1…⌘7) drive the sidebar; see NavigationCommands.
+        .focusedSceneValue(\.sidebarSelection, $selection)
+        .onAppear { if selection == nil { selection = .dashboard } }
         .modifier(WindowSheets(
             addingServer: $addingServer,
             importing: $importing,
@@ -86,6 +124,7 @@ public struct RootView: View {
                 Label(loc.t("group.new"), systemImage: "square.stack.3d.up.badge.a")
             }
             .help(loc.t("group.new"))
+            .keyboardShortcut("n", modifiers: [.command, .shift])
             importButton
             addServerButton
 
@@ -103,6 +142,7 @@ public struct RootView: View {
                 Label(loc.t("keys.generate"), systemImage: "plus")
             }
             .help(loc.t("keys.generate"))
+            .keyboardShortcut("n")
             Button { keyScanToken += 1 } label: {
                 Label(loc.t("common.refresh"), systemImage: "arrow.clockwise")
             }
@@ -133,6 +173,7 @@ public struct RootView: View {
             Label(label, systemImage: "plus")
         }
         .help(label)
+        .keyboardShortcut("n")
     }
 
     private var importButton: some View {
@@ -140,6 +181,7 @@ public struct RootView: View {
             Label(loc.t("import.title"), systemImage: "square.and.arrow.down")
         }
         .help(loc.t("import.title"))
+        .keyboardShortcut("i", modifiers: [.command, .shift])
     }
 
     private var addServerButton: some View {
@@ -147,6 +189,7 @@ public struct RootView: View {
             Label(loc.t("server.add"), systemImage: "plus")
         }
         .help(loc.t("server.add"))
+        .keyboardShortcut("n")
     }
 
     // MARK: - Sidebar
@@ -217,6 +260,7 @@ public struct RootView: View {
                     }
                     .buttonStyle(.borderless)
                     .help(loc.t("common.close"))
+                    .accessibilityLabel(loc.t("common.close"))
                 }
                 .tag(Selection.session(session.id))
             }
@@ -287,6 +331,7 @@ private struct ServerToolbarActions: View {
             Label(loc.t("nav.terminal"), systemImage: "terminal")
         }
         .help(loc.t("nav.terminal"))
+        .keyboardShortcut("t")
         .disabled(server == nil)
 
         Button {
@@ -295,6 +340,7 @@ private struct ServerToolbarActions: View {
             Label("SFTP", systemImage: "folder")
         }
         .help("SFTP")
+        .keyboardShortcut("t", modifiers: [.command, .shift])
         .disabled(server == nil)
 
         Button { editingServer = server } label: {

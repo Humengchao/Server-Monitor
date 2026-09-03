@@ -131,6 +131,7 @@ struct ServerMonitorApp: App {
                 }
                 .keyboardShortcut("r")
             }
+            NavigationCommands(localization: localization)
         }
 
         // Always-on presence: the app keeps polling with its window closed and
