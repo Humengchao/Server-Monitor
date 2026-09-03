@@ -7,7 +7,6 @@ import { useTranslation } from 'react-i18next';
 import { serversApi, Server } from '../api/servers';
 import TagSelect from './TagSelect';
 import BatchExecModal from './BatchExecModal';
-import { formatBytes } from '../utils/format';
 import { downloadCSV } from '../utils/csv';
 
 const { Text } = Typography;
@@ -26,11 +25,31 @@ function apiError(err: unknown, fallback: string): string {
   return detail || fallback;
 }
 
-const INVENTORY_COLUMNS = [
-  'name', 'host', 'port', 'server_type', 'ssh_username', 'cpu_cores',
-  'memory_total', 'disk_total', 'public_location', 'expires_at',
-  'billing_price', 'billing_currency', 'billing_cycle', 'tags',
-] as const;
+/**
+ * Inventory export columns, as (header, value) pairs.
+ *
+ * Sizes go out as raw byte counts. They used to be run through formatBytes,
+ * which produced "31.4 GB" — a string a spreadsheet cannot sum, sort or chart,
+ * in a file whose only purpose is to be loaded into one. The header carries the
+ * unit instead, matching how the API names its own byte fields.
+ */
+const INVENTORY_COLUMNS: { header: string; value: (s: Server) => string }[] = [
+  { header: 'name', value: (s) => s.name },
+  { header: 'host', value: (s) => s.host },
+  { header: 'port', value: (s) => String(s.port ?? '') },
+  { header: 'server_type', value: (s) => s.server_type },
+  { header: 'ssh_username', value: (s) => s.ssh_username },
+  { header: 'cpu_cores', value: (s) => String(s.cpu_cores ?? '') },
+  { header: 'memory_total_bytes', value: (s) => String(s.memory_total ?? '') },
+  { header: 'disk_total_bytes', value: (s) => String(s.disk_total ?? '') },
+  { header: 'public_location', value: (s) => s.public_location ?? '' },
+  { header: 'expires_at', value: (s) => s.expires_at ?? '' },
+  { header: 'billing_price', value: (s) => String(s.billing_price ?? '') },
+  { header: 'billing_currency', value: (s) => s.billing_currency ?? '' },
+  { header: 'billing_cycle', value: (s) => s.billing_cycle ?? '' },
+  // Space-separated so the field stays usable without a nested-quoting dialect.
+  { header: 'tags', value: (s) => (s.tags || []).map((tag) => tag.name).join(' ') },
+];
 
 /**
  * Sticky bar that appears while servers are selected, hosting every batch
@@ -98,13 +117,9 @@ export default function BatchActionBar({ selected, total, onSelectAll, onClear, 
   // Exports the selected hosts' inventory (no secrets — the API never returns
   // passwords or keys in the first place).
   const handleExport = () => {
-    const rows: string[][] = [[...INVENTORY_COLUMNS]];
+    const rows: string[][] = [INVENTORY_COLUMNS.map((column) => column.header)];
     for (const server of selected) {
-      rows.push(INVENTORY_COLUMNS.map((column) => {
-        if (column === 'tags') return (server.tags || []).map((tag) => tag.name).join(' ');
-        if (column === 'memory_total' || column === 'disk_total') return formatBytes(server[column]);
-        return String(server[column] ?? '');
-      }));
+      rows.push(INVENTORY_COLUMNS.map((column) => column.value(server)));
     }
     downloadCSV(`servers-${selected.length}.csv`, rows);
     message.success(t('batch.exported', { count: selected.length }));
