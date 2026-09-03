@@ -23,21 +23,24 @@ struct TickBarrierTests {
         Server(name: name, host: "10.255.255.1", port: 22, username: "u", authKind: .agent)
     }
 
-    /// A server `pollDue` will skip: it exists, but is sitting out a backoff.
-    /// Its results are held like any other and survive the per-server
-    /// de-duplication, which a polled server's would not.
-    private func bystander(in monitor: MonitorService, _ name: String = "bystander") throws -> UUID {
+    /// A server `pollDue` will skip: it has a verdict on screen and is sitting
+    /// out a backoff. Its results are held like any other and survive the
+    /// per-server de-duplication, which a polled server's would not. Made
+    /// before the test's other servers, so the poll that gives it its verdict
+    /// does not also wait on a hanging host.
+    private func bystander(in monitor: MonitorService, _ name: String = "bystander") async throws -> UUID {
         try monitor.addServer(refusing(name))
         let id = try #require(monitor.servers.last?.id)
+        await monitor.pollAll()
         for _ in 1...3 { monitor.noteFailure(serverID: id) }
         return id
     }
 
     @Test func aTickHoldsResultsUntilItsLastPollReturns() async throws {
         let monitor = try service()
+        let bystander = try await bystander(in: monitor)
         try monitor.addServer(refusing("a"))
         try monitor.addServer(refusing("b"))
-        let bystander = try bystander(in: monitor)
         var applied = 0
 
         let tasks = monitor.pollDue()
@@ -53,14 +56,41 @@ struct TickBarrierTests {
         #expect(!monitor.tickOpen, "the last poll closes the tick")
         #expect(monitor.tickMembers.isEmpty)
         #expect(applied == 1, "published when the tick closed")
-        #expect(monitor.status.count == 2, "both polled results landed in the one publish")
+        #expect(monitor.status.count == 3, "both polled results landed in the one publish")
+    }
+
+    @Test func aHostsFirstEverResultIsNotHeld() async throws {
+        // Launch: every host is on a cold SSH handshake and the first tick runs
+        // to its cap, so holding first results kept the dashboard on spinners
+        // for the whole cap. Nothing-to-something is worth its own pass, once.
+        let monitor = try service()
+        try monitor.addServer(hanging("slow"))
+        try monitor.addServer(refusing("fast"))
+        let fast = monitor.servers[1].id
+        let tasks = monitor.pollDue()
+        defer { for task in tasks { task.cancel() } }
+        #expect(monitor.tickOpen)
+
+        var applied = 0
+        monitor.commit(for: fast) { applied += 1 }
+        #expect(applied == 1, "a host with only a spinner on screen publishes at once, mid-tick")
+
+        // Its real poll lands a verdict (connection refused) through the same
+        // door — and from then on it has content, so updates wait for the tick.
+        await tasks[1].value
+        guard case .offline = monitor.status[fast] else {
+            Issue.record("expected the refused poll to have published its verdict"); return
+        }
+        #expect(monitor.tickOpen, "the slow host is still holding the tick open")
+        monitor.commit(for: fast) { applied += 1 }
+        #expect(applied == 1, "with a verdict on screen, the next result is held for the tick")
     }
 
     @Test func theCapReleasesATickAStragglerIsHoldingUp() async throws {
         let monitor = try service()
         monitor.tickCap = .milliseconds(150)
+        let bystander = try await bystander(in: monitor)
         try monitor.addServer(hanging("slow"))
-        let bystander = try bystander(in: monitor)
         var applied = 0
 
         let tasks = monitor.pollDue()
@@ -82,8 +112,8 @@ struct TickBarrierTests {
         // had queued — even if a tick was now in progress, splitting it.
         let monitor = try service()
         monitor.tickCap = .milliseconds(700)
+        let bystander = try await bystander(in: monitor)
         try monitor.addServer(hanging("slow"))
-        let bystander = try bystander(in: monitor)
         var applied = 0
 
         monitor.commit(for: bystander) { applied += 1 }

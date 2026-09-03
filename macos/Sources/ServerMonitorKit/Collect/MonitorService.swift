@@ -601,14 +601,38 @@ public final class MonitorService: ObservableObject {
         // `pollAll` apply it. The menu bar reads `peakCPU`/`offlineServers`,
         // which are computed from this same state, so it catches up then too —
         // it is a summary of a few numbers, not a view worth 11% of a core.
-        // Hidden, mid-tick, or inside a window: queue it. A lone result with
-        // none of those in force is applied on the spot.
-        if !uiIsVisible || tickOpen || flushScheduled {
+        guard uiIsVisible else {
+            pending.append((serverID, apply))
+            return
+        }
+        // A host with nothing on screen yet goes straight through: at launch
+        // every host does a full SSH handshake, so the first tick ran to its
+        // 2 s cap and the dashboard sat on spinners for 2.7 s to then show
+        // everything at once. Spinner-to-numbers is worth a pass per host —
+        // once. From the second result on, the tick batches it.
+        if tickOpen && !hasContent(serverID) {
+            apply()
+            return
+        }
+        // Mid-tick or inside a window: queue it. A lone result with neither in
+        // force is applied on the spot.
+        if tickOpen || flushScheduled {
             pending.append((serverID, apply))
             return
         }
         apply()
         scheduleFlush()
+    }
+
+    /// Whether the card for this server shows anything but a spinner: a
+    /// snapshot, or a verdict. A host that keeps failing has a verdict on
+    /// screen, so its next failure waits for the tick like any other update.
+    private func hasContent(_ serverID: UUID) -> Bool {
+        if latest[serverID] != nil { return true }
+        switch status[serverID] {
+        case .online, .offline: return true
+        case .polling, .unknown, nil: return false
+        }
     }
 
     private func scheduleFlush() {
