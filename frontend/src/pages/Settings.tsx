@@ -1,8 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import {
-  App, Alert, Button, Card, ColorPicker, Col, Form, Input, Modal, Popconfirm, Row, Space, Table, Tag as AntTag, Typography,
+  App, Alert, Button, Card, ColorPicker, Col, Form, Input, Modal, Popconfirm, Row, Space, Table, Tag as AntTag,
+  Tooltip, Typography,
 } from 'antd';
-import { DeleteOutlined, LockOutlined, PlusOutlined, SafetyCertificateOutlined, TagsOutlined } from '@ant-design/icons';
+import {
+  DeleteOutlined, EditOutlined, LockOutlined, PlusOutlined, SafetyCertificateOutlined, TagsOutlined,
+} from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { tagsApi, Tag } from '../api/servers';
 import { authApi } from '../api/auth';
@@ -28,6 +31,8 @@ export default function Settings() {
   const [tags, setTags] = useState<Tag[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  // null while creating; the tag being renamed otherwise.
+  const [editingTag, setEditingTag] = useState<Tag | null>(null);
   const [form] = Form.useForm();
   const [passwordForm] = Form.useForm<PasswordFormValues>();
   const [savingPassword, setSavingPassword] = useState(false);
@@ -60,15 +65,43 @@ export default function Settings() {
     return '#1890ff';
   };
 
-  const handleCreate = async (values: { name: string; color: unknown }) => {
+  const openCreate = () => {
+    setEditingTag(null);
+    // destroyOnHidden discards the fields, but the create form must not inherit
+    // whatever colour the previous edit left behind.
+    form.setFieldsValue({ name: '', color: '#1890ff' });
+    setModalOpen(true);
+  };
+
+  const openEdit = (tag: Tag) => {
+    setEditingTag(tag);
+    form.setFieldsValue({ name: tag.name, color: tag.color });
+    setModalOpen(true);
+  };
+
+  const handleSubmit = async (values: { name: string; color: unknown }) => {
+    const color = toHexColor(values.color);
     try {
-      await tagsApi.create(values.name, toHexColor(values.color));
-      message.success(t('settings.tagCreated'));
+      if (editingTag) {
+        await tagsApi.update(editingTag.id, values.name, color);
+        message.success(t('settings.tagUpdated'));
+      } else {
+        await tagsApi.create(values.name, color);
+        message.success(t('settings.tagCreated'));
+      }
       setModalOpen(false);
+      setEditingTag(null);
       form.resetFields();
       loadTags();
-    } catch {
-      message.error(t('settings.tagCreateFailed'));
+    } catch (err: unknown) {
+      // A duplicate name comes back as 409 and needs its own wording: the
+      // generic failure message sent people looking for a server fault.
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      if (status === 409) {
+        message.error(t('settings.tagNameTaken'));
+        return;
+      }
+      message.error(editingTag ? t('settings.tagUpdateFailed') : t('settings.tagCreateFailed'));
     }
   };
 
@@ -124,11 +157,25 @@ export default function Settings() {
     {
       title: t('common.actions'),
       key: 'actions',
-      width: 90,
+      width: 96,
       render: (_: unknown, record: Tag) => (
-        <Popconfirm title={t('settings.deleteTagConfirm')} onConfirm={() => handleDelete(record.id)}>
-          <Button type="text" danger icon={<DeleteOutlined />} />
-        </Popconfirm>
+        <Space size={0}>
+          <Tooltip title={t('common.edit')}>
+            <Button type="text" icon={<EditOutlined />} onClick={() => openEdit(record)} />
+          </Tooltip>
+          {/* The confirm spells out the cascade: deleting a tag removes it from
+              every server at once, and there is no undo. */}
+          <Popconfirm
+            title={t('settings.deleteTagConfirm')}
+            description={t('settings.deleteTagWarning')}
+            okButtonProps={{ danger: true }}
+            onConfirm={() => handleDelete(record.id)}
+          >
+            <Tooltip title={t('common.delete')}>
+              <Button type="text" danger icon={<DeleteOutlined />} />
+            </Tooltip>
+          </Popconfirm>
+        </Space>
       ),
     },
   ];
@@ -149,7 +196,7 @@ export default function Settings() {
             className="panel-card"
             title={<Space><TagsOutlined />{t('settings.tagManagement')}</Space>}
             extra={
-              <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
+              <Button type="primary" size="small" icon={<PlusOutlined />} onClick={openCreate}>
                 {t('settings.createTag')}
               </Button>
             }
@@ -233,19 +280,29 @@ export default function Settings() {
       </Row>
 
       <Modal
-        title={t('settings.createTag')}
+        title={editingTag ? t('settings.editTag') : t('settings.createTag')}
         open={modalOpen}
-        onCancel={() => setModalOpen(false)}
+        onCancel={() => { setModalOpen(false); setEditingTag(null); }}
         onOk={() => form.submit()}
         destroyOnHidden
       >
-        <Form form={form} layout="vertical" onFinish={handleCreate}>
-          <Form.Item name="name" label={t('settings.tagName')} rules={[{ required: true }]}>
-            <Input placeholder={t('settings.tagNamePlaceholder')} />
+        <Form form={form} layout="vertical" onFinish={handleSubmit}>
+          <Form.Item
+            name="name"
+            label={t('settings.tagName')}
+            // 64 matches the column; trimmed because a name of spaces passes
+            // `required` but is rejected by the server.
+            normalize={(value: string) => value?.replace(/^\s+/, '')}
+            rules={[{ required: true }, { max: 64, message: t('settings.tagNameTooLong') }]}
+          >
+            <Input placeholder={t('settings.tagNamePlaceholder')} maxLength={64} showCount />
           </Form.Item>
           <Form.Item name="color" label={t('settings.color')} initialValue="#1890ff">
             <ColorPicker format="hex" />
           </Form.Item>
+          {editingTag && (
+            <Text type="secondary">{t('settings.editTagHint')}</Text>
+          )}
         </Form>
       </Modal>
     </div>

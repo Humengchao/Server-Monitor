@@ -753,6 +753,16 @@ button, input, textarea, select { font: inherit; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A rejected sign-in gets a tinted row so a run of them is visible while
+   scanning, without having to switch to the filtered view. color-mix keeps it
+   legible on both themes — a flat rgba wash goes muddy in dark mode. */
+.login-row-failed > td.ant-table-cell {
+  background: color-mix(in srgb, #e2545f 7%, transparent);
+}
+.server-table .ant-table-tbody > tr.login-row-failed:hover > td.ant-table-cell {
+  background: color-mix(in srgb, #e2545f 13%, transparent);
+}
+
 .state-chip {
   padding: 2px 7px;
   border-radius: 6px;

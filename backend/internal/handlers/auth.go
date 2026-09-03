@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -101,14 +103,16 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	// Get last login BEFORE inserting the new record
+	// Read the previous sign-in before recording this one, so the response can
+	// tell the user where they last came from.
+	//
+	// A first-ever login legitimately has no prior row: sql.ErrNoRows is the
+	// expected answer, not a fault. It used to be logged as "GetLastLogin
+	// error" on every new account, alongside a line printing the user's IP on
+	// every single login.
 	lastLogin, err := models.GetLastLogin(db.Raw, user.ID)
-	if err != nil {
-		log.Printf("GetLastLogin error: %v", err)
-	} else if lastLogin != nil {
-		log.Printf("GetLastLogin found: ip=%s time=%s", lastLogin.IP, lastLogin.LoggedAt)
-	} else {
-		log.Printf("GetLastLogin: no previous login")
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		log.Printf("login: reading previous sign-in for %s: %v", user.ID, err)
 	}
 
 	models.InsertLoginRecord(db.Raw, user.ID, ip, ua, true)
@@ -162,19 +166,32 @@ func (h *AuthHandler) LoginHistory(c *gin.Context) {
 		}
 	}
 
-	records, err := models.GetLoginHistory(db.Raw, userID, limit, offset)
+	failedOnly := c.Query("failed") == "1"
+
+	records, err := models.GetLoginHistory(db.Raw, userID, limit, offset, failedOnly)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load login history"})
 		return
 	}
-	total, _ := models.CountLoginHistory(db.Raw, userID)
+	total, failed, err := models.CountLoginHistory(db.Raw, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load login history"})
+		return
+	}
 	if records == nil {
 		records = []models.LoginHistory{}
 	}
 
+	// `total` drives pagination, so it has to count the filtered view; `failed`
+	// is the unfiltered all-time count that labels the filter itself.
+	shown := total
+	if failedOnly {
+		shown = failed
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"records": records,
-		"total":   total,
+		"total":   shown,
+		"failed":  failed,
 	})
 }
 

@@ -215,5 +215,9 @@ export const tagsApi = {
   list: () => client.get<Tag[]>('/tags'),
   create: (name: string, color?: string) =>
     client.post<Tag>('/tags', { name, color }),
+  // Renames in place. Deleting and recreating would cascade through
+  // server_tags and strip the tag from every server that carried it.
+  update: (id: string, name: string, color?: string) =>
+    client.put<Tag>(`/tags/${id}`, { name, color }),
   delete: (id: string) => client.delete(`/tags/${id}`),
 };

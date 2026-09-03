@@ -149,6 +149,7 @@ func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, noti
 		{
 			tags.GET("", tagH.List)
 			tags.POST("", tagH.Create)
+			tags.PUT("/:id", tagH.Update)
 			tags.DELETE("/:id", tagH.Delete)
 		}
 

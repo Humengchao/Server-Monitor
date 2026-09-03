@@ -2,6 +2,7 @@ package models
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -16,12 +17,50 @@ type Tag struct {
 	Color  string    `json:"color"`
 }
 
+// ErrTagNameTaken reports a collision with the tags table's UNIQUE(user_id,
+// name). Returned as a sentinel so handlers can answer 409 without matching on
+// driver error text.
+var ErrTagNameTaken = errors.New("tag name already exists")
+
+// isUniqueViolation identifies Postgres error 23505 (unique_violation).
+func isUniqueViolation(err error) bool {
+	var pqErr *pq.Error
+	if errors.As(err, &pqErr) {
+		return pqErr.Code == "23505"
+	}
+	return false
+}
+
 func CreateTag(db *sql.DB, t *Tag) error {
 	t.ID = uuid.New()
 	_, err := db.Exec(
 		"INSERT INTO tags (id, user_id, name, color) VALUES ($1,$2,$3,$4)",
 		t.ID, t.UserID, t.Name, t.Color)
+	if isUniqueViolation(err) {
+		return ErrTagNameTaken
+	}
 	return err
+}
+
+// UpdateTag renames and recolours a tag in place, reporting whether the caller
+// owns a tag with that ID. Editing rather than delete-and-recreate matters
+// because the tag ID is what server_tags references: recreating a tag drops it
+// from every server that carried it.
+func UpdateTag(db *sql.DB, t *Tag) (bool, error) {
+	result, err := db.Exec(
+		"UPDATE tags SET name=$1, color=$2 WHERE id=$3 AND user_id=$4",
+		t.Name, t.Color, t.ID, t.UserID)
+	if isUniqueViolation(err) {
+		return true, ErrTagNameTaken
+	}
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return affected > 0, nil
 }
 
 func GetTagsByUserID(db *sql.DB, userID uuid.UUID) ([]Tag, error) {
