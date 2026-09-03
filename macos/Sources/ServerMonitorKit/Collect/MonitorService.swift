@@ -317,7 +317,10 @@ public final class MonitorService {
                 // connect timeout) stretched everyone's 5 s interval to 15 s,
                 // and a hung one (30 s watchdog) to 35 s.
                 _ = self.pollDue()
-                let interval = self.settings.pollInterval
+                let interval = Self.effectiveInterval(
+                    self.settings.pollInterval,
+                    lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled
+                )
                 try? await Task.sleep(for: .seconds(interval))
             }
         }
@@ -336,6 +339,15 @@ public final class MonitorService {
                 }.value
             }
         }
+    }
+
+    /// The gap between ticks. In Low Power Mode the user has asked the whole
+    /// Mac to do less; nine ssh round trips every five seconds is exactly the
+    /// kind of background work that request is about, so the cadence drops
+    /// to a third. Read on every tick, so flipping the switch takes effect at
+    /// the next one.
+    static func effectiveInterval(_ configured: TimeInterval, lowPower: Bool) -> TimeInterval {
+        lowPower ? configured * 3 : configured
     }
 
     public func stop() {

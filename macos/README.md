@@ -99,6 +99,9 @@ full handshake.
   minutes, cleared by any answer, by editing the host, and by the network
   coming back (`NWPathMonitor`), since nine hosts failing at once is almost
   always this machine's link. A manual refresh always means "try now".
+- **Low Power Mode is honoured.** With it on, polls run a third as often; the
+  moment it is off, the configured interval is back. Nine ssh round trips every
+  five seconds is exactly the kind of background work that switch is about.
 - **Keyboard.** A Go menu (⌘1…⌘7) for the sidebar; ⌘N for "new whatever this
   screen is about", ⇧⌘N new group, ⇧⌘I import, ⌘T / ⇧⌘T terminal or SFTP on
   the selected machine, ⌘R refresh. The window reopens where it was left.

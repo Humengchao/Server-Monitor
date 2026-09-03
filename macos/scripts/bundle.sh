@@ -28,6 +28,11 @@ echo "==> Assembling $APP"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BINARY" "$APP/Contents/MacOS/ServerMonitor"
+# Local symbols only (-x): they are what Xcode's "Strip Linked Product" drops
+# for a release build, and here they were 8.5 MB of a 13.8 MB binary. Global
+# symbols and Swift runtime metadata stay, so nothing about the app changes
+# but its size — and any crash log still names the exported functions.
+strip -x "$APP/Contents/MacOS/ServerMonitor"
 
 echo "==> Rendering icon"
 # No Xcode means no actool, so the .icns is built straight from the SVG with

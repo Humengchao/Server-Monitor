@@ -153,6 +153,14 @@ struct PollBackoffTests {
         #expect(monitor.failureStreak.isEmpty)
     }
 
+    @Test func lowPowerModeSlowsTheCadence() {
+        // Not off — a monitor that stops monitoring on battery is worse than
+        // none — just a third as often.
+        #expect(MonitorService.effectiveInterval(5, lowPower: false) == 5)
+        #expect(MonitorService.effectiveInterval(5, lowPower: true) == 15)
+        #expect(MonitorService.effectiveInterval(60, lowPower: true) == 180)
+    }
+
     @Test func deletingAServerForgetsItsBackoff() throws {
         let monitor = try service()
         let server = Server(name: "gone", host: "10.255.255.1", username: "root", authKind: .agent)
