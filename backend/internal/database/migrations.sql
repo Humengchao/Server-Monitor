@@ -270,3 +270,10 @@ CREATE TABLE IF NOT EXISTS user_settings (
     default_webhook_url TEXT NOT NULL DEFAULT '',
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Why the collector last failed to reach a host. Without this the panel could
+-- only say "offline": a rejected password and an unreachable address looked
+-- identical, though they need entirely different fixes.
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS last_error_kind VARCHAR(16) NOT NULL DEFAULT '';
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS last_error TEXT NOT NULL DEFAULT '';
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS last_error_at TIMESTAMPTZ;

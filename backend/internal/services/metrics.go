@@ -267,14 +267,17 @@ func (c *Collector) pollAll() {
 			if err != nil {
 				delay := c.recordPollFailure(s.ID, fingerprint, err, time.Now())
 				log.Printf("collector: poll %s failed: %v; retry in %s", s.Name, err, delay)
+				c.persistPollError(s.ID, s.Name, err)
 				return
 			}
 			if err := models.SaveMetric(c.db.Raw, s.ID, m); err != nil {
 				delay := c.recordPollFailure(s.ID, fingerprint, err, time.Now())
 				log.Printf("collector: save metric for %s failed: %v; retry in %s", s.Name, err, delay)
+				c.persistPollError(s.ID, s.Name, fmt.Errorf("save metric: %w", err))
 				return
 			}
 			c.clearPollFailure(s.ID)
+			c.persistPollError(s.ID, s.Name, nil)
 		}()
 	}
 }
@@ -425,6 +428,26 @@ func (c *Collector) recordPollFailure(serverID uuid.UUID, fingerprint [32]byte, 
 	state.retryAt = now.Add(delay)
 	c.failures[serverID] = state
 	return delay
+}
+
+// persistPollError mirrors the poll outcome onto the server row so the panel
+// can say why a host is dark instead of only that it is. Pass nil to clear.
+//
+// Both statements are no-ops when the stored reason already matches, so a
+// healthy fleet costs nothing per tick and a long outage is written once. A
+// failure here is logged and dropped: the reason is diagnostic, and losing it
+// must not disturb collection.
+func (c *Collector) persistPollError(serverID uuid.UUID, name string, pollErr error) {
+	var err error
+	if pollErr == nil {
+		err = models.ClearServerPollError(c.db.Raw, serverID)
+	} else {
+		err = models.RecordServerPollError(c.db.Raw, serverID,
+			string(ClassifyPollError(pollErr)), TrimPollErrorDetail(pollErr), time.Now())
+	}
+	if err != nil {
+		log.Printf("collector: recording poll status for %s: %v", name, err)
+	}
 }
 
 func (c *Collector) clearPollFailure(serverID uuid.UUID) {

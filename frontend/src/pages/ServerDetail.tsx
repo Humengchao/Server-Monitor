@@ -17,6 +17,7 @@ import { serversApi, Server, MetricPoint } from '../api/servers';
 import { useMetrics, TimeRange } from '../hooks/useMetrics';
 import AvailabilityPanel from '../components/AvailabilityPanel';
 import PlatformIcon from '../components/PlatformIcon';
+import PollErrorNotice from '../components/PollErrorNotice';
 import { platformClass } from '../utils/platform';
 import MetricsChart from '../components/MetricsChart';
 import ProcessTable from '../components/ProcessTable';
@@ -370,13 +371,20 @@ export default function ServerDetail() {
         </Space>
       </div>
 
+      {/* Directly under the hero, above the tiles: the tiles are the figures
+          this explains the absence of. */}
+      <PollErrorNotice server={server} />
+
       <div className="stat-tile-grid">
+        {/* `metrics ? … : '—'` throughout: a host with no sample has no
+            reading, and "0%" / "0 B" beside the dashes the other tiles already
+            showed read as a measured idle host rather than an unmeasured one. */}
         <StatTile
           icon={<DashboardOutlined />}
           label={t('metrics.cpu')}
-          value={`${cpuPercent}%`}
+          value={metrics ? `${cpuPercent}%` : '—'}
           accent={severityColor(cpuPercent, 'blue')}
-          percent={cpuPercent}
+          percent={metrics ? cpuPercent : undefined}
         />
         <StatTile
           icon={<DatabaseOutlined />}
@@ -396,7 +404,7 @@ export default function ServerDetail() {
           icon={<ClockCircleOutlined />}
           label={t('metrics.uptime')}
           value={formatUptime(metrics?.uptime_seconds || 0)}
-          hint={t('detail.cores', { count: server.cpu_cores || 0 })}
+          hint={server.cpu_cores ? t('detail.cores', { count: server.cpu_cores }) : undefined}
           accent="#4bb3d6"
         />
         <StatTile
@@ -409,15 +417,15 @@ export default function ServerDetail() {
         <StatTile
           icon={<ArrowDownOutlined />}
           label={t('metrics.totalDownload')}
-          value={formatBytes(metrics?.network_rx_total_bytes || 0)}
-          hint={`${formatBytes(metrics?.network_rx_bytes || 0)}/s`}
+          value={metrics ? formatBytes(metrics.network_rx_total_bytes) : '—'}
+          hint={metrics ? `${formatBytes(metrics.network_rx_bytes)}/s` : undefined}
           accent="#39b8a4"
         />
         <StatTile
           icon={<ArrowUpOutlined />}
           label={t('metrics.totalUpload')}
-          value={formatBytes(metrics?.network_tx_total_bytes || 0)}
-          hint={`${formatBytes(metrics?.network_tx_bytes || 0)}/s`}
+          value={metrics ? formatBytes(metrics.network_tx_total_bytes) : '—'}
+          hint={metrics ? `${formatBytes(metrics.network_tx_bytes)}/s` : undefined}
           accent="#8d6dd7"
         />
         <StatTile

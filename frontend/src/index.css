@@ -276,6 +276,47 @@ button, input, textarea, select { font: inherit; }
 .status-pill.offline span { background: #ef6371; }
 
 .server-tags { min-height: 24px; margin: 15px 0 10px; display: flex; gap: 4px; flex-wrap: wrap; }
+
+/* Why a host is dark, on the fleet views. Deliberately not a neutral antd Tag:
+   this is the one label on the card that is worth interrupting a scan for, and
+   the tint carries whether it is a credential problem (red — someone must
+   change something here) or a reachability one (amber — probably elsewhere). */
+/* Mixed toward --text rather than hardcoded per theme: this stylesheet has no
+   per-rule dark overrides anywhere, it derives everything from the variables,
+   and mixing keeps the label legible on both surfaces from one declaration. */
+.poll-error-badge {
+  --badge-hue: #e3a13a;
+  padding: 1px 7px;
+  display: inline-flex; align-items: center; gap: 4px;
+  border-radius: 6px;
+  font-size: 11px; font-weight: 600; line-height: 20px;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--badge-hue) 78%, var(--text));
+  background: color-mix(in srgb, var(--badge-hue) 16%, transparent);
+}
+.poll-error-badge .anticon { font-size: 11px; }
+/* Red where somebody has to change something in this panel, amber where the
+   cause is most likely elsewhere, grey where the host is fine and we are not. */
+.poll-error-badge.kind-auth,
+.poll-error-badge.kind-host_key { --badge-hue: #e2545f; }
+.poll-error-badge.kind-storage { --badge-hue: #8b93a8; }
+
+/* Table status cell: pill on top, reason under it. */
+.table-status { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+
+/* Detail page banner. The host's own error is monospaced and selectable —
+   it is the string someone will paste into a search or a ticket. */
+.poll-error-notice { margin-bottom: 20px; }
+.poll-error-body { display: flex; flex-direction: column; gap: 7px; align-items: flex-start; }
+.poll-error-body code {
+  max-width: 100%;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
 .server-tags .ant-tag { margin: 0; border-radius: 6px; font-size: 10px; }
 .server-specs { min-height: 45px; margin-top: 15px; padding-bottom: 13px; display: flex; gap: 7px 13px; flex-wrap: wrap; border-bottom: 1px solid var(--border); }
 /* The tag row already supplies the gap when it is present. */

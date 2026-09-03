@@ -17,6 +17,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { Server } from '../api/servers';
 import PlatformIcon from './PlatformIcon';
+import { PollErrorBadge } from './PollErrorNotice';
 import { platformClass } from '../utils/platform';
 import { AlertEvent } from '../api/alerts';
 import { availabilityColor } from '../api/uptime';
@@ -119,8 +120,11 @@ function ServerCard({
       {/* Rendered only when there is something to show: an empty tag row still
           took 24px plus 25px of margin, which is where the odd band of white
           under the header on an untagged card came from. */}
-      {(server.public_location || !!server.tags?.length) && (
+      {(server.public_location || !!server.tags?.length || !!server.last_error_kind) && (
         <div className="server-tags">
+          {/* First in the row: on a dark card the reason it is dark outranks
+              its location and labels. */}
+          <PollErrorBadge server={server} />
           {server.public_location && (
             <Tag variant="filled" className="location-tag" icon={<EnvironmentOutlined />} title={server.public_location}>
               {server.public_location}

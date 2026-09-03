@@ -24,9 +24,20 @@ export interface Server {
   public_location: string;
   notes?: string;
   created_at: string;
+  /**
+   * Why the collector last failed to reach this host; absent once it succeeds.
+   * The kind is a stable token to translate; last_error is the host's own
+   * words, shown verbatim for whoever is debugging.
+   */
+  last_error_kind?: PollErrorKind | '';
+  last_error?: string;
+  last_error_at?: string;
   tags: Tag[];
   latest_metrics: LatestMetrics | null;
 }
+
+export type PollErrorKind =
+  | 'auth' | 'host_key' | 'unreachable' | 'timeout' | 'command' | 'storage' | 'other';
 
 export interface LatestMetrics {
   cpu_percent: number;

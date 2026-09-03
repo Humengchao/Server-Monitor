@@ -13,33 +13,39 @@ import (
 )
 
 type Server struct {
-	ID              uuid.UUID      `json:"id"`
-	UserID          uuid.UUID      `json:"user_id"`
-	Name            string         `json:"name"`
-	Host            string         `json:"host"`
-	Port            int            `json:"port"`
-	SSHUsername     string         `json:"ssh_username"`
-	SSHPassword     string         `json:"-"`
-	SSHKey          string         `json:"-"`
-	SSHHostKey      string         `json:"ssh_host_key,omitempty"`
-	CredentialID    *uuid.UUID     `json:"credential_id,omitempty"`
-	CredentialName  string         `json:"credential_name,omitempty"`
-	CPUCores        int            `json:"cpu_cores"`
-	MemoryTotal     int64          `json:"memory_total"`
-	DiskTotal       int64          `json:"disk_total"`
-	HasDocker       bool           `json:"has_docker"`
-	DockerVersion   string         `json:"docker_version"`
-	ExpiresAt       *time.Time     `json:"expires_at"`
-	BillingPrice    float64        `json:"billing_price"`
-	BillingCurrency string         `json:"billing_currency"`
-	BillingCycle    string         `json:"billing_cycle"`
-	TrafficLimit    int64          `json:"traffic_limit_bytes"`
-	PublicLocation  string         `json:"public_location"`
-	ServerType      string         `json:"server_type"`
-	Notes           string         `json:"notes"`
-	CreatedAt       time.Time      `json:"created_at"`
-	Tags            []Tag          `json:"tags,omitempty"`
-	LatestMetrics   *LatestMetrics `json:"latest_metrics,omitempty"`
+	ID              uuid.UUID  `json:"id"`
+	UserID          uuid.UUID  `json:"user_id"`
+	Name            string     `json:"name"`
+	Host            string     `json:"host"`
+	Port            int        `json:"port"`
+	SSHUsername     string     `json:"ssh_username"`
+	SSHPassword     string     `json:"-"`
+	SSHKey          string     `json:"-"`
+	SSHHostKey      string     `json:"ssh_host_key,omitempty"`
+	CredentialID    *uuid.UUID `json:"credential_id,omitempty"`
+	CredentialName  string     `json:"credential_name,omitempty"`
+	CPUCores        int        `json:"cpu_cores"`
+	MemoryTotal     int64      `json:"memory_total"`
+	DiskTotal       int64      `json:"disk_total"`
+	HasDocker       bool       `json:"has_docker"`
+	DockerVersion   string     `json:"docker_version"`
+	ExpiresAt       *time.Time `json:"expires_at"`
+	BillingPrice    float64    `json:"billing_price"`
+	BillingCurrency string     `json:"billing_currency"`
+	BillingCycle    string     `json:"billing_cycle"`
+	TrafficLimit    int64      `json:"traffic_limit_bytes"`
+	PublicLocation  string     `json:"public_location"`
+	ServerType      string     `json:"server_type"`
+	Notes           string     `json:"notes"`
+	CreatedAt       time.Time  `json:"created_at"`
+	// Why the collector last failed to reach this host, cleared on the next
+	// success. LastErrorKind is a stable token the UI translates; LastError is
+	// the host's or library's own words, kept for whoever is debugging.
+	LastErrorKind string         `json:"last_error_kind,omitempty"`
+	LastError     string         `json:"last_error,omitempty"`
+	LastErrorAt   *time.Time     `json:"last_error_at,omitempty"`
+	Tags          []Tag          `json:"tags,omitempty"`
+	LatestMetrics *LatestMetrics `json:"latest_metrics,omitempty"`
 }
 
 type LatestMetrics struct {
@@ -90,6 +96,7 @@ const serverSummarySelect = `SELECT s.id, s.user_id, s.name, s.host, s.port, s.s
 	 COALESCE(s.has_docker, FALSE), COALESCE(s.docker_version, ''),
 	 s.expires_at, COALESCE(s.server_type, 'linux'), COALESCE(s.notes, ''),
 	 COALESCE(s.billing_price, 0), COALESCE(s.billing_currency, 'CNY'), COALESCE(s.billing_cycle, 'year'), COALESCE(s.traffic_limit_bytes, 0), COALESCE(s.public_location, ''),
+	 COALESCE(s.last_error_kind, ''), COALESCE(s.last_error, ''), s.last_error_at,
 	 COALESCE(sm.cpu_percent, 0), COALESCE(sm.load_1, 0), COALESCE(sm.load_5, 0), COALESCE(sm.load_15, 0),
 	 COALESCE(sm.memory_used, 0), COALESCE(sm.memory_total, 0), COALESCE(sm.disk_used_bytes, 0),
 	 COALESCE(sm.network_rx_bytes, 0), COALESCE(sm.network_tx_bytes, 0),
@@ -108,6 +115,7 @@ func scanServerSummaries(rows *sql.Rows) ([]Server, error) {
 		var recordedAt sql.NullTime
 		var credIDStr string
 		var expiresAt sql.NullTime
+		var lastErrorAt sql.NullTime
 		if err := rows.Scan(&s.ID, &s.UserID, &s.Name, &s.Host, &s.Port,
 			&s.SSHUsername, &s.CreatedAt, &s.SSHHostKey,
 			&credIDStr, &s.CredentialName,
@@ -115,6 +123,7 @@ func scanServerSummaries(rows *sql.Rows) ([]Server, error) {
 			&s.HasDocker, &s.DockerVersion,
 			&expiresAt, &s.ServerType, &s.Notes,
 			&s.BillingPrice, &s.BillingCurrency, &s.BillingCycle, &s.TrafficLimit, &s.PublicLocation,
+			&s.LastErrorKind, &s.LastError, &lastErrorAt,
 			&m.CPUPercent, &m.Load1, &m.Load5, &m.Load15, &m.MemoryUsed, &m.MemoryTotal, &m.DiskUsed,
 			&m.NetworkRxBytes, &m.NetworkTxBytes,
 			&m.NetworkRxTotal, &m.NetworkTxTotal,
@@ -123,6 +132,9 @@ func scanServerSummaries(rows *sql.Rows) ([]Server, error) {
 		}
 		if expiresAt.Valid {
 			s.ExpiresAt = &expiresAt.Time
+		}
+		if lastErrorAt.Valid {
+			s.LastErrorAt = &lastErrorAt.Time
 		}
 		if credIDStr != "" {
 			id, err := uuid.Parse(credIDStr)
@@ -167,6 +179,28 @@ func GetServerSummary(db *sql.DB, id, userID uuid.UUID) (*Server, error) {
 		return nil, sql.ErrNoRows
 	}
 	return &servers[0], nil
+}
+
+// RecordServerPollError stores why the collector could not reach a host.
+//
+// The WHERE clause skips the write when the reason has not changed, so a host
+// that has been unreachable for a week does not take a row update on every
+// retry — only the transitions are written.
+func RecordServerPollError(db *sql.DB, id uuid.UUID, kind, detail string, at time.Time) error {
+	_, err := db.Exec(
+		`UPDATE servers SET last_error_kind=$2, last_error=$3, last_error_at=$4
+		 WHERE id=$1 AND (last_error_kind <> $2 OR last_error <> $3)`,
+		id, kind, detail, at)
+	return err
+}
+
+// ClearServerPollError forgets the last failure after a successful poll. The
+// guard keeps a healthy host's row untouched on every three-second tick.
+func ClearServerPollError(db *sql.DB, id uuid.UUID) error {
+	_, err := db.Exec(
+		`UPDATE servers SET last_error_kind='', last_error='', last_error_at=NULL
+		 WHERE id=$1 AND (last_error_kind <> '' OR last_error <> '')`, id)
+	return err
 }
 
 func ServerOwnedByUser(db *sql.DB, id, userID uuid.UUID) (bool, error) {

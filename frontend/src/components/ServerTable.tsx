@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Server } from '../api/servers';
 import PlatformIcon from './PlatformIcon';
+import { PollErrorBadge } from './PollErrorNotice';
 import { platformClass } from '../utils/platform';
 import { AlertEvent } from '../api/alerts';
 import { availabilityColor } from '../api/uptime';
@@ -92,10 +93,13 @@ export default function ServerTable({
     {
       title: t('common.status'),
       key: 'status',
-      width: 104,
+      width: 124,
       render: (_: unknown, server: Server) => (
-        <div className={`status-pill ${isOnline(server) ? 'online' : 'offline'}`}>
-          <span />{isOnline(server) ? t('dashboard.online') : t('dashboard.offline')}
+        <div className="table-status">
+          <div className={`status-pill ${isOnline(server) ? 'online' : 'offline'}`}>
+            <span />{isOnline(server) ? t('dashboard.online') : t('dashboard.offline')}
+          </div>
+          <PollErrorBadge server={server} />
         </div>
       ),
     },
