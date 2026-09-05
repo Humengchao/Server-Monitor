@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { Collapse, Table, Tag, Button, Space, Typography, Spin, Empty, Drawer, App, Card, Tooltip, Result } from 'antd';
+import { Collapse, Table, Tag, Button, Space, Typography, Spin, Empty, Drawer, App, Card, Tooltip, Result, Progress } from 'antd';
 import {
   ReloadOutlined, CaretRightOutlined, PauseOutlined, SyncOutlined, ArrowRightOutlined, FileTextOutlined, CodeOutlined,
   ContainerOutlined, CloudServerOutlined, CheckCircleOutlined, QuestionCircleOutlined, SearchOutlined,
@@ -8,8 +8,10 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import { useTranslation } from 'react-i18next';
 import { serversApi, Server, DockerContainer } from '../api/servers';
+import { formatBytes, severityColor } from '../utils/format';
 import { Terminal } from 'xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { usePolling } from '../hooks/usePolling';
 import 'xterm/css/xterm.css';
 
 const { Title, Text } = Typography;
@@ -31,6 +33,104 @@ const stateColor: Record<string, string> = {
   removing: 'warning',
   dead: 'error',
 };
+
+type Translate = (key: string, options?: Record<string, unknown>) => string;
+
+function finiteNumber(value: number | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function ResourceBar({
+  value,
+  label,
+  hue,
+  available = true,
+  unavailableText,
+}: {
+  value: number | undefined;
+  label: string;
+  hue: 'blue' | 'green';
+  available?: boolean;
+  unavailableText?: string;
+}) {
+  const numeric = finiteNumber(value);
+  if (!available || numeric === null) return <span className="docker-metric-unavailable" title={unavailableText}>—</span>;
+  const display = `${numeric.toFixed(1)}%`;
+  // CPU can exceed 100% on a multicore host. Keep the label truthful while
+  // clamping only the visual track to the progress component's range.
+  const track = Math.min(100, Math.max(0, numeric));
+  return (
+    <div className="docker-resource-bar" title={`${label}: ${display}`}>
+      <Progress percent={track} showInfo={false} size="small" strokeColor={severityColor(track, hue)} railColor="rgba(128, 140, 170, .16)" />
+      <span>{display}</span>
+    </div>
+  );
+}
+
+function MemoryMetric({ container, t }: { container: DockerContainer; t: Translate }) {
+  if (!container.stats_available) return <span className="docker-metric-unavailable" title={t('docker.statsUnavailable')}>—</span>;
+  const usage = finiteNumber(container.memory_usage);
+  const limit = finiteNumber(container.memory_limit);
+  const percent = finiteNumber(container.memory_percent);
+  if (usage === null && percent === null) return <span className="docker-metric-unavailable" title={t('docker.statsUnavailable')}>—</span>;
+  const detail = usage !== null
+    ? (limit !== null && limit > 0 ? `${formatBytes(usage, 1)} / ${formatBytes(limit, 1)}` : formatBytes(usage, 1))
+    : '—';
+  return (
+    <div className="docker-resource-detail" title={t('docker.memoryHint')}>
+      <strong>{detail}</strong>
+      {percent !== null && <small>{percent.toFixed(1)}%</small>}
+    </div>
+  );
+}
+
+function DiskMetric({ container, t }: { container: DockerContainer; t: Translate }) {
+  // Older backends did not send disk_available. Treat a present disk_usage as
+  // usable for compatibility, while newer responses can explicitly mark it
+  // unavailable when `docker ps --size` was not supported.
+  const usage = finiteNumber(container.disk_usage);
+  if (usage === null || container.disk_available === false) return <span className="docker-metric-unavailable" title={t('docker.diskUnavailable')}>—</span>;
+  const virtual = finiteNumber(container.disk_virtual_usage);
+  const read = finiteNumber(container.disk_read_bytes);
+  const write = finiteNumber(container.disk_write_bytes);
+  return (
+    <div className="docker-resource-detail docker-disk-detail" title={t('docker.diskHint')}>
+      <strong>{formatBytes(usage, 1)}</strong>
+      {virtual !== null && virtual > usage && <small>≈ {formatBytes(virtual, 1)}</small>}
+      {container.block_io_available && (read !== null || write !== null) && (
+        <small>{t('docker.blockIO')}: {formatBytes(read || 0, 1)} ↓ / {formatBytes(write || 0, 1)} ↑</small>
+      )}
+    </div>
+  );
+}
+
+function containerResourceColumns(t: Translate): ColumnsType<DockerContainer> {
+  return [
+    {
+      title: <Tooltip title={t('docker.cpuHint')}><span className="col-hint">{t('docker.cpu')}</span></Tooltip>,
+      key: 'cpu',
+      width: 138,
+      sorter: (a: DockerContainer, b: DockerContainer) => (a.cpu_percent || 0) - (b.cpu_percent || 0),
+      render: (_: unknown, record: DockerContainer) => (
+        <ResourceBar value={record.cpu_percent} label={t('docker.cpu')} hue="blue" available={record.stats_available} unavailableText={t('docker.statsUnavailable')} />
+      ),
+    },
+    {
+      title: <Tooltip title={t('docker.memoryHint')}><span className="col-hint">{t('docker.memory')}</span></Tooltip>,
+      key: 'memory',
+      width: 180,
+      sorter: (a: DockerContainer, b: DockerContainer) => (a.memory_usage || 0) - (b.memory_usage || 0),
+      render: (_: unknown, record: DockerContainer) => <MemoryMetric container={record} t={t} />,
+    },
+    {
+      title: <Tooltip title={t('docker.diskHint')}><span className="col-hint">{t('docker.disk')}</span></Tooltip>,
+      key: 'disk',
+      width: 150,
+      sorter: (a: DockerContainer, b: DockerContainer) => (a.disk_usage || 0) - (b.disk_usage || 0),
+      render: (_: unknown, record: DockerContainer) => <DiskMetric container={record} t={t} />,
+    },
+  ];
+}
 
 function LogsModal({ serverId, containerId, containerName, onClose }: {
   serverId: string;
@@ -208,18 +308,22 @@ export function ServerDockerPanel({ serverId, version }: { serverId: string; ver
   const { message } = App.useApp();
   const [containers, setContainers] = useState<DockerContainer[]>([]);
   const [loading, setLoading] = useState(true);
+  const loadingRef = useRef(false);
   const [logsTarget, setLogsTarget] = useState<{ containerId: string; containerName: string } | null>(null);
   const [execTarget, setExecTarget] = useState<{ containerId: string; containerName: string } | null>(null);
 
-  const loadContainers = useCallback(async () => {
-    setLoading(true);
+  const loadContainers = useCallback(async (showLoading = true) => {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
+    if (showLoading) setLoading(true);
     try {
       const res = await serversApi.getContainers(serverId);
       setContainers(res.data || []);
     } catch {
-      message.error(t('docker.loadFailed'));
+      if (showLoading) message.error(t('docker.loadFailed'));
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
+      loadingRef.current = false;
     }
   }, [message, serverId, t]);
 
@@ -229,6 +333,10 @@ export function ServerDockerPanel({ serverId, version }: { serverId: string; ver
     }, 0);
     return () => window.clearTimeout(timer);
   }, [loadContainers]);
+
+  // Container resource values are live readings. Refresh only while this
+  // detail panel is mounted, so the hidden tabs do not create SSH traffic.
+  usePolling(() => loadContainers(false), 15000, { leading: false });
 
   const handleAction = async (containerId: string, action: 'start' | 'stop' | 'restart') => {
     try {
@@ -260,6 +368,7 @@ export function ServerDockerPanel({ serverId, version }: { serverId: string; ver
       width: 110,
       render: (value: string) => <Tag color={stateColor[value] || 'default'}>{value}</Tag>,
     },
+    ...containerResourceColumns(t),
     {
       title: t('common.status'),
       dataIndex: 'status',
@@ -302,7 +411,7 @@ export function ServerDockerPanel({ serverId, version }: { serverId: string; ver
           <Text type="secondary">{t('docker.containers', { count: containers.length })}</Text>
         </Space>
       )}
-      extra={<Button icon={<ReloadOutlined />} onClick={loadContainers}>{t('common.refresh')}</Button>}
+      extra={<Button icon={<ReloadOutlined />} onClick={() => { void loadContainers(); }}>{t('common.refresh')}</Button>}
     >
       <Table
         rowKey="id"
@@ -311,7 +420,7 @@ export function ServerDockerPanel({ serverId, version }: { serverId: string; ver
         loading={loading}
         pagination={false}
         size="small"
-        scroll={{ x: 1100 }}
+        scroll={{ x: 1500 }}
         locale={{ emptyText: <Empty description={t('docker.noContainers')} /> }}
       />
 
@@ -347,6 +456,7 @@ export default function Docker() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [activeKeys, setActiveKeys] = useState<string[]>([]);
+  const activeKeysRef = useRef<string[]>([]);
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [logsTarget, setLogsTarget] = useState<{ serverId: string; containerId: string; containerName: string } | null>(null);
@@ -359,15 +469,17 @@ export default function Docker() {
   // still in flight (state in handleCollapseChange can be a render behind).
   const inFlightRef = useRef<Set<string>>(new Set());
 
-  const loadContainers = useCallback(async (serverId: string) => {
+  const loadContainers = useCallback(async (serverId: string, showLoading = true) => {
     if (inFlightRef.current.has(serverId)) return;
     inFlightRef.current.add(serverId);
-    setServers((prev) => prev.map((s) => (s.server.id === serverId ? { ...s, loading: true } : s)));
+    if (showLoading) {
+      setServers((prev) => prev.map((s) => (s.server.id === serverId ? { ...s, loading: true } : s)));
+    }
     try {
       const res = await serversApi.getContainers(serverId);
       setServers((prev) => prev.map((s) => (s.server.id === serverId ? { ...s, containers: res.data || [], loading: false, loaded: true } : s)));
     } catch {
-      message.error(t('docker.loadFailed'));
+      if (showLoading) message.error(t('docker.loadFailed'));
       setServers((prev) => prev.map((s) => (s.server.id === serverId ? { ...s, loading: false } : s)));
     } finally {
       inFlightRef.current.delete(serverId);
@@ -394,14 +506,25 @@ export default function Docker() {
       setServers(withDocker);
       setUndetected(allServers.filter((s) => !s.has_docker));
 
+      const keysToLoad = expandServerId
+        ? [expandServerId]
+        : activeKeysRef.current;
       if (expandServerId) {
+        activeKeysRef.current = [expandServerId];
         setActiveKeys([expandServerId]);
       }
 
-      // Load containers for all Docker servers in parallel
-      for (const sd of withDocker) {
-        void loadContainers(sd.server.id);
-      }
+      // Container rows are loaded lazily when a host is expanded. This keeps a
+      // large fleet from opening an SSH request for every collapsed panel.
+      // Re-fetch hosts that were already expanded after a manual host-list
+      // refresh; otherwise their freshly reset rows would remain empty until
+      // the user collapses and expands them again.
+      const validIDs = new Set(withDocker.map((item) => item.server.id));
+      window.setTimeout(() => {
+        for (const key of keysToLoad) {
+          if (validIDs.has(key)) void loadContainers(key);
+        }
+      }, 0);
     } catch {
       setLoadError(true);
       message.error(t('docker.loadFailed'));
@@ -424,6 +547,14 @@ export default function Docker() {
     return () => window.clearTimeout(timer);
   }, [loadServers]);
 
+  // Refresh resource readings only for expanded hosts. The request guard in
+  // loadContainers prevents a slow SSH call from overlapping the next tick.
+  usePolling(
+    () => Promise.all(activeKeys.map((key) => loadContainers(key, false))).then(() => undefined),
+    15000,
+    { leading: false, enabled: activeKeys.length > 0 },
+  );
+
   const getColumns = (serverId: string): ColumnsType<DockerContainer> => [
     {
       title: t('common.name'),
@@ -444,6 +575,7 @@ export default function Docker() {
       width: 110,
       render: (v: string) => <Tag color={stateColor[v] || 'default'}>{v}</Tag>,
     },
+    ...containerResourceColumns(t),
     {
       title: t('common.status'),
       dataIndex: 'status',
@@ -503,6 +635,10 @@ export default function Docker() {
     containers: servers.reduce((sum, sd) => sum + sd.containers.length, 0),
     running: servers.reduce((sum, sd) => sum + sd.containers.filter((c) => c.state === 'running').length, 0),
   };
+  const loadedHosts = servers.filter((sd) => sd.loaded).length;
+  const allHostsLoaded = loadedHosts === servers.length;
+  const summaryHint = allHostsLoaded ? undefined : t('docker.summaryPartial', { loaded: loadedHosts, total: servers.length });
+  const summaryValue = (value: number) => loadedHosts > 0 ? String(value) : '—';
 
   const collapseItems = servers.map((sd) => ({
     key: sd.server.id,
@@ -549,6 +685,7 @@ export default function Docker() {
         loading={sd.loading}
         pagination={false}
         size="small"
+        scroll={{ x: 1500 }}
         locale={{ emptyText: <Empty description={t('docker.noContainers')} /> }}
       />
     ),
@@ -556,6 +693,7 @@ export default function Docker() {
 
   const handleCollapseChange = (keys: string | string[]) => {
     const keyArr = Array.isArray(keys) ? keys : [keys];
+    activeKeysRef.current = keyArr;
     setActiveKeys(keyArr);
     for (const key of keyArr) {
       const sd = servers.find((s) => s.server.id === key);
@@ -587,11 +725,11 @@ export default function Docker() {
         </Card>
         <Card className="overview-card overview-card-accent" variant="borderless">
           <div className="overview-icon"><ContainerOutlined /></div>
-          <div><Text type="secondary">{t('docker.totalContainers')}</Text><strong>{totals.containers}</strong></div>
+          <div><Text type="secondary">{t('docker.totalContainers')}</Text><strong title={summaryHint}>{summaryValue(totals.containers)}</strong></div>
         </Card>
         <Card className="overview-card overview-card-success" variant="borderless">
           <div className="overview-icon"><CheckCircleOutlined /></div>
-          <div><Text type="secondary">{t('docker.runningContainers')}</Text><strong>{totals.running}</strong></div>
+          <div><Text type="secondary">{t('docker.runningContainers')}</Text><strong title={summaryHint}>{summaryValue(totals.running)}</strong></div>
         </Card>
         <Card className={`overview-card ${undetected.length ? 'overview-card-amber' : 'overview-card-muted'}`} variant="borderless">
           <div className="overview-icon"><QuestionCircleOutlined /></div>

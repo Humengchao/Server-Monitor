@@ -990,6 +990,63 @@ GET /api/servers/:id/docker/check?refresh=1
 
 ---
 
+### 容器列表与资源用量
+
+```
+GET /api/servers/:id/docker/containers
+```
+
+返回该主机上的全部容器（包括已停止容器）。资源字段均为尽力而为：运行中的容器从
+`docker stats --no-stream` 获取实时 CPU/内存，磁盘字段从 `docker ps --size` 获取容器层大小。
+
+```json
+[
+  {
+    "id": "a1b2c3d4e5f6",
+    "name": "web",
+    "image": "nginx:alpine",
+    "state": "running",
+    "status": "Up 2 hours",
+    "ports": "0.0.0.0:80->80/tcp",
+    "created": "2024-01-01 12:00:00 +0000 UTC",
+    "cpu_percent": 2.4,
+    "memory_usage": 33554432,
+    "memory_limit": 536870912,
+    "memory_percent": 6.25,
+    "disk_read_bytes": 0,
+    "disk_write_bytes": 4096,
+    "block_io_available": true,
+    "disk_usage": 12582912,
+    "disk_virtual_usage": 188743680,
+    "disk_available": true,
+    "stats_available": true
+  }
+]
+```
+
+| 字段 | 说明 |
+|---|---|
+| `cpu_percent` | 当前 CPU 使用率；多核主机可能超过 100% |
+| `memory_usage` / `memory_limit` | 当前内存使用量 / Docker 报告的限制，单位为字节；限制为 0 表示未设置显式限制 |
+| `memory_percent` | 内存占用率（百分比） |
+| `disk_read_bytes` / `disk_write_bytes` | 容器启动以来累计块设备读取 / 写入量，单位为字节；不是瞬时速率 |
+| `block_io_available` | 是否拿到 Docker 的累计块 I/O 统计；存储驱动不支持时为 `false` |
+| `disk_usage` | 容器可写层大小，单位为字节 |
+| `disk_virtual_usage` | 可写层加镜像层的虚拟总大小，单位为字节；不包含卷和 bind mount |
+| `disk_available` | 是否成功执行并解析了 `docker ps --size` |
+| `stats_available` | 是否拿到实时 `docker stats`；停止容器通常为 `false`，前端应显示为暂无数据而不是 0 |
+
+资源命令有 15 秒超时和输出上限；旧版 Docker 不支持 `--size` 时仍返回容器基础信息，但磁盘字段标记为不可用。
+
+| 状态码 | 说明 |
+|---|---|
+| 200 | 成功；单个容器缺少实时统计时仍会返回基础信息 |
+| 404 | 服务器不存在或不属于当前用户 |
+| 500 | Docker 容器列表读取失败 |
+| 502 | SSH 连接失败 |
+
+---
+
 ## 十一、SSH WebSocket 终端
 
 ```

@@ -44,7 +44,7 @@ The public probe refreshes every 15 seconds and exposes only anonymous node alia
 | Process management | Live process table on the detail page, sortable by PID / user / CPU / memory / RSS / uptime, with search, pausable auto-refresh, and terminate (SIGTERM / SIGKILL) |
 | Availability | Observed availability over 24h / 7d / 30d, a 30-day daily strip and outage log, a fleet-wide mean on the overview, and a 30-day SLA figure on the public status page |
 | Services & ports | systemd unit list (failures first) with start/stop/restart/reload, plus a listening-port table that classifies each bind by who can reach it |
-| Operations | Web SSH terminal, Docker container management (start / stop / logs / interactive shell), shared SSH credential store, per-server notes |
+| Operations | Web SSH terminal, Docker container management (start / stop / logs / interactive shell, CPU / memory / disk usage), shared SSH credential store, per-server notes |
 | Account security | Change your password and sign every other device out at once |
 | Public status page | Anonymized probe page whose API excludes identity and connection details at the query level |
 
@@ -208,7 +208,7 @@ Add the following secrets in **Settings -> Secrets and variables -> actions**:
 - [x] **CI/CD Integration** -- GitHub Actions auto lint / build / test / deploy
 - [x] **Edit Server Info** -- Support editing host / port / SSH credentials for existing servers
 - [x] **Login History** -- Show last login IP, time, and location as a notification after login
-- [x] **Docker Management** -- View Docker container list and status on server detail page
+- [x] **Docker Management** -- View Docker container list, status, CPU, memory and disk usage on the server detail page
 - [x] **SSH Key Management** -- Manage SSH keys independently (create, name, associate with servers)
 - [x] **SSH Credential Management** -- Manage reusable SSH usernames and passwords
 - [x] **Account Settings** -- Change your password from Settings; other sessions are revoked immediately

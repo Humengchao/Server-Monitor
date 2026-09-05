@@ -558,6 +558,16 @@ button, input, textarea, select { font: inherit; }
 .docker-count i { width: 7px; height: 7px; border-radius: 50%; }
 .docker-count.running i { background: #16a980; box-shadow: 0 0 0 3px rgba(22, 169, 128, .14); }
 .docker-count.stopped i { background: #9aa4bb; }
+.docker-resource-bar { min-width: 118px; display: flex; align-items: center; gap: 7px; }
+.docker-resource-bar .ant-progress { flex: 1; min-width: 54px; margin: 0; line-height: 1; }
+.docker-resource-bar .ant-progress-inner { height: 5px !important; }
+.docker-resource-bar > span { min-width: 48px; color: var(--text); font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.docker-resource-detail { min-width: 142px; display: flex; align-items: baseline; gap: 7px; white-space: nowrap; }
+.docker-resource-detail strong, .docker-disk-value { color: var(--text); font-size: 11px; font-variant-numeric: tabular-nums; }
+.docker-resource-detail small { color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.docker-disk-detail { flex-direction: column; gap: 1px; align-items: flex-start; }
+.docker-disk-detail small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.docker-metric-unavailable { color: var(--muted); font-size: 13px; }
 .docker-undetected { margin-top: 26px; }
 .docker-undetected .section-heading > div { flex-direction: column; align-items: flex-start; gap: 2px; }
 .docker-undetected-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }

@@ -560,11 +560,13 @@ export default function ServerDetail() {
         {
           key: 'docker',
           label: t('docker.title'),
-          children: dockerInstalled === true ? (
+          // Docker stats are fetched over SSH; mount the panel only when it is
+          // visible so switching to another tab stops its 15-second poll.
+          children: activeTab === 'docker' && dockerInstalled === true ? (
             <Suspense fallback={tabFallback}><ServerDockerPanel serverId={id!} version={server.docker_version} /></Suspense>
-          ) : (
+          ) : activeTab === 'docker' ? (
             <div className="empty-state"><Empty description={t('docker.noServers')} /></div>
-          ),
+          ) : null,
         },
         {
           key: 'notes',

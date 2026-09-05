@@ -62,6 +62,25 @@ export interface DockerContainer {
   state: string;
   ports: string;
   created: string;
+  /** Instantaneous CPU usage; Docker may report values above 100 on multicore hosts. */
+  cpu_percent?: number;
+  /** Current memory usage in bytes, available while the container is running. */
+  memory_usage?: number;
+  /** Configured memory limit in bytes (0 means no explicit limit). */
+  memory_limit?: number;
+  memory_percent?: number;
+  /** Cumulative block I/O counters in bytes, available for running containers when supported. */
+  disk_read_bytes?: number;
+  disk_write_bytes?: number;
+  block_io_available?: boolean;
+  /** Writable container layer size in bytes. */
+  disk_usage?: number;
+  /** Virtual container size including image layers, as reported by Docker. */
+  disk_virtual_usage?: number;
+  /** Whether the disk size came from a successful `docker ps --size` query. */
+  disk_available?: boolean;
+  /** False when Docker could not provide a live stats sample (usually stopped). */
+  stats_available?: boolean;
 }
 
 export interface ProcessInfo {
