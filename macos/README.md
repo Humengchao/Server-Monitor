@@ -114,15 +114,18 @@ full handshake.
 
 ## Requirements
 
-- macOS 15 or later (Citadel's interactive PTY API is 15+).
-- Command Line Tools for Xcode. Full Xcode is *not* required.
+- macOS 15 or later.
+- Xcode 16.4 or later for the complete SwiftUI app/test link step. The
+  package sources themselves can still be inspected and compiled with the
+  Command Line Tools, but the current macOS SDK does not reliably link the
+  SwiftUI executable from CLT alone.
 
 ## Build
 
 ```bash
 cd macos
 swift build            # compile
-swift test             # 306 tests, fully offline
+swift test             # 312 tests, fully offline
 ./scripts/bundle.sh    # -> dist/Server Monitor.app
 MAKE_DMG=1 ./scripts/bundle.sh   # also produce a .dmg
 
@@ -233,8 +236,8 @@ Sources/ServerMonitorKit/
               SFTPView, SessionHistoryView, DockerPane, TerminalPane,
               SettingsView, MenuBarPanel, Components/
 Sources/ServerMonitor/    @main app entry
-Tests/                    109 tests: parsers, database, SFTP listing, key
+Tests/                    312 tests: parsers, database, SFTP listing, key
                           scanning and naming, Docker summaries, groups,
-                          sessions, alert debouncing, plus an opt-in live SSH
-                          check
+                          sessions, alert debouncing, process cancellation,
+                          plus opt-in live SSH checks
 ```

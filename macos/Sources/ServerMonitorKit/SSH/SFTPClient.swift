@@ -155,7 +155,12 @@ public struct SFTPClient: Sendable {
         Task {
             guard total > 0 else { return }
             while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(250))
+                do {
+                    try await Task.sleep(for: .milliseconds(250))
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled else { return }
                 let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
                 let written = (attributes?[.size] as? Int64) ?? 0
                 onProgress(min(1, Double(written) / Double(total)))
@@ -209,11 +214,17 @@ public struct SFTPClient: Sendable {
             if total > 0 {
                 tracker = Task {
                     while !Task.isCancelled {
-                        try? await Task.sleep(for: .milliseconds(400))
+                        do {
+                            try await Task.sleep(for: .milliseconds(400))
+                        } catch {
+                            return
+                        }
+                        guard !Task.isCancelled else { return }
                         let output = try? await runner.run(
                             "stat -c %s -- \(Self.quote(destination)) 2>/dev/null || echo 0",
                             on: target
                         )
+                        guard !Task.isCancelled else { return }
                         let written = Int64(output?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "") ?? 0
                         onProgress(min(1, Double(written) / Double(total)))
                     }

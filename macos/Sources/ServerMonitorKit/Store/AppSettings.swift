@@ -92,7 +92,7 @@ public final class AppSettings: ObservableObject {
         diskThreshold = defaults.object(forKey: Keys.diskThreshold) as? Int ?? 90
         launchAtLogin = defaults.bool(forKey: Keys.launchAtLogin)
         let storedFont = defaults.string(forKey: Keys.terminalFontName)
-        terminalFontName = Self.terminalFonts.contains(storedFont ?? "") ? storedFont! : "Menlo"
+        terminalFontName = Self.terminalFonts.first(where: { $0 == storedFont }) ?? "Menlo"
         let storedSize = defaults.double(forKey: Keys.terminalFontSize)
         terminalFontSize = Self.terminalFontSizes.contains(storedSize) ? storedSize : 13
     }

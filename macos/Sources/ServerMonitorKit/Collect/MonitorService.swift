@@ -673,6 +673,11 @@ public final class MonitorService {
                 // both stay live without their own round trip.
                 if let summary = snapshot.dockerSummary {
                     self.dockerSummaries[server.id] = summary
+                } else {
+                    // Docker can disappear, lose permissions, or stop between
+                    // polls. Do not leave the previous engine card visible as
+                    // if it were still current.
+                    self.dockerSummaries.removeValue(forKey: server.id)
                 }
                 // Only when something moved: assigning identical values still
                 // publishes `servers` on every poll.
@@ -687,7 +692,11 @@ public final class MonitorService {
                     self.servers[index].dockerVersion = snapshot.dockerVersion
                 }
             }
-            alerts?.evaluate(server: server, status: .online(at: now), snapshot: snapshot)
+            // The user may have edited the name or per-host thresholds while
+            // this SSH round was in flight. Notifications must use the row as
+            // it is now, not the stale value captured when polling started.
+            let currentForAlert = self.server(id: server.id) ?? server
+            alerts?.evaluate(server: currentForAlert, status: .online(at: now), snapshot: snapshot)
         } catch {
             // A cancelled poll says nothing about the host.
             if error is CancellationError { return }
@@ -696,7 +705,8 @@ public final class MonitorService {
             Self.log.info("\(server.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
             let failure = ServerStatus.offline(reason: error.localizedDescription)
             commit(for: server.id) { self.status[server.id] = failure }
-            alerts?.evaluate(server: server, status: failure, snapshot: nil)
+            let currentForAlert = self.server(id: server.id) ?? server
+            alerts?.evaluate(server: currentForAlert, status: failure, snapshot: nil)
         }
     }
 

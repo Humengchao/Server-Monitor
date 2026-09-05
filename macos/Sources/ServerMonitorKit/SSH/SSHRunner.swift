@@ -67,11 +67,25 @@ public struct SSHRunner: Sendable {
         return base
     }
 
-    /// Short, stable per-host socket name derived from the destination.
+    /// Short, stable per-server socket name derived from the destination.
+    ///
+    /// The server id is intentional. Two rows may point at the same endpoint
+    /// with different identities, passwords, ProxyJump settings, or host-key
+    /// policies. Sharing a ControlMaster between them lets the first row's
+    /// authenticated connection silently satisfy the second row, which is
+    /// both surprising and wrong. A socket belongs to one configured server
+    /// row; terminal and SFTP for that row still reuse its poll connection.
     static func controlPath(for target: SSHTarget) throws -> String {
         // %C in ControlPath would be simpler, but computing it ourselves keeps
         // the name stable across option changes and lets us close it by path.
-        let seed = "\(target.username)@\(target.host):\(target.port)"
+        let credential: String
+        switch target.credential {
+        case .sshConfigAlias: credential = "alias"
+        case .identityFile(let path): credential = "identity:\(path)"
+        case .agent: credential = "agent"
+        case .password: credential = "password"
+        }
+        let seed = "\(target.serverID.uuidString)|\(target.username)@\(target.host):\(target.port)|\(credential)"
         var hash: UInt64 = 0xcbf29ce484222325
         for byte in seed.utf8 {
             hash = (hash ^ UInt64(byte)) &* 0x100000001b3
@@ -165,12 +179,10 @@ public struct SSHRunner: Sendable {
                 environment: askpass?.environment
             )
         } catch let failure as Failure where Self.isDeadMultiplexSocket(failure) {
-            // The master went away underneath us. Control paths are keyed on
-            // user@host:port, so two server rows pointing at one machine share
-            // a master: deleting or editing either tears it down mid-poll for
-            // the other. The connection is fine; only the socket is stale, and
-            // a host that is genuinely unreachable says so on stderr and does
-            // not land here.
+            // The master went away underneath this server row. Its socket is
+            // stale; a host that is genuinely unreachable says so on stderr
+            // and does not land here. Retry once after removing only this row's
+            // socket.
             try? FileManager.default.removeItem(atPath: controlPath)
             return try await Self.execute(
                 executable: "/usr/bin/ssh",
@@ -284,7 +296,10 @@ public struct SSHRunner: Sendable {
 
         let watchdog = Task {
             try await Task.sleep(for: .seconds(timeout))
-            if process.isRunning { process.terminate() }
+            if process.isRunning {
+                exit.markTimedOut()
+                process.terminate()
+            }
         }
         defer { watchdog.cancel() }
 
@@ -312,6 +327,11 @@ public struct SSHRunner: Sendable {
         // A cancelled process also died by signal; report it as what it was,
         // not as a timeout.
         if Task.isCancelled { throw CancellationError() }
+
+        // Do this before accepting partial stdout. A timed-out metrics command
+        // can have printed a plausible-looking prefix; returning it would
+        // silently publish a half-read snapshot as if it were current.
+        if exit.wasTimedOut { throw Failure.timedOut(seconds: timeout) }
 
         if process.terminationStatus != 0 {
             // Partial output still parses; only a completely empty result is a
@@ -356,6 +376,19 @@ public struct SSHRunner: Sendable {
         private let lock = NSLock()
         private var hasExited = false
         private var waiter: CheckedContinuation<Void, Never>?
+        private var timedOut = false
+
+        func markTimedOut() {
+            lock.lock()
+            timedOut = true
+            lock.unlock()
+        }
+
+        var wasTimedOut: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return timedOut
+        }
 
         func complete() {
             lock.lock()

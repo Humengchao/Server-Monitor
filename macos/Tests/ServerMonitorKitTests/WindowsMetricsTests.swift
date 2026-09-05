@@ -386,6 +386,40 @@ struct PasswordAuthTests {
         }
     }
 
+    @Test func aTimedOutCommandNeverPublishesPartialOutput() async throws {
+        // A metrics script can print a valid-looking prefix before hanging.
+        // That prefix must not be accepted as a current snapshot after the
+        // watchdog fires.
+        await #expect(throws: SSHRunner.Failure.self) {
+            _ = try await SSHRunner.execute(
+                executable: "/bin/sh",
+                arguments: ["-c", "printf 'cpu=42\\n'; sleep 30"],
+                timeout: 1
+            )
+        }
+    }
+
+    @Test func controlMastersAreIsolatedPerConfiguredServer() throws {
+        let endpoint = UUID()
+        let first = SSHTarget(
+            serverID: endpoint, host: "same.example", port: 22,
+            username: "root", credential: .identityFile(path: "/keys/one")
+        )
+        let second = SSHTarget(
+            serverID: UUID(), host: "same.example", port: 22,
+            username: "root", credential: .identityFile(path: "/keys/one")
+        )
+        let differentCredential = SSHTarget(
+            serverID: endpoint, host: "same.example", port: 22,
+            username: "root", credential: .identityFile(path: "/keys/two")
+        )
+
+        let firstPath = try SSHRunner.controlPath(for: first)
+        #expect(firstPath != (try SSHRunner.controlPath(for: second)))
+        #expect(firstPath != (try SSHRunner.controlPath(for: differentCredential)))
+        #expect(firstPath == (try SSHRunner.controlPath(for: first)))
+    }
+
     @Test func onlySilent255CountsAsADeadMultiplexSocket() {
         // Retrying on anything else would double the time an unreachable host
         // takes to be reported offline.
