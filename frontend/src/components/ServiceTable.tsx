@@ -271,7 +271,7 @@ export default function ServiceTable({ serverId, serverType }: Props) {
               { value: 'paused', icon: <Tooltip title={t('process.pause')}><PauseOutlined /></Tooltip> },
             ]}
           />
-          <Button icon={<ReloadOutlined />} onClick={() => load()} loading={loading} />
+          <Button aria-label={t('common.refresh')} icon={<ReloadOutlined />} onClick={() => load()} loading={loading} />
         </Space>
       </div>
 

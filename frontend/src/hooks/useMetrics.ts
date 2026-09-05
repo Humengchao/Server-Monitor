@@ -37,12 +37,19 @@ export function useMetrics(serverId: string, timeRange: TimeRange, interval = 30
   // rather than the browser's: local skew beyond the online window would
   // otherwise mislabel a healthy host.
   const [observedAt, setObservedAt] = useState(0);
+  const latestAbortRef = useRef<AbortController | null>(null);
+  const historyAbortRef = useRef<AbortController | null>(null);
   const timeRangeRef = useRef(timeRange);
-  timeRangeRef.current = timeRange;
+  useEffect(() => {
+    timeRangeRef.current = timeRange;
+  }, [timeRange]);
 
   const fetchLatest = useCallback(async () => {
+    latestAbortRef.current?.abort();
+    const controller = new AbortController();
+    latestAbortRef.current = controller;
     try {
-      const res = await serversApi.getLatestMetrics(serverId);
+      const res = await serversApi.getLatestMetrics(serverId, controller.signal);
       const newMetrics = res.data ?? null;
       setMetrics((prev) => (metricsChanged(prev, newMetrics) ? newMetrics : prev));
       const dateHeader = res.headers?.date;
@@ -51,29 +58,45 @@ export function useMetrics(serverId: string, timeRange: TimeRange, interval = 30
     } catch {
       // ignore
     } finally {
-      setLoading(false);
+      if (latestAbortRef.current === controller) {
+        latestAbortRef.current = null;
+        setLoading(false);
+      }
     }
   }, [serverId]);
 
   const fetchHistory = useCallback(async () => {
+    historyAbortRef.current?.abort();
+    const controller = new AbortController();
+    historyAbortRef.current = controller;
     try {
       const range = timeRangeRef.current;
-      const res = await serversApi.getMetricsHistory(serverId, range.since, range.until);
+      const res = await serversApi.getMetricsHistory(serverId, range.since, range.until, controller.signal);
       setHistory(res.data || []);
     } catch {
       // ignore
+    } finally {
+      if (historyAbortRef.current === controller) historyAbortRef.current = null;
     }
   }, [serverId]);
 
   usePolling(fetchLatest, interval, { leading: false });
 
   useEffect(() => {
-    fetchLatest();
+    // Defer the initial request so the effect itself does not synchronously
+    // trigger state updates during the commit phase.
+    const timer = window.setTimeout(() => { void fetchLatest(); }, 0);
+    return () => window.clearTimeout(timer);
   }, [fetchLatest]);
 
   useEffect(() => {
     fetchHistory();
   }, [fetchHistory, timeRange.since, timeRange.until]);
+
+  useEffect(() => () => {
+    latestAbortRef.current?.abort();
+    historyAbortRef.current?.abort();
+  }, [serverId]);
 
   return { metrics, history, loading, observedAt, refetchLatest: fetchLatest, refetchHistory: fetchHistory };
 }

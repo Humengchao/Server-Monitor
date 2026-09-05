@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Select, Space, Button, Input, App } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
@@ -17,8 +17,9 @@ export default function TagSelect({ value = [], onChange }: Props) {
   const [newName, setNewName] = useState('');
   const [newColor, setNewColor] = useState('#1890ff');
   const [showNew, setShowNew] = useState(false);
+  const [creating, setCreating] = useState(false);
 
-  const loadTags = async () => {
+  const loadTags = useCallback(async () => {
     setLoading(true);
     try {
       const res = await tagsApi.list();
@@ -27,22 +28,28 @@ export default function TagSelect({ value = [], onChange }: Props) {
       message.error(t('settings.loadTagsFailed'));
     }
     setLoading(false);
-  };
+  }, [message, t]);
 
   useEffect(() => {
-    loadTags();
-  }, []);
+    // Defer the initial request so the effect itself does not synchronously
+    // trigger state updates during the commit phase.
+    const timer = window.setTimeout(() => { void loadTags(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadTags]);
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
+    setCreating(true);
     try {
       const res = await tagsApi.create(newName.trim(), newColor);
-      setTags([...tags, res.data]);
+      setTags((prev) => [...prev, res.data]);
       setNewName('');
       setNewColor('#1890ff');
       setShowNew(false);
     } catch {
       message.error(t('settings.tagCreateFailed'));
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -74,7 +81,7 @@ export default function TagSelect({ value = [], onChange }: Props) {
                     onChange={(e) => setNewColor(e.target.value)}
                     style={{ width: 28, height: 28, border: 'none', cursor: 'pointer' }}
                   />
-                  <Button size="small" type="primary" onClick={handleCreate}>{t('common.add')}</Button>
+                  <Button size="small" type="primary" loading={creating} disabled={!newName.trim()} onClick={handleCreate}>{t('common.add')}</Button>
                 </Space>
               ) : (
                 <Button type="dashed" size="small" icon={<PlusOutlined />} onClick={() => setShowNew(true)}>

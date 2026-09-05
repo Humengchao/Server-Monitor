@@ -8,6 +8,11 @@ import { authApi } from '../api/auth';
 
 const { Title, Text } = Typography;
 
+function apiError(err: unknown, fallback: string): string {
+  const detail = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+  return detail || fallback;
+}
+
 export default function Login() {
   const { t } = useTranslation();
   const { message } = App.useApp();
@@ -27,8 +32,8 @@ export default function Login() {
       }
 
       navigate('/dashboard');
-    } catch (err: any) {
-      message.error(err.response?.data?.error || t('login.failed'));
+    } catch (err: unknown) {
+      message.error(apiError(err, t('login.failed')));
     }
     setLoading(false);
   };
@@ -59,10 +64,10 @@ export default function Login() {
         <Text type="secondary" className="auth-form-subtitle">{t('auth.loginSubtitle')}</Text>
         <Form onFinish={handleLogin} size="large">
           <Form.Item name="username" rules={[{ required: true, message: t('login.usernameRequired') }]}>
-            <Input prefix={<UserOutlined />} placeholder={t('login.usernamePlaceholder')} />
+            <Input autoComplete="username" prefix={<UserOutlined />} placeholder={t('login.usernamePlaceholder')} />
           </Form.Item>
           <Form.Item name="password" rules={[{ required: true, message: t('login.passwordRequired') }]}>
-            <Input.Password prefix={<LockOutlined />} placeholder={t('login.passwordPlaceholder')} />
+            <Input.Password autoComplete="current-password" prefix={<LockOutlined />} placeholder={t('login.passwordPlaceholder')} />
           </Form.Item>
           <Form.Item className="auth-submit">
             <Button type="primary" htmlType="submit" loading={loading} block>

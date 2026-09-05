@@ -93,6 +93,7 @@ export default function Alerts() {
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<'events' | 'rules'>('events');
   const [modalOpen, setModalOpen] = useState(false);
+  const [savingRule, setSavingRule] = useState(false);
   const [editingRule, setEditingRule] = useState<AlertRule | null>(null);
   const [testing, setTesting] = useState(false);
   const [form] = Form.useForm();
@@ -182,6 +183,7 @@ export default function Alerts() {
       enabled: values.enabled !== false,
       webhook_url: String(values.webhook_url || '').trim(),
     };
+    setSavingRule(true);
     try {
       if (editingRule) {
         await alertsApi.updateRule(editingRule.id, payload);
@@ -196,6 +198,8 @@ export default function Alerts() {
       load(false);
     } catch (err: unknown) {
       message.error(apiError(err, t('alerts.saveFailed')));
+    } finally {
+      setSavingRule(false);
     }
   };
 
@@ -317,8 +321,8 @@ export default function Alerts() {
       width: 100,
       render: (_: unknown, rule: AlertRule) => (
         <Space size={2}>
-          <Button type="text" icon={<EditOutlined />} onClick={() => openEdit(rule)} />
-          <Button type="text" danger icon={<DeleteOutlined />} onClick={() => handleDelete(rule)} />
+          <Button type="text" aria-label={t('common.edit')} icon={<EditOutlined />} onClick={() => openEdit(rule)} />
+          <Button type="text" danger aria-label={t('common.delete')} icon={<DeleteOutlined />} onClick={() => handleDelete(rule)} />
         </Space>
       ),
     },
@@ -443,12 +447,13 @@ export default function Alerts() {
       <Modal
         title={editingRule ? t('alerts.editRule') : t('alerts.addRule')}
         open={modalOpen}
-        onCancel={() => { setModalOpen(false); setEditingRule(null); }}
+        onCancel={() => { if (!savingRule && !testing) { setModalOpen(false); setEditingRule(null); } }}
         onOk={() => form.submit()}
+        confirmLoading={savingRule}
         width={620}
         destroyOnHidden
       >
-        <Form form={form} layout="vertical" onFinish={handleSubmit} className="alert-form">
+        <Form form={form} layout="vertical" onFinish={handleSubmit} className="alert-form" disabled={savingRule}>
           <Form.Item name="name" label={t('alerts.ruleName')} rules={[{ required: true }]}>
             <Input placeholder={t('alerts.ruleNamePlaceholder')} maxLength={128} />
           </Form.Item>
@@ -502,7 +507,7 @@ export default function Alerts() {
             <Input placeholder="https://hooks.example.com/alerts" allowClear />
           </Form.Item>
           <Space className="alert-form-footer">
-            <Button icon={<ExperimentOutlined />} loading={testing} onClick={handleTestWebhook}>
+            <Button icon={<ExperimentOutlined />} loading={testing} disabled={savingRule} onClick={handleTestWebhook}>
               {t('alerts.testWebhook')}
             </Button>
             <Form.Item name="enabled" valuePropName="checked" noStyle>

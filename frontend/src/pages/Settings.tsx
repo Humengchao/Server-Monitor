@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   App, Alert, Button, Card, ColorPicker, Col, Form, Input, Modal, Popconfirm, Row, Space, Table, Tag as AntTag, Typography,
 } from 'antd';
@@ -32,7 +32,7 @@ export default function Settings() {
   const [passwordForm] = Form.useForm<PasswordFormValues>();
   const [savingPassword, setSavingPassword] = useState(false);
 
-  const loadTags = async () => {
+  const loadTags = useCallback(async () => {
     setLoading(true);
     try {
       const res = await tagsApi.list();
@@ -41,13 +41,13 @@ export default function Settings() {
       message.error(t('settings.loadTagsFailed'));
     }
     setLoading(false);
-  };
+  }, [message, t]);
 
   useEffect(() => {
     // Deferred so the first fetch doesn't set state synchronously in the effect.
     const initial = window.setTimeout(() => loadTags(), 0);
     return () => window.clearTimeout(initial);
-  }, []);
+  }, [loadTags]);
 
   // antd's ColorPicker hands the form an AggregationColor object (not a hex
   // string) once the user picks a color; sending it raw makes the backend's
@@ -127,7 +127,7 @@ export default function Settings() {
       width: 90,
       render: (_: unknown, record: Tag) => (
         <Popconfirm title={t('settings.deleteTagConfirm')} onConfirm={() => handleDelete(record.id)}>
-          <Button type="text" danger icon={<DeleteOutlined />} />
+          <Button type="text" danger aria-label={t('common.delete')} icon={<DeleteOutlined />} />
         </Popconfirm>
       ),
     },

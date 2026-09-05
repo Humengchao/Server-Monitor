@@ -26,7 +26,8 @@ export default function LoginHistory() {
   };
 
   useEffect(() => {
-    fetchData(page);
+    const timer = window.setTimeout(() => { void fetchData(page); }, 0);
+    return () => window.clearTimeout(timer);
   }, [page]);
 
   const columns: ColumnsType<LoginHistoryItem> = [
@@ -73,6 +74,7 @@ export default function LoginHistory() {
         columns={columns}
         dataSource={records}
         loading={loading}
+        scroll={{ x: 640 }}
         pagination={{
           current: page,
           total,

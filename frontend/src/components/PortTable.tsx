@@ -178,7 +178,7 @@ export default function PortTable({ serverId }: Props) {
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
-          <Button icon={<ReloadOutlined />} onClick={() => load()} loading={loading} />
+          <Button aria-label={t('common.refresh')} icon={<ReloadOutlined />} onClick={() => load()} loading={loading} />
         </Space>
       </div>
 

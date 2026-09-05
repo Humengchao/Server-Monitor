@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { Collapse, Table, Tag, Button, Space, Typography, Spin, Empty, Drawer, App, Card, Tooltip } from 'antd';
+import { Collapse, Table, Tag, Button, Space, Typography, Spin, Empty, Drawer, App, Card, Tooltip, Result } from 'antd';
 import {
   ReloadOutlined, CaretRightOutlined, PauseOutlined, SyncOutlined, ArrowRightOutlined, FileTextOutlined, CodeOutlined,
   ContainerOutlined, CloudServerOutlined, CheckCircleOutlined, QuestionCircleOutlined, SearchOutlined,
@@ -44,16 +44,19 @@ function LogsModal({ serverId, containerId, containerName, onClose }: {
 
   useEffect(() => {
     const ac = new AbortController();
-    setLoading(true);
-    serversApi.getContainerLogs(serverId, containerId, 500, ac.signal)
-      .then((r) => setLogs(r.data.logs || t('docker.empty')))
-      .catch(() => {
-        if (!ac.signal.aborted) setLogs(t('docker.loadLogsFailed'));
-      })
-      .finally(() => {
-        if (!ac.signal.aborted) setLoading(false);
-      });
-    return () => ac.abort();
+    const timer = window.setTimeout(() => {
+      setLoading(true);
+      setLogs('');
+      void serversApi.getContainerLogs(serverId, containerId, 500, ac.signal)
+        .then((r) => setLogs(r.data.logs || t('docker.empty')))
+        .catch(() => {
+          if (!ac.signal.aborted) setLogs(t('docker.loadLogsFailed'));
+        })
+        .finally(() => {
+          if (!ac.signal.aborted) setLoading(false);
+        });
+    }, 0);
+    return () => { window.clearTimeout(timer); ac.abort(); };
   }, [serverId, containerId, t]);
 
   return (
@@ -100,7 +103,7 @@ function ExecDrawer({ serverId, containerId, containerName, open, onClose }: {
   // Read t through a ref inside socket callbacks so a language switch doesn't
   // tear down and restart the exec session just to retranslate messages.
   const tRef = useRef(t);
-  tRef.current = t;
+  useEffect(() => { tRef.current = t; }, [t]);
 
   useEffect(() => {
     if (!open || !containerId || !termRef.current) return;
@@ -119,7 +122,7 @@ function ExecDrawer({ serverId, containerId, containerName, open, onClose }: {
 
     // Use ResizeObserver for robust terminal sizing (replaces fragile 300ms timeout)
     const ro = new ResizeObserver(() => {
-      try { fitAddon.fit(); } catch {}
+      try { fitAddon.fit(); } catch { /* terminal may be disposed during unmount */ }
     });
     ro.observe(termRef.current!);
 
@@ -168,7 +171,7 @@ function ExecDrawer({ serverId, containerId, containerName, open, onClose }: {
     // Whenever the fit addon changes the terminal dimensions, tell the backend
     terminal.onResize(() => sendResize());
 
-    const handleResize = () => { try { fitAddon.fit(); } catch {} };
+    const handleResize = () => { try { fitAddon.fit(); } catch { /* terminal may be disposed during unmount */ } };
     window.addEventListener('resize', handleResize);
 
     return () => {
@@ -342,6 +345,7 @@ export default function Docker() {
   const [undetected, setUndetected] = useState<Server[]>([]);
   const [redetecting, setRedetecting] = useState<string | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [activeKeys, setActiveKeys] = useState<string[]>([]);
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -350,8 +354,29 @@ export default function Docker() {
 
   const expandServerId = searchParams.get('server');
 
+  // Each request costs an SSH round trip on the backend; the ref guards
+  // against duplicates when a panel is expanded while its initial load is
+  // still in flight (state in handleCollapseChange can be a render behind).
+  const inFlightRef = useRef<Set<string>>(new Set());
+
+  const loadContainers = useCallback(async (serverId: string) => {
+    if (inFlightRef.current.has(serverId)) return;
+    inFlightRef.current.add(serverId);
+    setServers((prev) => prev.map((s) => (s.server.id === serverId ? { ...s, loading: true } : s)));
+    try {
+      const res = await serversApi.getContainers(serverId);
+      setServers((prev) => prev.map((s) => (s.server.id === serverId ? { ...s, containers: res.data || [], loading: false, loaded: true } : s)));
+    } catch {
+      message.error(t('docker.loadFailed'));
+      setServers((prev) => prev.map((s) => (s.server.id === serverId ? { ...s, loading: false } : s)));
+    } finally {
+      inFlightRef.current.delete(serverId);
+    }
+  }, [message, t]);
+
   const loadServers = useCallback(async () => {
     setInitialLoading(true);
+    setLoadError(false);
     try {
       const res = await serversApi.list();
       const allServers = res.data || [];
@@ -375,33 +400,14 @@ export default function Docker() {
 
       // Load containers for all Docker servers in parallel
       for (const sd of withDocker) {
-        loadContainers(sd.server.id);
+        void loadContainers(sd.server.id);
       }
     } catch {
-      // ignore
+      setLoadError(true);
+      message.error(t('docker.loadFailed'));
     }
     setInitialLoading(false);
-  }, [expandServerId]);
-
-  // Each request costs an SSH round trip on the backend; the ref guards
-  // against duplicates when a panel is expanded while its initial load is
-  // still in flight (state in handleCollapseChange can be a render behind).
-  const inFlightRef = useRef<Set<string>>(new Set());
-
-  const loadContainers = async (serverId: string) => {
-    if (inFlightRef.current.has(serverId)) return;
-    inFlightRef.current.add(serverId);
-    setServers((prev) => prev.map((s) => (s.server.id === serverId ? { ...s, loading: true } : s)));
-    try {
-      const res = await serversApi.getContainers(serverId);
-      setServers((prev) => prev.map((s) => (s.server.id === serverId ? { ...s, containers: res.data || [], loading: false, loaded: true } : s)));
-    } catch {
-      message.error(t('docker.loadFailed'));
-      setServers((prev) => prev.map((s) => (s.server.id === serverId ? { ...s, loading: false } : s)));
-    } finally {
-      inFlightRef.current.delete(serverId);
-    }
-  };
+  }, [expandServerId, loadContainers, message, t]);
 
   const handleAction = async (serverId: string, containerId: string, action: 'start' | 'stop' | 'restart') => {
     try {
@@ -414,7 +420,8 @@ export default function Docker() {
   };
 
   useEffect(() => {
-    loadServers();
+    const timer = window.setTimeout(() => { void loadServers(); }, 0);
+    return () => window.clearTimeout(timer);
   }, [loadServers]);
 
   const getColumns = (serverId: string): ColumnsType<DockerContainer> => [
@@ -594,6 +601,12 @@ export default function Docker() {
 
       {initialLoading ? (
         <div style={{ textAlign: 'center', padding: 80 }}><Spin size="large" /></div>
+      ) : loadError ? (
+        <Result
+          status="error"
+          title={t('docker.loadFailed')}
+          extra={<Button type="primary" icon={<ReloadOutlined />} onClick={loadServers}>{t('common.refresh')}</Button>}
+        />
       ) : (
         <>
           {servers.length === 0 ? (
@@ -637,7 +650,7 @@ export default function Docker() {
                           {t('docker.redetect')}
                         </Button>
                       </Tooltip>
-                      <Button size="small" type="text" icon={<ArrowRightOutlined />} onClick={() => navigate(`/servers/${server.id}`)} />
+                      <Button size="small" type="text" aria-label={t('docker.serverDetail')} icon={<ArrowRightOutlined />} onClick={() => navigate(`/servers/${server.id}`)} />
                     </Space>
                   </div>
                 ))}

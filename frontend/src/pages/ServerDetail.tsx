@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo, Suspense, lazy } from
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Typography, Tag, Space, Button, Card, Tabs, Spin, Modal, Form, Input, InputNumber, Select,
-  App, Row, Col, Empty, Progress, Segmented, Tooltip,
+  App, Row, Col, Empty, Progress, Segmented, Tooltip, Result,
 } from 'antd';
 import {
   ArrowLeftOutlined, EditOutlined, DeleteOutlined, DockerOutlined, KeyOutlined, SaveOutlined,
@@ -39,6 +39,28 @@ const { Title } = Typography;
 const { RangePicker } = DatePicker;
 
 type PresetKey = '1h' | 'today' | 'yesterday' | '7d' | '30d';
+
+interface ServerFormValues {
+  name: string;
+  host: string;
+  port?: number;
+  ssh_username?: string;
+  ssh_password?: string;
+  ssh_key?: string;
+  ssh_host_key?: string;
+  server_type?: string;
+  expires_at?: Dayjs | null;
+  billing_price?: number;
+  billing_currency?: string;
+  billing_cycle?: string;
+  traffic_limit_gb?: number;
+  public_location?: string;
+}
+
+function apiError(err: unknown, fallback: string): string {
+  const detail = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+  return detail || fallback;
+}
 
 function getPresetRange(key: PresetKey): TimeRange {
   const now = dayjs();
@@ -122,8 +144,12 @@ export default function ServerDetail() {
   const navigate = useNavigate();
   const [server, setServer] = useState<Server | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
-  const [form] = Form.useForm();
+  const [savingServer, setSavingServer] = useState(false);
+  const [savingNotes, setSavingNotes] = useState(false);
+  const [form] = Form.useForm<ServerFormValues>();
+  const serverType = Form.useWatch('server_type', form) || 'linux';
   const [tagValues, setTagValues] = useState<string[]>([]);
   const [selectedCredential, setSelectedCredential] = useState<string | undefined>(undefined);
   const [dockerInstalled, setDockerInstalled] = useState<boolean | null>(null);
@@ -153,6 +179,7 @@ export default function ServerDetail() {
   ];
 
   const loadServer = useCallback(async () => {
+    setLoadError(false);
     try {
       const res = await serversApi.get(id!);
       const found = res.data;
@@ -160,10 +187,12 @@ export default function ServerDetail() {
       setDockerInstalled(found.has_docker);
       setNotes(found.notes || '');
       setNotesChanged(false);
-    } catch (err: any) {
-      if (err?.response?.status === 404) {
+    } catch (err: unknown) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      if (status === 404) {
         setServer(null);
       } else {
+        setLoadError(true);
         message.error(t('server.loadFailed'));
       }
     }
@@ -171,8 +200,9 @@ export default function ServerDetail() {
   }, [id, message, t]);
 
   useEffect(() => {
-    loadServer();
-  }, [id]);
+    const timer = window.setTimeout(() => { void loadServer(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadServer]);
 
   const handlePreset = (key: PresetKey) => {
     setActivePreset(key);
@@ -213,14 +243,19 @@ export default function ServerDetail() {
     setModalOpen(true);
   };
 
-  const handleSubmit = async (values: any) => {
+  const handleSubmit = async (values: ServerFormValues) => {
     if (!server) return;
+    setSavingServer(true);
     try {
       const payload = {
         ...values,
         name: typeof values.name === 'string' ? values.name.trim() : values.name,
         host: typeof values.host === 'string' ? values.host.trim() : values.host,
         ssh_username: typeof values.ssh_username === 'string' ? values.ssh_username.trim() : values.ssh_username,
+        // Do not send stale direct-auth values while a shared credential is
+        // selected; the fields are intentionally hidden in that mode.
+        ssh_password: selectedCredential ? undefined : values.ssh_password,
+        ssh_key: selectedCredential ? undefined : values.ssh_key,
         credential_id: selectedCredential || null,
         server_type: values.server_type || 'linux',
         expires_at: values.expires_at ? values.expires_at.toISOString() : null,
@@ -232,8 +267,10 @@ export default function ServerDetail() {
       message.success(t('server.updated'));
       setModalOpen(false);
       loadServer();
-    } catch (err: any) {
-      message.error(err.response?.data?.error || t('server.updateFailed'));
+    } catch (err: unknown) {
+      message.error(apiError(err, t('server.updateFailed')));
+    } finally {
+      setSavingServer(false);
     }
   };
 
@@ -258,6 +295,7 @@ export default function ServerDetail() {
 
   const handleSaveNotes = async () => {
     if (!server) return;
+    setSavingNotes(true);
     try {
       await serversApi.update(server.id, {
         name: server.name,
@@ -280,6 +318,8 @@ export default function ServerDetail() {
       setNotesChanged(false);
     } catch {
       message.error(t('server.notesSaveFailed'));
+    } finally {
+      setSavingNotes(false);
     }
   };
 
@@ -318,7 +358,14 @@ export default function ServerDetail() {
   const diskPercent = metrics && server ? percentOf(metrics.disk_used, server.disk_total) : 0;
 
   if (loading) return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}><Spin size="large" /></div>;
-  if (!server) return <div className="empty-state"><Empty description={t('server.notFound')} /></div>;
+  if (loadError) return <Result status="error" title={t('server.loadFailed')} extra={<Button type="primary" onClick={() => { void loadServer(); }}>{t('common.refresh')}</Button>} />;
+  if (!server) return (
+    <Result
+      status="404"
+      title={t('server.notFound')}
+      extra={<Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/dashboard')}>{t('common.back')}</Button>}
+    />
+  );
 
   return (
     <div className={`server-detail-page${activeTab === 'terminal' ? ' server-detail-page--terminal' : ''}`}>
@@ -535,6 +582,7 @@ export default function ServerDetail() {
                   type="primary"
                   icon={<SaveOutlined />}
                   disabled={!notesChanged}
+                  loading={savingNotes}
                   onClick={handleSaveNotes}
                 >
                   {t('common.save')}
@@ -548,11 +596,12 @@ export default function ServerDetail() {
       <Modal
         title={t('server.edit')}
         open={modalOpen}
-        onCancel={() => setModalOpen(false)}
+        onCancel={() => { if (!savingServer) setModalOpen(false); }}
         onOk={() => form.submit()}
+        confirmLoading={savingServer}
         width={680}
       >
-        <Form form={form} layout="vertical" onFinish={handleSubmit}>
+        <Form form={form} layout="vertical" onFinish={handleSubmit} disabled={savingServer}>
           <Form.Item name="name" label={t('server.serverName')} rules={[{ required: true }]}>
             <Input placeholder={t('server.serverNamePlaceholder')} />
           </Form.Item>
@@ -563,13 +612,13 @@ export default function ServerDetail() {
             <InputNumber min={1} max={65535} style={{ width: '100%' }} />
           </Form.Item>
           <Form.Item name="server_type" label={t('server.type')} initialValue="linux">
-            <Select>
+            <Select onChange={() => setSelectedCredential(undefined)}>
               <Select.Option value="linux"><AppleOutlined /> Linux</Select.Option>
               <Select.Option value="windows"><WindowsOutlined /> Windows</Select.Option>
             </Select>
           </Form.Item>
           <Form.Item label={t('server.credential')}>
-            <CredentialSelect value={selectedCredential} onChange={setSelectedCredential} serverType={form.getFieldValue('server_type') || 'linux'} />
+            <CredentialSelect value={selectedCredential} onChange={setSelectedCredential} serverType={serverType} />
           </Form.Item>
           {!selectedCredential && (
             <>

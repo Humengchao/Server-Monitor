@@ -27,18 +27,22 @@ interface Props {
   firing?: Map<string, AlertEvent[]>;
 }
 
-function MiniBar({ percent, hue, label }: { percent: number; hue: 'blue' | 'green' | 'violet'; label?: string }) {
+function MiniBar({ percent, hue, label }: { percent: number | null; hue: 'blue' | 'green' | 'violet'; label?: string }) {
   return (
     <Tooltip title={label}>
       <div className="mini-bar">
-        <Progress
-          percent={percent}
-          showInfo={false}
-          size="small"
-          strokeColor={severityColor(percent, hue)}
-          railColor="rgba(128, 140, 170, .16)"
-        />
-        <span>{percent}%</span>
+        {percent === null ? <span>—</span> : (
+          <>
+            <Progress
+              percent={percent}
+              showInfo={false}
+              size="small"
+              strokeColor={severityColor(percent, hue)}
+              railColor="rgba(128, 140, 170, .16)"
+            />
+            <span>{percent}%</span>
+          </>
+        )}
       </div>
     </Tooltip>
   );
@@ -102,7 +106,7 @@ export default function ServerTable({
       key: 'cpu',
       width: 130,
       render: (_: unknown, server: Server) => (
-        <MiniBar percent={Math.round(server.latest_metrics?.cpu_percent || 0)} hue="blue" />
+        <MiniBar percent={server.latest_metrics ? Math.round(server.latest_metrics.cpu_percent) : null} hue="blue" />
       ),
     },
     {
@@ -113,7 +117,7 @@ export default function ServerTable({
         const m = server.latest_metrics;
         return (
           <MiniBar
-            percent={m ? percentOf(m.memory_used, m.memory_total) : 0}
+            percent={m ? percentOf(m.memory_used, m.memory_total) : null}
             hue="green"
             label={m ? `${formatBytes(m.memory_used)} / ${formatBytes(m.memory_total)}` : undefined}
           />
@@ -128,7 +132,7 @@ export default function ServerTable({
         const m = server.latest_metrics;
         return (
           <MiniBar
-            percent={m ? percentOf(m.disk_used, server.disk_total) : 0}
+            percent={m ? percentOf(m.disk_used, server.disk_total) : null}
             hue="violet"
             label={m ? `${formatBytes(m.disk_used)} / ${formatBytes(server.disk_total)}` : undefined}
           />
@@ -196,8 +200,8 @@ export default function ServerTable({
       // their own click.
       render: (_: unknown, server: Server) => (
         <Space size={0} onClick={(event) => event.stopPropagation()}>
-          {onEdit && <Button type="text" size="small" icon={<EditOutlined />} onClick={() => onEdit(server)} />}
-          {onDelete && <Button type="text" size="small" danger icon={<DeleteOutlined />} onClick={() => onDelete(server)} />}
+          {onEdit && <Button type="text" size="small" aria-label={t('common.edit')} icon={<EditOutlined />} onClick={() => onEdit(server)} />}
+          {onDelete && <Button type="text" size="small" danger aria-label={t('common.delete')} icon={<DeleteOutlined />} onClick={() => onDelete(server)} />}
         </Space>
       ),
     }] : []),
@@ -221,6 +225,7 @@ export default function ServerTable({
         fixed: true,
       } : undefined}
       onRow={(server) => ({
+        tabIndex: 0,
         // While selecting, a row click toggles the checkbox instead of
         // navigating away mid-selection.
         onClick: () => {
@@ -232,6 +237,20 @@ export default function ServerTable({
             ? selectedIds!.filter((id) => id !== server.id)
             : [...selectedIds!, server.id];
           onSelectionChange?.(next);
+        },
+        onKeyDown: (event) => {
+          if (event.target !== event.currentTarget) return;
+          if (event.key === 'Enter' || (selecting && event.key === ' ')) {
+            event.preventDefault();
+            if (!selecting) {
+              navigate(`/servers/${server.id}`);
+              return;
+            }
+            const next = selectedIds!.includes(server.id)
+              ? selectedIds!.filter((id) => id !== server.id)
+              : [...selectedIds!, server.id];
+            onSelectionChange?.(next);
+          }
         },
         style: { cursor: 'pointer' },
       })}

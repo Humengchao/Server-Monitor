@@ -9,6 +9,7 @@
   "nav.logout": "退出登录",
   "nav.workspace": "工作台",
   "nav.systemOnline": "系统运行正常",
+  "nav.networkOffline": "网络连接已断开，页面数据将在恢复后自动更新",
   "nav.loginHistory": "登录历史",
   "common.name": "名称",
   "common.actions": "操作",

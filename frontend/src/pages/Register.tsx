@@ -7,6 +7,11 @@ import { authApi } from '../api/auth';
 
 const { Title, Text } = Typography;
 
+function apiError(err: unknown, fallback: string): string {
+  const detail = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+  return detail || fallback;
+}
+
 export default function Register() {
   const { t } = useTranslation();
   const { message } = App.useApp();
@@ -19,8 +24,8 @@ export default function Register() {
       await authApi.register(values.username, values.password);
       message.success(t('register.success'));
       navigate('/login');
-    } catch (err: any) {
-      message.error(err.response?.data?.error || t('register.failed'));
+    } catch (err: unknown) {
+      message.error(apiError(err, t('register.failed')));
     }
     setLoading(false);
   };
@@ -54,13 +59,13 @@ export default function Register() {
             { required: true, message: t('register.usernameRequired') },
             { min: 3, message: t('register.usernameMin') },
           ]}>
-            <Input prefix={<UserOutlined />} placeholder={t('register.usernamePlaceholder')} />
+            <Input autoComplete="username" prefix={<UserOutlined />} placeholder={t('register.usernamePlaceholder')} />
           </Form.Item>
           <Form.Item name="password" rules={[
             { required: true, message: t('register.passwordRequired') },
             { min: 6, message: t('register.passwordMin') },
           ]}>
-            <Input.Password prefix={<LockOutlined />} placeholder={t('register.passwordPlaceholder')} />
+            <Input.Password autoComplete="new-password" prefix={<LockOutlined />} placeholder={t('register.passwordPlaceholder')} />
           </Form.Item>
           <Form.Item className="auth-submit">
             <Button type="primary" htmlType="submit" loading={loading} block>

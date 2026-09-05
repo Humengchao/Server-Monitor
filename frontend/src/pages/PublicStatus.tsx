@@ -237,7 +237,7 @@ export default function PublicStatus() {
               <button className={view === 'list' ? 'active' : ''} onClick={() => setView('list')} aria-label={t('probe.listView')}><BarsOutlined /></button>
             </div>
             <Input allowClear prefix={<SearchOutlined />} value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('probe.searchPlaceholder')} />
-            <Button className="probe-refresh" icon={<ReloadOutlined />} loading={loading} onClick={() => loadStatus(true)} />
+          <Button className="probe-refresh" aria-label={t('common.refresh')} icon={<ReloadOutlined />} loading={loading} onClick={() => loadStatus(true)} />
           </div>
         </section>
 

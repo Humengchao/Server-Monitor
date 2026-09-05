@@ -12,6 +12,7 @@ import {
   KeyOutlined,
   BellOutlined,
   TranslationOutlined,
+  DisconnectOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -33,6 +34,18 @@ export default function AppLayout({ darkMode, onToggleTheme }: Props) {
   const { user, logout } = useAuthStore();
   const { t, i18n } = useTranslation();
   const [activeAlerts, setActiveAlerts] = useState(0);
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   const refreshAlertBadge = useCallback(() => {
     alertsApi.summary()
@@ -125,12 +138,12 @@ export default function AppLayout({ darkMode, onToggleTheme }: Props) {
               </Badge>
             </Tooltip>
             <Tooltip title={i18n.language === 'en' ? '切换到中文' : 'Switch to English'}>
-              <Button className="header-icon-button" type="text" icon={<TranslationOutlined />} onClick={toggleLang}>
+              <Button className="header-icon-button" type="text" aria-label={i18n.language === 'en' ? '切换到中文' : 'Switch to English'} icon={<TranslationOutlined />} onClick={toggleLang}>
                 <span className="header-action-text">{i18n.language === 'en' ? '中文' : 'EN'}</span>
               </Button>
             </Tooltip>
             <Tooltip title={darkMode ? t('theme.light') : t('theme.dark')}>
-              <Button className="header-icon-button" type="text" icon={darkMode ? <SunOutlined /> : <MoonOutlined />} onClick={onToggleTheme} />
+              <Button className="header-icon-button" type="text" aria-label={darkMode ? t('theme.light') : t('theme.dark')} icon={darkMode ? <SunOutlined /> : <MoonOutlined />} onClick={onToggleTheme} />
             </Tooltip>
             <div className="header-divider" />
             <div className="user-chip">
@@ -138,12 +151,20 @@ export default function AppLayout({ darkMode, onToggleTheme }: Props) {
               <span>{user?.username}</span>
             </div>
             <Tooltip title={t('nav.logout')}>
-              <Button className="header-icon-button" type="text" icon={<LogoutOutlined />} onClick={handleLogout} />
+              <Button className="header-icon-button" type="text" aria-label={t('nav.logout')} icon={<LogoutOutlined />} onClick={handleLogout} />
             </Tooltip>
           </Space>
         </Header>
         <Content className="app-content">
-          <div className="content-inner"><Outlet /></div>
+          <div className="content-inner">
+            {!isOnline && (
+              <div className="network-banner" role="status" aria-live="polite">
+                <DisconnectOutlined />
+                <span>{t('nav.networkOffline')}</span>
+              </div>
+            )}
+            <Outlet />
+          </div>
         </Content>
       </AntLayout>
     </AntLayout>

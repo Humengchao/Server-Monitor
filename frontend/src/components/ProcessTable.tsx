@@ -199,7 +199,7 @@ export default function ProcessTable({ serverId, serverType }: Props) {
       render: (_: unknown, proc: ProcessInfo) => (
         <Space size={0}>
           <Tooltip title={t('process.terminate')}>
-            <Button type="text" size="small" icon={<CloseCircleOutlined />} onClick={() => handleKill(proc, false)} />
+            <Button type="text" size="small" aria-label={`${t('process.terminate')} ${proc.command || proc.pid}`} icon={<CloseCircleOutlined />} onClick={() => handleKill(proc, false)} />
           </Tooltip>
           {serverType !== 'windows' && (
             <Tooltip title={t('process.kill')}>
@@ -247,7 +247,7 @@ export default function ProcessTable({ serverId, serverType }: Props) {
               { value: 'paused', icon: <Tooltip title={t('process.pause')}><PauseCircleOutlined /></Tooltip> },
             ]}
           />
-          <Button icon={<ReloadOutlined />} onClick={() => load()} loading={loading} />
+          <Button aria-label={t('common.refresh')} icon={<ReloadOutlined />} onClick={() => load()} loading={loading} />
         </Space>
       </div>
 

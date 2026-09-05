@@ -70,6 +70,9 @@ function ServerCard({
       role={selectable ? 'checkbox' : undefined}
       aria-checked={selectable ? !!selected : undefined}
       onKeyDown={(event) => {
+        // Do not open/toggle the card when Enter/Space is used on an action
+        // button inside it.
+        if (event.target !== event.currentTarget) return;
         if (event.key === 'Enter' || (selectable && event.key === ' ')) {
           event.preventDefault();
           activate();
@@ -105,12 +108,12 @@ function ServerCard({
         <div className="server-card-actions" onClick={(event) => event.stopPropagation()}>
           {onEdit && (
             <Tooltip title={t('common.edit')}>
-              <Button size="small" type="text" icon={<EditOutlined />} onClick={() => onEdit(server)} />
+              <Button size="small" type="text" aria-label={t('common.edit')} icon={<EditOutlined />} onClick={() => onEdit(server)} />
             </Tooltip>
           )}
           {onDelete && (
             <Tooltip title={t('common.delete')}>
-              <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => onDelete(server)} />
+              <Button size="small" type="text" danger aria-label={t('common.delete')} icon={<DeleteOutlined />} onClick={() => onDelete(server)} />
             </Tooltip>
           )}
         </div>

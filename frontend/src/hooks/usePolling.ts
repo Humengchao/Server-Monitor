@@ -26,11 +26,13 @@ export interface PollingOptions {
  *
  * The callback is read through a ref, so a caller may pass a fresh closure on
  * every render (a `t`-dependent loader, say) without restarting the interval or
- * firing an extra request.
+ * firing an extra request. Async callbacks are serialized: a slow request cannot
+ * pile up behind every timer tick and then overwrite newer data.
  */
-export function usePolling(callback: () => void, intervalMs: number, options: PollingOptions = {}) {
+export function usePolling(callback: () => void | Promise<void>, intervalMs: number, options: PollingOptions = {}) {
   const { leading = true, enabled = true } = options;
   const callbackRef = useRef(callback);
+  const runningRef = useRef(false);
 
   // Synced in an effect rather than during render: writing a ref while
   // rendering is not allowed. Declared before the interval effect so the ref is
@@ -44,24 +46,35 @@ export function usePolling(callback: () => void, intervalMs: number, options: Po
 
     let missedTick = false;
 
+    const run = () => {
+      if (runningRef.current) return;
+      runningRef.current = true;
+      Promise.resolve()
+        .then(() => callbackRef.current())
+        .catch(() => undefined)
+        .finally(() => {
+          runningRef.current = false;
+        });
+    };
+
     const tick = () => {
       if (document.hidden) {
         missedTick = true;
         return;
       }
-      callbackRef.current();
+      run();
     };
 
     const onVisibilityChange = () => {
       if (!document.hidden && missedTick) {
         missedTick = false;
-        callbackRef.current();
+        run();
       }
     };
 
     // Deferred so the first call never sets state synchronously inside an
     // effect body, which would cascade renders.
-    const initial = leading ? window.setTimeout(() => callbackRef.current(), 0) : undefined;
+    const initial = leading ? window.setTimeout(run, 0) : undefined;
     const timer = window.setInterval(tick, intervalMs);
     document.addEventListener('visibilitychange', onVisibilityChange);
 

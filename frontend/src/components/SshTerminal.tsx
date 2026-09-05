@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useContext } from 'react';
+import React, { useRef, useEffect, useState, useContext, useCallback } from 'react';
 import { Terminal } from 'xterm';
 import type { ITheme } from 'xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -6,7 +6,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Button, Space, App } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import { DarkModeContext } from '../App';
+import { DarkModeContext } from '../contexts/DarkModeContext';
 import 'xterm/css/xterm.css';
 
 interface Props {
@@ -39,6 +39,9 @@ export default function SshTerminal({ serverId }: Props) {
   const { t } = useTranslation();
   const { message } = App.useApp();
   const darkMode = useContext(DarkModeContext);
+  const darkModeRef = useRef(darkMode);
+  const tRef = useRef(t);
+  const messageRef = useRef(message);
   const termRef = useRef<HTMLDivElement>(null);
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
@@ -47,12 +50,18 @@ export default function SshTerminal({ serverId }: Props) {
 
   // Retheme the live terminal instantly when the app theme toggles
   useEffect(() => {
+    darkModeRef.current = darkMode;
     if (terminalRef.current) {
       terminalRef.current.options.theme = darkMode ? darkTheme : lightTheme;
     }
   }, [darkMode]);
 
-  const connect = () => {
+  useEffect(() => {
+    tRef.current = t;
+    messageRef.current = message;
+  }, [message, t]);
+
+  const connect = useCallback(() => {
     // Tear down any previous terminal/socket before creating a new one
     cleanupRef.current?.();
 
@@ -60,7 +69,7 @@ export default function SshTerminal({ serverId }: Props) {
       cursorBlink: true,
       fontSize: 14,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      theme: darkMode ? darkTheme : lightTheme,
+      theme: darkModeRef.current ? darkTheme : lightTheme,
     });
     terminalRef.current = terminal;
 
@@ -74,7 +83,11 @@ export default function SshTerminal({ serverId }: Props) {
 
     // ResizeObserver keeps terminal filling the container on any layout change
     const ro = new ResizeObserver(() => {
-      try { fitAddon.fit(); } catch {}
+      try {
+        fitAddon.fit();
+      } catch {
+        // The terminal may already be disposed during a concurrent resize.
+      }
     });
     ro.observe(termRef.current!);
 
@@ -91,7 +104,7 @@ export default function SshTerminal({ serverId }: Props) {
     ws.onopen = () => {
       setConnected(true);
       sendResize(ws, terminal); // sync PTY size with the fitted terminal
-      terminal.write(t('terminal.connected') + '\r\n');
+      terminal.write(tRef.current('terminal.connected') + '\r\n');
     };
 
     ws.onmessage = (ev) => {
@@ -100,11 +113,11 @@ export default function SshTerminal({ serverId }: Props) {
 
     ws.onclose = () => {
       setConnected(false);
-      terminal.write('\r\n' + t('terminal.disconnected') + '\r\n');
+      terminal.write('\r\n' + tRef.current('terminal.disconnected') + '\r\n');
     };
 
     ws.onerror = () => {
-      message.error(t('terminal.connFailed'));
+      messageRef.current.error(tRef.current('terminal.connFailed'));
     };
 
     terminal.onData((data) => {
@@ -132,7 +145,7 @@ export default function SshTerminal({ serverId }: Props) {
     };
     cleanupRef.current = cleanup;
     return cleanup;
-  };
+  }, [serverId]);
 
   useEffect(() => {
     connect();
@@ -140,7 +153,7 @@ export default function SshTerminal({ serverId }: Props) {
       cleanupRef.current?.();
       cleanupRef.current = null;
     };
-  }, [serverId]);
+  }, [connect]);
 
   const handleReconnect = () => {
     connect();

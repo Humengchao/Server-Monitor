@@ -20,6 +20,7 @@ export default function CredentialSelect({ value, onChange, serverType }: Props)
   const [newUsername, setNewUsername] = useState('root');
   const [newPassword, setNewPassword] = useState('');
   const [newKey, setNewKey] = useState('');
+  const [creating, setCreating] = useState(false);
 
   const loadCreds = async () => {
     setLoading(true);
@@ -33,11 +34,15 @@ export default function CredentialSelect({ value, onChange, serverType }: Props)
   };
 
   useEffect(() => {
-    loadCreds();
+    // Defer the initial request so the effect itself does not synchronously
+    // trigger state updates during the commit phase.
+    const timer = window.setTimeout(() => { void loadCreds(); }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
+    setCreating(true);
     try {
       const res = await credentialsApi.create({
         name: newName.trim(),
@@ -46,7 +51,7 @@ export default function CredentialSelect({ value, onChange, serverType }: Props)
         ssh_key: newKey,
         credential_type: serverType || 'linux',
       });
-      setCreds([res.data, ...creds]);
+      setCreds((prev) => [res.data, ...prev]);
       onChange?.(res.data.id);
       setNewName('');
       setNewUsername('root');
@@ -56,6 +61,8 @@ export default function CredentialSelect({ value, onChange, serverType }: Props)
       message.success(t('credential.created'));
     } catch {
       message.error(t('credential.createFailed'));
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -101,8 +108,8 @@ export default function CredentialSelect({ value, onChange, serverType }: Props)
                   style={{ fontSize: 12 }}
                 />
                 <Space>
-                  <Button size="small" type="primary" onClick={handleCreate}>{t('common.create')}</Button>
-                  <Button size="small" onClick={() => setShowNew(false)}>{t('common.cancel')}</Button>
+                  <Button size="small" type="primary" loading={creating} disabled={!newName.trim()} onClick={handleCreate}>{t('common.create')}</Button>
+                  <Button size="small" disabled={creating} onClick={() => setShowNew(false)}>{t('common.cancel')}</Button>
                 </Space>
               </Space>
             ) : (

@@ -9,6 +9,7 @@
   "nav.logout": "Logout",
   "nav.workspace": "Workspace",
   "nav.systemOnline": "All systems operational",
+  "nav.networkOffline": "Network connection lost. Data will refresh when it returns.",
   "nav.loginHistory": "Login History",
   "common.name": "Name",
   "common.actions": "Actions",

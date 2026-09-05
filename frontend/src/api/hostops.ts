@@ -72,12 +72,12 @@ export function serviceStateColor(active: string): string {
 
 export const hostOpsApi = {
   services: (id: string, signal?: AbortSignal) =>
-    client.get<ServiceListResponse>(`/servers/${id}/services`, { signal }),
+    client.get<ServiceListResponse>(`/servers/${id}/services`, { signal, timeout: 20000 }),
   controlService: (id: string, name: string, action: ServiceAction) =>
     client.post<{ message: string }>(`/servers/${id}/services/control`, { name, action },
       // The host's own refusal ("Access denied") is the useful part of a 502
       // here, so it must reach the caller rather than trigger a redirect.
-      { skipAuthRedirect: true }),
+      { skipAuthRedirect: true, timeout: 20000 }),
   ports: (id: string, signal?: AbortSignal) =>
-    client.get<PortListResponse>(`/servers/${id}/ports`, { signal }),
+    client.get<PortListResponse>(`/servers/${id}/ports`, { signal, timeout: 20000 }),
 };

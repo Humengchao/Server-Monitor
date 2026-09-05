@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Row, Col, Button, Modal, Form, Input, InputNumber, Select, Segmented, Tooltip,
-  Typography, Space, App, Card, Skeleton, Empty
+  Typography, Space, App, Card, Skeleton, Empty, Result
 } from 'antd';
 import { DatePicker } from 'antd';
-import dayjs from 'dayjs';
+import dayjs, { Dayjs } from 'dayjs';
 import {
   PlusOutlined, ReloadOutlined, FilterOutlined, SafetyOutlined, WindowsOutlined, AppleOutlined,
   CloudServerOutlined, CheckCircleOutlined, DisconnectOutlined, SearchOutlined, AppstoreOutlined,
@@ -32,6 +32,28 @@ const ONLINE_WINDOW_MS = 120000;
 type StatusFilter = 'all' | 'online' | 'offline';
 type SortKey = 'default' | 'name' | 'cpu' | 'memory' | 'disk' | 'uptime' | 'expiry';
 type ViewMode = 'grid' | 'list';
+
+interface ServerFormValues {
+  name: string;
+  host: string;
+  port?: number;
+  ssh_username?: string;
+  ssh_password?: string;
+  ssh_key?: string;
+  ssh_host_key?: string;
+  server_type?: string;
+  expires_at?: Dayjs | null;
+  billing_price?: number;
+  billing_currency?: string;
+  billing_cycle?: string;
+  traffic_limit_gb?: number;
+  public_location?: string;
+}
+
+function apiError(err: unknown, fallback: string): string {
+  const detail = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+  return detail || fallback;
+}
 
 // ipwho.is supports HTTPS on the free tier; the previous ip-api.com endpoint
 // was HTTP-only and got blocked as mixed content on HTTPS deployments.
@@ -64,9 +86,13 @@ export default function Dashboard() {
   const { message, modal, notification } = App.useApp();
   const [servers, setServers] = useState<Server[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const loadInFlightRef = useRef(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [savingServer, setSavingServer] = useState(false);
   const [editingServer, setEditingServer] = useState<Server | null>(null);
-  const [form] = Form.useForm();
+  const [form] = Form.useForm<ServerFormValues>();
+  const serverType = Form.useWatch('server_type', form) || 'linux';
   const [tagValues, setTagValues] = useState<string[]>([]);
   const [filterTagIds, setFilterTagIds] = useState<string[]>([]);
   const [selectedCredential, setSelectedCredential] = useState<string | undefined>(undefined);
@@ -144,13 +170,19 @@ export default function Dashboard() {
         showNotification(currentDesc, lastDesc);
       })
       .catch(() => { clearTimeout(ipTimer); /* silently degrade */ });
-  }, []);
+  }, [notification, t]);
 
   const loadServers = useCallback(async (showLoading = true) => {
-    if (showLoading) setLoading(true);
+    if (loadInFlightRef.current) return;
+    loadInFlightRef.current = true;
+    if (showLoading) {
+      setLoading(true);
+      setLoadError(false);
+    }
     try {
       const res = await serversApi.list();
       setServers(res.data || []);
+      setLoadError(false);
       // Judge online/offline against the server's clock (Date header), not the
       // browser's: local clock skew beyond the 2-minute threshold would
       // otherwise flip every card to offline (or keep dead ones online).
@@ -158,24 +190,35 @@ export default function Dashboard() {
       const serverNow = typeof dateHeader === 'string' ? Date.parse(dateHeader) : NaN;
       setRefreshTimestamp(Number.isNaN(serverNow) ? Date.now() : serverNow);
     } catch {
-      if (showLoading) message.error(t('server.loadFailed'));
+      if (showLoading) {
+        setLoadError(true);
+        message.error(t('server.loadFailed'));
+      }
+    } finally {
+      if (showLoading) setLoading(false);
+      loadInFlightRef.current = false;
     }
-    if (showLoading) setLoading(false);
   }, [message, t]);
 
   usePolling(() => loadServers(false), 3000, { leading: false });
 
   useEffect(() => {
-    loadServers();
+    const timer = window.setTimeout(() => { void loadServers(); }, 0);
+    return () => window.clearTimeout(timer);
   }, [loadServers]);
 
-  const handleSubmit = async (values: any) => {
+  const handleSubmit = async (values: ServerFormValues) => {
+    setSavingServer(true);
     try {
       const payload = {
         ...values,
         name: typeof values.name === 'string' ? values.name.trim() : values.name,
         host: typeof values.host === 'string' ? values.host.trim() : values.host,
         ssh_username: typeof values.ssh_username === 'string' ? values.ssh_username.trim() : values.ssh_username,
+        // When a shared credential is selected, do not submit stale values
+        // from the unmounted direct-auth fields.
+        ssh_password: selectedCredential ? undefined : values.ssh_password,
+        ssh_key: selectedCredential ? undefined : values.ssh_key,
         credential_id: selectedCredential || null,
         server_type: values.server_type || 'linux',
         expires_at: values.expires_at ? values.expires_at.toISOString() : null,
@@ -199,8 +242,10 @@ export default function Dashboard() {
       setSelectedCredential(undefined);
       setEditingServer(null);
       loadServers();
-    } catch (err: any) {
-      message.error(err.response?.data?.error || t('server.operationFailed'));
+    } catch (err: unknown) {
+      message.error(apiError(err, t('server.operationFailed')));
+    } finally {
+      setSavingServer(false);
     }
   };
 
@@ -484,6 +529,7 @@ export default function Dashboard() {
           <Tooltip title={selecting ? t('batch.exitSelection') : t('batch.enterSelection')}>
             <Button
               type={selecting ? 'primary' : 'default'}
+              aria-label={selecting ? t('batch.exitSelection') : t('batch.enterSelection')}
               icon={<CheckSquareOutlined />}
               onClick={() => (selecting ? exitSelection() : setSelecting(true))}
             />
@@ -506,12 +552,34 @@ export default function Dashboard() {
 
       {loading ? (
         <Row gutter={[18, 18]}>{[1, 2, 3, 4].map((item) => <Col key={item} xs={24} sm={12} xl={6}><Card className="server-card"><Skeleton active /></Card></Col>)}</Row>
+      ) : loadError && servers.length === 0 ? (
+        <Result
+          status="error"
+          title={t('server.loadFailed')}
+          extra={<Button type="primary" icon={<ReloadOutlined />} onClick={() => { void loadServers(); }}>{t('common.refresh')}</Button>}
+        />
       ) : filteredServers.length === 0 ? (
         <div className="empty-state">
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
             description={servers.length === 0 ? t('server.empty') : t('dashboard.noMatches')}
-          />
+          >
+            {servers.length === 0 && (
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={() => {
+                  setEditingServer(null);
+                  form.resetFields();
+                  setTagValues([]);
+                  setSelectedCredential(undefined);
+                  setModalOpen(true);
+                }}
+              >
+                {t('server.add')}
+              </Button>
+            )}
+          </Empty>
         </div>
       ) : view === 'list' ? (
         <ServerTable
@@ -557,11 +625,12 @@ export default function Dashboard() {
       <Modal
         title={editingServer ? t('server.edit') : t('server.add')}
         open={modalOpen}
-        onCancel={() => { setModalOpen(false); setEditingServer(null); }}
+        onCancel={() => { if (!savingServer) { setModalOpen(false); setEditingServer(null); } }}
         onOk={() => form.submit()}
+        confirmLoading={savingServer}
         width={680}
       >
-        <Form form={form} layout="vertical" onFinish={handleSubmit}>
+        <Form form={form} layout="vertical" onFinish={handleSubmit} disabled={savingServer}>
           <Form.Item name="name" label={t('server.serverName')} rules={[{ required: true }]}>
             <Input placeholder={t('server.serverNamePlaceholder')} />
           </Form.Item>
@@ -572,13 +641,13 @@ export default function Dashboard() {
             <InputNumber min={1} max={65535} style={{ width: '100%' }} />
           </Form.Item>
           <Form.Item name="server_type" label={t('server.type')} initialValue="linux">
-            <Select>
+            <Select onChange={() => setSelectedCredential(undefined)}>
               <Select.Option value="linux"><AppleOutlined /> Linux</Select.Option>
               <Select.Option value="windows"><WindowsOutlined /> Windows</Select.Option>
             </Select>
           </Form.Item>
           <Form.Item label={t('server.credential')}>
-            <CredentialSelect value={selectedCredential} onChange={setSelectedCredential} serverType={form.getFieldValue('server_type') || 'linux'} />
+            <CredentialSelect value={selectedCredential} onChange={setSelectedCredential} serverType={serverType} />
           </Form.Item>
           {!selectedCredential && (
             <>

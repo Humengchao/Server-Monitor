@@ -6,6 +6,7 @@ import enUS from 'antd/locale/en_US';
 import i18n from './i18n';
 import AppLayout from './components/Layout';
 import { useAuthStore } from './store/authStore';
+import { DarkModeContext } from './contexts/DarkModeContext';
 
 // Route-level code splitting: heavy dependencies (recharts, xterm) load only
 // with the pages that use them, instead of on every first visit.
@@ -21,10 +22,6 @@ const Alerts = lazy(() => import('./pages/Alerts'));
 const PublicStatus = lazy(() => import('./pages/PublicStatus'));
 
 const antdLocales: Record<string, typeof enUS> = { en: enUS, zh: zhCN };
-
-// Lets deep components (e.g. the SSH terminal) react to theme changes live,
-// without re-reading localStorage or reconnecting.
-export const DarkModeContext = React.createContext(false);
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token);

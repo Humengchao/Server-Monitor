@@ -8,12 +8,26 @@ import { credentialsApi, Credential } from '../api/credentials';
 
 const { Title, Text } = Typography;
 
+interface CredentialFormValues {
+  name: string;
+  ssh_username: string;
+  ssh_password?: string;
+  ssh_key?: string;
+  credential_type?: string;
+}
+
+function apiError(err: unknown, fallback: string): string {
+  const detail = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+  return detail || fallback;
+}
+
 export default function Credentials() {
   const { t } = useTranslation();
   const { message } = App.useApp();
   const [creds, setCreds] = useState<Credential[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
+  const [savingCredential, setSavingCredential] = useState(false);
   const [editing, setEditing] = useState<Credential | null>(null);
   const [form] = Form.useForm();
 
@@ -29,10 +43,12 @@ export default function Credentials() {
   }, [message, t]);
 
   useEffect(() => {
-    load();
+    const timer = window.setTimeout(() => { void load(); }, 0);
+    return () => window.clearTimeout(timer);
   }, [load]);
 
-  const handleSubmit = async (values: any) => {
+  const handleSubmit = async (values: CredentialFormValues) => {
+    setSavingCredential(true);
     try {
       const payload = {
         ...values,
@@ -50,8 +66,10 @@ export default function Credentials() {
       form.resetFields();
       setEditing(null);
       load();
-    } catch (err: any) {
-      message.error(err.response?.data?.error || t('server.operationFailed'));
+    } catch (err: unknown) {
+      message.error(apiError(err, t('server.operationFailed')));
+    } finally {
+      setSavingCredential(false);
     }
   };
 
@@ -102,7 +120,7 @@ export default function Credentials() {
     {
       title: t('credential.savedAuth'),
       key: 'saved_auth',
-      render: (_: any, record: Credential) => (
+      render: (_: unknown, record: Credential) => (
         <Space size={[4, 4]} wrap>
           {record.has_password && <Tag color="green">{t('credential.savedPassword')}</Tag>}
           {record.has_key && <Tag color="blue">{t('credential.savedKey')}</Tag>}
@@ -120,15 +138,15 @@ export default function Credentials() {
       title: t('common.actions'),
       key: 'actions',
       width: 120,
-      render: (_: any, record: Credential) => (
+      render: (_: unknown, record: Credential) => (
         <Space>
-          <Button type="text" icon={<EditOutlined />} onClick={() => handleEdit(record)} />
+          <Button type="text" aria-label={t('common.edit')} icon={<EditOutlined />} onClick={() => handleEdit(record)} />
           <Popconfirm
             title={t('credential.deleteConfirm')}
             description={t('credential.deleteDesc')}
             onConfirm={() => handleDelete(record.id)}
           >
-            <Button type="text" danger icon={<DeleteOutlined />} />
+            <Button type="text" danger aria-label={t('common.delete')} icon={<DeleteOutlined />} />
           </Popconfirm>
         </Space>
       ),
@@ -172,11 +190,12 @@ export default function Credentials() {
       <Modal
         title={editing ? t('credential.edit') : t('credential.add')}
         open={modalOpen}
-        onCancel={() => { setModalOpen(false); form.resetFields(); setEditing(null); }}
+        onCancel={() => { if (!savingCredential) { setModalOpen(false); form.resetFields(); setEditing(null); } }}
         onOk={() => form.submit()}
+        confirmLoading={savingCredential}
         width={480}
       >
-        <Form form={form} layout="vertical" onFinish={handleSubmit}>
+        <Form form={form} layout="vertical" onFinish={handleSubmit} disabled={savingCredential}>
           <Form.Item name="name" label={t('credential.name')} rules={[{ required: true }]}>
             <Input placeholder={t('credential.namePlaceholder')} />
           </Form.Item>

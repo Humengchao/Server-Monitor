@@ -8,7 +8,7 @@ export interface Server {
   port: number;
   ssh_username: string;
   ssh_host_key?: string;
-  credential_id?: string;
+  credential_id?: string | null;
   credential_name?: string;
   server_type: string;
   cpu_cores: number;
@@ -135,7 +135,7 @@ export const serversApi = {
     ssh_password?: string;
     ssh_key?: string;
     ssh_host_key?: string;
-    credential_id?: string;
+    credential_id?: string | null;
     expires_at?: string | null;
     billing_price?: number;
     billing_currency?: string;
@@ -154,7 +154,7 @@ export const serversApi = {
     ssh_password?: string;
     ssh_key?: string;
     ssh_host_key?: string;
-    credential_id?: string;
+    credential_id?: string | null;
     expires_at?: string | null;
     billing_price?: number;
     billing_currency?: string;
@@ -170,11 +170,11 @@ export const serversApi = {
   setTags: (id: string, tag_ids: string[]) =>
     client.put(`/servers/${id}/tags`, { tag_ids }),
 
-  getLatestMetrics: (id: string) =>
-    client.get<MetricPoint>(`/servers/${id}/metrics/latest`),
+  getLatestMetrics: (id: string, signal?: AbortSignal) =>
+    client.get<MetricPoint>(`/servers/${id}/metrics/latest`, { signal }),
 
-  getMetricsHistory: (id: string, since?: string, until?: string) =>
-    client.get<MetricPoint[]>(`/servers/${id}/metrics`, { params: { since, until } }),
+  getMetricsHistory: (id: string, since?: string, until?: string, signal?: AbortSignal) =>
+    client.get<MetricPoint[]>(`/servers/${id}/metrics`, { params: { since, until }, signal }),
 
   bulkTags: (server_ids: string[], tag_ids: string[], action: 'add' | 'remove') =>
     client.post<{ message: string; servers: number }>('/servers/bulk/tags', { server_ids, tag_ids, action }),
@@ -194,21 +194,21 @@ export const serversApi = {
     client.delete(`/servers/${id}/processes/${pid}`, { params: force ? { force: 1 } : undefined }),
 
   checkDocker: (id: string) =>
-    client.get<{ installed: boolean; version?: string }>(`/servers/${id}/docker/check`),
+    client.get<{ installed: boolean; version?: string }>(`/servers/${id}/docker/check`, { timeout: 20000 }),
   /** Asks the host directly and updates the stored flag — the recovery path for a
    *  server whose Docker flag was lost to a transient probe failure. */
   redetectDocker: (id: string) =>
     client.get<{ installed: boolean; version?: string; refreshed: boolean }>(
-      `/servers/${id}/docker/check`, { params: { refresh: 1 } }),
+      `/servers/${id}/docker/check`, { params: { refresh: 1 }, timeout: 20000 }),
 
   getContainers: (id: string) =>
-    client.get<DockerContainer[]>(`/servers/${id}/docker/containers`),
+    client.get<DockerContainer[]>(`/servers/${id}/docker/containers`, { timeout: 20000 }),
 
   containerAction: (id: string, containerId: string, action: 'start' | 'stop' | 'restart') =>
-    client.post(`/servers/${id}/docker/containers/${containerId}/${action}`),
+    client.post(`/servers/${id}/docker/containers/${containerId}/${action}`, undefined, { timeout: 20000 }),
 
   getContainerLogs: (id: string, containerId: string, tail?: number, signal?: AbortSignal) =>
-    client.get<{ logs: string }>(`/servers/${id}/docker/containers/${containerId}/logs`, { params: { tail }, signal }),
+    client.get<{ logs: string }>(`/servers/${id}/docker/containers/${containerId}/logs`, { params: { tail }, signal, timeout: 20000 }),
 };
 
 export const tagsApi = {

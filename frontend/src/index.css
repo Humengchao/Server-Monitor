@@ -139,7 +139,7 @@ button, input, textarea, select { font: inherit; }
 .page-context .page-context-label { font-size: 11px; text-transform: uppercase; letter-spacing: .9px; }
 .page-context strong { margin-top: 3px; font-size: 15px; color: var(--text); }
 .header-actions { height: 100%; }
-.header-icon-button.ant-btn { color: var(--muted); }
+.header-icon-button.ant-btn { min-width: 38px; min-height: 38px; color: var(--muted); }
 .header-icon-button.ant-btn:hover { color: #4f7cff; background: rgba(79, 124, 255, .09); }
 .header-divider { width: 1px; height: 24px; margin: 0 5px; background: var(--border); }
 .user-chip { padding: 4px 6px 4px 4px; display: flex; align-items: center; gap: 9px; color: var(--text); font-size: 13px; font-weight: 600; }
@@ -147,6 +147,19 @@ button, input, textarea, select { font: inherit; }
 
 .app-content { min-width: 0; background: var(--app-bg); }
 .content-inner { width: 100%; max-width: 1640px; margin: 0 auto; padding: 30px 32px 40px; }
+.network-banner {
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid color-mix(in srgb, #cf8f2c 34%, var(--border));
+  border-radius: 10px;
+  color: #a87522;
+  background: color-mix(in srgb, #cf8f2c 10%, var(--surface));
+  font-size: 12px;
+}
+:root[data-theme='dark'] .network-banner { color: #ffd17b; }
 
 /* Shared page styling */
 .page-heading { margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; }
@@ -501,6 +514,7 @@ button, input, textarea, select { font: inherit; }
 .server-table .ant-table-thead > tr > th.ant-table-cell-fix-end { background: var(--surface-soft); }
 .server-table .ant-table-tbody > tr:hover > td.ant-table-cell-fix-start,
 .server-table .ant-table-tbody > tr:hover > td.ant-table-cell-fix-end { background: var(--surface-soft); }
+.server-table .ant-table-tbody > tr:focus-visible > td { outline: 2px solid #5d7df7; outline-offset: -2px; }
 .server-table .status-pill { width: fit-content; }
 .table-identity { display: flex; align-items: center; gap: 10px; }
 .table-identity > div { min-width: 0; display: flex; flex-direction: column; }
@@ -835,6 +849,8 @@ button, input, textarea, select { font: inherit; }
   .detail-actions { width: 100%; }
   .detail-actions .ant-space-item { flex: 1; }
   .detail-actions .ant-btn { width: 100%; }
+  /* Hover is unavailable on touch screens; keep card actions discoverable. */
+  .server-card-actions { opacity: 1; transform: none; }
   .stat-tile-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .stat-tile { padding: 12px; gap: 9px; }
   .stat-tile-icon { width: 32px; height: 32px; flex-basis: 32px; font-size: 14px; }
@@ -856,6 +872,9 @@ button, input, textarea, select { font: inherit; }
   .batch-bar-actions .ant-btn { width: 100%; }
   .availability-windows { grid-template-columns: 1fr; }
   .availability-strip { height: 38px; gap: 2px; }
+  .docker-undetected-list { grid-template-columns: 1fr; }
+  .docker-undetected-row { align-items: flex-start; flex-wrap: wrap; }
+  .docker-undetected-row > .ant-space { width: 100%; justify-content: flex-end; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1113,6 +1132,8 @@ button, input, textarea, select { font: inherit; }
 .glass-filter-list::-webkit-scrollbar { display: none; }
 .glass-filter-list button { height: 36px; padding: 0 11px; display: flex; align-items: center; gap: 7px; border: 0; border-radius: 9px; color: rgba(228,233,251,.64); background: transparent; font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; transition: .18s ease; }
 .glass-filter-list button:hover { color: #fff; background: rgba(255,255,255,.06); }
+.glass-filter-list button:focus-visible,
+.view-switch button:focus-visible { outline: 2px solid #9f91ff; outline-offset: 2px; }
 .glass-filter-list button.active { color: #fff; background: rgba(131,110,224,.27); box-shadow: inset 0 0 0 1px rgba(187,174,255,.13); }
 .glass-filter-list em { min-width: 20px; height: 20px; padding: 0 5px; display: grid; place-items: center; border-radius: 6px; color: rgba(231,235,255,.72); background: rgba(255,255,255,.07); font-size: 10px; font-style: normal; }
 .filter-tag-dot { width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 8px currentColor; }
