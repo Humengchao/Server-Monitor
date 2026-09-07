@@ -142,9 +142,10 @@ export interface MetricPoint {
 }
 
 export const serversApi = {
-  list: () => client.get<Server[]>('/servers'),
+  list: (signal?: AbortSignal) => client.get<Server[]>('/servers', { signal }),
 
-  get: (id: string) => client.get<Server>(`/servers/${id}`),
+  get: (id: string, signal?: AbortSignal) =>
+    client.get<Server>(`/servers/${id}`, { signal }),
 
   create: (data: {
     name: string;
@@ -220,8 +221,8 @@ export const serversApi = {
     client.get<{ installed: boolean; version?: string; refreshed: boolean }>(
       `/servers/${id}/docker/check`, { params: { refresh: 1 }, timeout: 20000 }),
 
-  getContainers: (id: string) =>
-    client.get<DockerContainer[]>(`/servers/${id}/docker/containers`, { timeout: 20000 }),
+  getContainers: (id: string, signal?: AbortSignal) =>
+    client.get<DockerContainer[]>(`/servers/${id}/docker/containers`, { timeout: 20000, signal }),
 
   containerAction: (id: string, containerId: string, action: 'start' | 'stop' | 'restart') =>
     client.post(`/servers/${id}/docker/containers/${containerId}/${action}`, undefined, { timeout: 20000 }),

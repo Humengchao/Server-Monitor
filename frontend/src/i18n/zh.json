@@ -251,6 +251,8 @@
   "probe.status.degraded": "部分节点负载较高",
   "probe.status.outage": "部分服务暂时离线",
   "probe.updatedAt": "{{time}} 更新",
+  "probe.stale": "当前显示最近一次数据",
+  "probe.staleHint": "最新刷新失败，页面会继续自动重试。",
   "probe.total": "节点总数",
   "probe.online": "运行正常",
   "probe.degraded": "负载预警",

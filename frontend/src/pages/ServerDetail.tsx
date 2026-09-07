@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo, Suspense, lazy } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, Suspense, lazy, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Typography, Tag, Space, Button, Card, Tabs, Spin, Modal, Form, Input, InputNumber, Select,
@@ -14,7 +14,7 @@ import { DatePicker } from 'antd';
 import dayjs, { Dayjs } from 'dayjs';
 import { useTranslation } from 'react-i18next';
 import { serversApi, Server, MetricPoint } from '../api/servers';
-import { useMetrics, TimeRange } from '../hooks/useMetrics';
+import { isMetricFresh, useMetrics, TimeRange } from '../hooks/useMetrics';
 import AvailabilityPanel from '../components/AvailabilityPanel';
 import MetricsChart from '../components/MetricsChart';
 import ProcessTable from '../components/ProcessTable';
@@ -158,6 +158,7 @@ export default function ServerDetail() {
   const [activeTab, setActiveTab] = useState('metrics');
   const [activePreset, setActivePreset] = useState<PresetKey | null>('1h');
   const [timeRange, setTimeRange] = useState<TimeRange>(() => getPresetRange('1h'));
+  const serverRequestRef = useRef<AbortController | null>(null);
 
   const { metrics, history, loading: metricsLoading, observedAt } = useMetrics(id!, timeRange);
 
@@ -179,15 +180,21 @@ export default function ServerDetail() {
   ];
 
   const loadServer = useCallback(async () => {
+    serverRequestRef.current?.abort();
+    const controller = new AbortController();
+    serverRequestRef.current = controller;
+    setLoading(true);
     setLoadError(false);
     try {
-      const res = await serversApi.get(id!);
+      const res = await serversApi.get(id!, controller.signal);
+      if (controller.signal.aborted || serverRequestRef.current !== controller) return;
       const found = res.data;
       setServer(found);
       setDockerInstalled(found.has_docker);
       setNotes(found.notes || '');
       setNotesChanged(false);
     } catch (err: unknown) {
+      if (controller.signal.aborted || serverRequestRef.current !== controller) return;
       const status = (err as { response?: { status?: number } })?.response?.status;
       if (status === 404) {
         setServer(null);
@@ -195,13 +202,20 @@ export default function ServerDetail() {
         setLoadError(true);
         message.error(t('server.loadFailed'));
       }
+    } finally {
+      if (serverRequestRef.current === controller) {
+        serverRequestRef.current = null;
+        setLoading(false);
+      }
     }
-    setLoading(false);
   }, [id, message, t]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void loadServer(); }, 0);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      serverRequestRef.current?.abort();
+    };
   }, [loadServer]);
 
   const handlePreset = (key: PresetKey) => {
@@ -351,8 +365,7 @@ export default function ServerDetail() {
 
   const lang = i18n.language?.startsWith('zh') ? 'zh' : 'en';
   const expInfo = useMemo(() => getExpirationInfo(server?.expires_at, lang), [server?.expires_at, lang]);
-  const isOnline = observedAt > 0 && !!metrics?.recorded_at
-    && observedAt - new Date(metrics.recorded_at).getTime() < 120000;
+  const isOnline = isMetricFresh(metrics, observedAt);
   const cpuPercent = Math.round(metrics?.cpu_percent || 0);
   const memPercent = metrics ? percentOf(metrics.memory_used, metrics.memory_total) : 0;
   const diskPercent = metrics && server ? percentOf(metrics.disk_used, server.disk_total) : 0;
@@ -489,6 +502,7 @@ export default function ServerDetail() {
                 <Space wrap>
                   <RangePicker
                     showTime
+                    value={[dayjs(timeRange.since), dayjs(timeRange.until)]}
                     disabledDate={(current) => current && current.isAfter(dayjs(), 'day')}
                     onChange={handleRangeChange}
                   />

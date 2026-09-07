@@ -25,8 +25,29 @@ function metricsChanged(a: MetricPoint | null, b: MetricPoint | null): boolean {
     a.disk_rx_bytes !== b.disk_rx_bytes ||
     a.disk_tx_bytes !== b.disk_tx_bytes ||
     a.uptime_seconds !== b.uptime_seconds ||
-    a.latency_ms !== b.latency_ms
+    a.latency_ms !== b.latency_ms ||
+    // A host can legitimately report the same values for several samples.
+    // The timestamp still advances, and must replace the previous point so
+    // consumers do not eventually mark a healthy, idle host as stale/offline.
+    a.recorded_at !== b.recorded_at
   );
+}
+
+export const METRIC_ONLINE_WINDOW_MS = 120000;
+
+/**
+ * Judge freshness using the time at which the API response was observed.
+ * Keeping this in one place avoids subtly different online checks across
+ * pages and treats malformed/future timestamps conservatively.
+ */
+export function isMetricFresh(metrics: MetricPoint | null, observedAt: number, windowMs = METRIC_ONLINE_WINDOW_MS): boolean {
+  if (!metrics?.recorded_at || !Number.isFinite(observedAt) || observedAt <= 0) return false;
+  const recordedAt = Date.parse(metrics.recorded_at);
+  if (!Number.isFinite(recordedAt)) return false;
+  const age = observedAt - recordedAt;
+  // A small amount of clock skew is fine, but a wildly future timestamp is
+  // not evidence that a host is alive.
+  return age >= -30000 && age < windowMs;
 }
 
 export function useMetrics(serverId: string, timeRange: TimeRange, interval = 3000) {
@@ -98,5 +119,13 @@ export function useMetrics(serverId: string, timeRange: TimeRange, interval = 30
     historyAbortRef.current?.abort();
   }, [serverId]);
 
-  return { metrics, history, loading, observedAt, refetchLatest: fetchLatest, refetchHistory: fetchHistory };
+  return {
+    metrics,
+    history,
+    loading,
+    observedAt,
+    isFresh: isMetricFresh(metrics, observedAt),
+    refetchLatest: fetchLatest,
+    refetchHistory: fetchHistory,
+  };
 }

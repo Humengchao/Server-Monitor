@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Button, Input, Skeleton } from 'antd';
+import { Alert, Button, Input, Skeleton } from 'antd';
 import {
   AppstoreOutlined,
   ArrowDownOutlined,
@@ -92,7 +92,9 @@ interface PublicStatusResponse {
   privacy: { anonymized: boolean; hidden_fields: string[] };
 }
 
-const apiURL = `${window.location.origin}/api/public/status`;
+const apiBase = (import.meta.env.VITE_API_URL || `${window.location.origin}/api`).replace(/\/$/, '');
+const apiURL = `${apiBase}/public/status`;
+const STATUS_REQUEST_TIMEOUT_MS = 15000;
 
 const formatBytes = (value: number, digits = 1) => {
   if (!Number.isFinite(value) || value <= 0) return '0 B';
@@ -116,23 +118,48 @@ export default function PublicStatus() {
   const [data, setData] = useState<PublicStatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [stale, setStale] = useState(false);
   const [filter, setFilter] = useState<FilterKey>('all');
   const [query, setQuery] = useState('');
   const [view, setView] = useState<'card' | 'list'>('card');
   const [light, setLight] = useState(false);
   const ratesPerEUR = useExchangeRates();
+  const requestRef = useRef<AbortController | null>(null);
+  const requestIdRef = useRef(0);
 
   const loadStatus = useCallback(async (showLoading = false) => {
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    const requestId = ++requestIdRef.current;
+    requestRef.current = controller;
+    const timeout = window.setTimeout(() => controller.abort(), STATUS_REQUEST_TIMEOUT_MS);
     if (showLoading) setLoading(true);
     try {
-      const response = await fetch(apiURL, { headers: { Accept: 'application/json' } });
+      const response = await fetch(apiURL, {
+        headers: { Accept: 'application/json' },
+        signal: controller.signal,
+        cache: 'no-store',
+      });
       if (!response.ok) throw new Error('status request failed');
-      setData(await response.json());
+      const nextData = await response.json() as PublicStatusResponse;
+      // AbortController is best effort (a response may already be queued), so
+      // also guard state updates with a monotonically increasing request id.
+      if (requestId !== requestIdRef.current || controller.signal.aborted) return;
+      setData(nextData);
       setError(false);
+      setStale(false);
     } catch {
+      if (controller.signal.aborted || requestId !== requestIdRef.current) return;
       setError(true);
+      // Keep the last good snapshot visible. It is much more useful than
+      // replacing a transient network failure with an alarming outage state.
+      setStale(true);
     } finally {
-      setLoading(false);
+      window.clearTimeout(timeout);
+      if (requestId === requestIdRef.current) {
+        requestRef.current = null;
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -144,6 +171,8 @@ export default function PublicStatus() {
     const initial = window.setTimeout(() => loadStatus(true), 0);
     return () => {
       window.clearTimeout(initial);
+      requestRef.current?.abort();
+      requestIdRef.current += 1;
     };
   }, [loadStatus]);
 
@@ -181,8 +210,14 @@ export default function PublicStatus() {
     ...publicTags.map((tag) => ({ key: `tag:${tag.name}` as FilterKey, label: tag.name, count: tag.count, color: tag.color })),
   ];
 
-  const overall = error ? 'outage' : (data?.overall || 'operational');
-  const updatedAt = data ? new Date(data.generated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—';
+  // `error` describes the latest refresh, not the health of the monitored
+  // fleet. Preserve the last known overall state while showing a separate
+  // stale indicator when refreshes fail.
+  const overall = data?.overall || (error ? 'outage' : 'operational');
+  const generatedDate = data ? new Date(data.generated_at) : null;
+  const updatedAt = generatedDate && Number.isFinite(generatedDate.getTime())
+    ? generatedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : '—';
   const hasRemainingValue = (data?.nodes || []).some((node) => node.remaining_value > 0);
   const remainingValueLabel = useMemo(() => {
     const valued = (data?.nodes || []).filter((node) => node.remaining_value > 0);
@@ -198,10 +233,11 @@ export default function PublicStatus() {
       <div className="probe-bg-shade" />
 
       <header className="glass-header minimal-header">
-        <div className="glass-header-status">
+        <div className="glass-header-status" role="status" aria-live="polite">
           <span className={`overall-dot ${overall}`} />
           <span>{t(`probe.status.${overall}`)}</span>
           <small>{t('probe.updatedAt', { time: updatedAt })}</small>
+          {stale && <small className="status-stale-label">{t('probe.stale')}</small>}
         </div>
         <div className="glass-header-actions">
           <Button type="text" icon={<TranslationOutlined />} onClick={toggleLanguage}>{zh ? 'EN' : '中文'}</Button>
@@ -210,7 +246,7 @@ export default function PublicStatus() {
         </div>
       </header>
 
-      <main className="glass-shell compact-shell">
+      <main className="glass-shell compact-shell" aria-busy={loading}>
         <section className="glass-summary-grid">
           <SummaryCard icon={<DatabaseOutlined />} label={t('probe.memoryUsage')} value={`${formatBytes(data?.summary.memory_used || 0)} / ${formatBytes(data?.summary.memory_total || 0)}`} tone="purple" />
           <SummaryCard icon={<HddOutlined />} label={t('probe.diskUsage')} value={`${formatBytes(data?.summary.disk_used || 0)} / ${formatBytes(data?.summary.disk_total || 0)}`} tone="blue" />
@@ -225,7 +261,13 @@ export default function PublicStatus() {
         <section className="glass-toolbar">
           <div className="glass-filter-list">
             {filters.map((item) => (
-              <button className={filter === item.key ? 'active' : ''} key={item.key} onClick={() => setFilter(item.key)}>
+              <button
+                type="button"
+                className={filter === item.key ? 'active' : ''}
+                key={item.key}
+                aria-pressed={filter === item.key}
+                onClick={() => setFilter(item.key)}
+              >
                 {item.color && <i className="filter-tag-dot" style={{ backgroundColor: item.color }} />}
                 {item.label}<em>{item.count}</em>
               </button>
@@ -233,13 +275,24 @@ export default function PublicStatus() {
           </div>
           <div className="glass-tools">
             <div className="view-switch">
-              <button className={view === 'card' ? 'active' : ''} onClick={() => setView('card')} aria-label={t('probe.cardView')}><AppstoreOutlined /></button>
-              <button className={view === 'list' ? 'active' : ''} onClick={() => setView('list')} aria-label={t('probe.listView')}><BarsOutlined /></button>
+              <button type="button" className={view === 'card' ? 'active' : ''} aria-pressed={view === 'card'} onClick={() => setView('card')} aria-label={t('probe.cardView')}><AppstoreOutlined /></button>
+              <button type="button" className={view === 'list' ? 'active' : ''} aria-pressed={view === 'list'} onClick={() => setView('list')} aria-label={t('probe.listView')}><BarsOutlined /></button>
             </div>
-            <Input allowClear prefix={<SearchOutlined />} value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('probe.searchPlaceholder')} />
-          <Button className="probe-refresh" aria-label={t('common.refresh')} icon={<ReloadOutlined />} loading={loading} onClick={() => loadStatus(true)} />
+            <Input allowClear prefix={<SearchOutlined />} value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('probe.searchPlaceholder')} aria-label={t('probe.searchPlaceholder')} />
+          <Button className="probe-refresh" aria-label={t('common.refresh')} title={t('common.refresh')} icon={<ReloadOutlined />} loading={loading} onClick={() => loadStatus(true)} />
           </div>
         </section>
+
+        {stale && data && (
+          <Alert
+            className="glass-stale-banner"
+            type="warning"
+            showIcon
+            message={t('probe.stale')}
+            description={t('probe.staleHint')}
+            action={<Button size="small" onClick={() => loadStatus(true)}>{t('probe.retry')}</Button>}
+          />
+        )}
 
         {loading && !data ? (
           <div className="glass-node-grid">{[1, 2, 3, 4].map((item) => <div className="glass-node-card" key={item}><Skeleton active /></div>)}</div>

@@ -251,6 +251,8 @@
   "probe.status.degraded": "Some nodes under load",
   "probe.status.outage": "Some services are offline",
   "probe.updatedAt": "Updated at {{time}}",
+  "probe.stale": "Showing last known data",
+  "probe.staleHint": "The latest refresh failed. We will keep retrying automatically.",
   "probe.total": "Total nodes",
   "probe.online": "Operational",
   "probe.degraded": "Under load",

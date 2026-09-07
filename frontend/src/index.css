@@ -1044,7 +1044,8 @@ button, input, textarea, select { font: inherit; }
 .probe-glass-page {
   position: relative;
   min-height: 100vh;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   color: #eef2ff;
   background: #0c1020;
   isolation: isolate;
@@ -1102,6 +1103,7 @@ button, input, textarea, select { font: inherit; }
 .glass-brand small { margin-top: 2px; color: rgba(226,231,255,.52); font-size: 9px; letter-spacing: 2px; }
 .glass-header-status { padding: 9px 15px; display: flex; align-items: center; gap: 9px; border: 1px solid rgba(255,255,255,.1); border-radius: 999px; color: rgba(237,241,255,.86); background: rgba(255,255,255,.055); font-size: 12px; }
 .glass-header-status small { padding-left: 8px; border-left: 1px solid rgba(255,255,255,.12); color: rgba(224,231,255,.5); font-size: 10px; }
+.glass-header-status .status-stale-label { color: #ffd27f; }
 .overall-dot { width: 7px; height: 7px; border-radius: 50%; background: #4de5b3; box-shadow: 0 0 0 4px rgba(77,229,179,.12), 0 0 16px rgba(77,229,179,.7); }
 .overall-dot.degraded { background: #ffc968; box-shadow: 0 0 0 4px rgba(255,201,104,.12); }
 .overall-dot.outage { background: #ff7588; box-shadow: 0 0 0 4px rgba(255,117,136,.12); }
@@ -1138,6 +1140,7 @@ button, input, textarea, select { font: inherit; }
 .glass-summary-card strong { margin-top: 6px; color: #fff; font-size: 16px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .glass-toolbar { margin: 22px 0 15px; padding: 10px; display: flex; align-items: center; justify-content: space-between; gap: 15px; border: 1px solid rgba(255,255,255,.11); border-radius: 15px; background: rgba(13,18,35,.52); box-shadow: inset 0 1px rgba(255,255,255,.04); backdrop-filter: blur(22px); }
+.glass-stale-banner { margin: 0 0 14px; border-radius: 12px; background: rgba(126, 88, 26, .22); border-color: rgba(255, 202, 113, .28); }
 .glass-filter-list { display: flex; align-items: center; gap: 4px; overflow-x: auto; scrollbar-width: none; }
 .glass-filter-list::-webkit-scrollbar { display: none; }
 .glass-filter-list button { height: 36px; padding: 0 11px; display: flex; align-items: center; gap: 7px; border: 0; border-radius: 9px; color: rgba(228,233,251,.64); background: transparent; font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; transition: .18s ease; }
