@@ -67,6 +67,11 @@ public struct SFTPClient: Sendable {
 
     static func parseListing(_ output: String, parent: String) -> [RemoteFile] {
         var files: [RemoteFile] = []
+        // A directory can contain thousands of entries. DateFormatter is
+        // expensive to construct, so create one per listing instead of one per
+        // row; keeping it local also avoids sharing a mutable formatter across
+        // concurrent SFTP sessions.
+        let formatter = makeDateFormatter()
         for rawLine in output.lines() {
             let line = String(rawLine)
             if line.hasPrefix("total ") { continue }
@@ -78,7 +83,7 @@ public struct SFTPClient: Sendable {
             let isDirectory = mode.hasPrefix("d")
             let isSymlink = mode.hasPrefix("l")
             let size = Int64(fields[4]) ?? 0
-            let modified = parseDate(fields[5], fields[6])
+            let modified = parseDate(fields[5], fields[6], formatter: formatter)
 
             // The name is everything after the timestamp, so spaces survive.
             var name = fields[7...].joined(separator: " ")
@@ -107,11 +112,15 @@ public struct SFTPClient: Sendable {
         }
     }
 
-    static func parseDate(_ day: String, _ time: String) -> Date? {
+    private static func makeDateFormatter() -> DateFormatter {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd HH:mm"
-        return formatter.date(from: "\(day) \(time)")
+        return formatter
+    }
+
+    private static func parseDate(_ day: String, _ time: String, formatter: DateFormatter) -> Date? {
+        formatter.date(from: "\(day) \(time)")
     }
 
     // MARK: - Mutations

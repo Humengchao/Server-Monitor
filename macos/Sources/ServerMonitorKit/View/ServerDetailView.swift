@@ -73,36 +73,33 @@ public struct ServerDetailView: View {
         // The process list is fetched only while this screen is up.
         .onAppear { monitor.setDetailVisible(server.id, true) }
         .onDisappear { monitor.setDetailVisible(server.id, false) }
-        // A task keyed on the server, rather than a Timer: the timer's closure
-        // captured a copy of this struct — and with it the server it was made
-        // for — so it kept reloading that host's history after the view had
-        // moved on. The task is cancelled and restarted with the new id.
-        .task(id: server.id) {
-            loadHistory()
+        // The task key includes the range. Changing the picker cancels the
+        // old database query and starts exactly one query for the new range;
+        // the previous unstructured Task approach let several reads overlap
+        // while a user clicked through the picker.
+        .task(id: "\(server.id.uuidString):\(range.rawValue)") {
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(15))
-                guard !Task.isCancelled else { break }
-                loadHistory()
+                await loadHistory()
+                do {
+                    try await Task.sleep(for: .seconds(15))
+                } catch {
+                    break
+                }
             }
         }
-        .onChange(of: range) { _, _ in loadHistory() }
     }
 
     /// ≤240 points, bucketed in SQLite off the main thread. The charts re-lay
     /// out on every frame of a resize and a day of raw polls is ~17,000 points
     /// (measured at 1.6 s per frame); 240 is more than a 700pt-wide chart can
     /// show anyway, and fetching them raw was itself a 120 ms main-thread hitch.
-    private func loadHistory() {
+    private func loadHistory() async {
         let requested = range
         let since = Date().addingTimeInterval(-requested.seconds)
         let serverID = server.id
-        Task {
-            let reduced = await monitor.chartHistory(serverID: serverID, since: since)
-            // The picker may have moved while the query ran; a stale answer
-            // would flash the old range's shape before the right one lands.
-            guard range == requested else { return }
-            samples = reduced
-        }
+        let reduced = await monitor.chartHistory(serverID: serverID, since: since)
+        guard !Task.isCancelled, range == requested else { return }
+        samples = reduced
     }
 
     // MARK: - Overview

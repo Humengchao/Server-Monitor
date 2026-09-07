@@ -51,7 +51,17 @@ struct DockerPane: View {
             Divider()
             content
         }
-        .task { await reload() }
+        .task(id: server.id) {
+            await reload()
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .seconds(15))
+                } catch {
+                    break
+                }
+                await refreshStats()
+            }
+        }
         .sheet(item: $logs) { sheet in
             logsView(sheet)
         }
@@ -260,28 +270,47 @@ struct DockerPane: View {
 
     /// Fetches every listing in one pass.
     ///
-    /// Sequentially rather than concurrently on purpose: all five calls share
-    /// one multiplexed SSH connection, and `docker stats` alone takes a couple
-    /// of seconds because the engine has to sample twice. Firing them together
-    /// would open five channels to save nothing.
+    /// Read-only Docker queries are independent, and OpenSSH multiplexing can
+    /// carry them on separate channels. Start them together so page-open time
+    /// is bounded by the slowest query rather than the sum of five SSH calls.
     private func reload() async {
         loading = true
         defer { loading = false }
         do {
             let target = try monitor.target(for: server)
             let docker = monitor.docker
-            containers = try await docker.listContainers(target: target)
-            compose = (try? await docker.listComposeProjects(target: target)) ?? []
-            images = try await docker.listImages(target: target)
-            volumes = try await docker.listVolumes(target: target)
-            networks = try await docker.listNetworks(target: target)
+            async let containersResult = docker.listContainers(target: target)
+            async let composeResult = docker.listComposeProjects(target: target)
+            async let imagesResult = docker.listImages(target: target)
+            async let volumesResult = docker.listVolumes(target: target)
+            async let networksResult = docker.listNetworks(target: target)
+            async let statsResult = docker.stats(target: target)
+
+            containers = try await containersResult
+            compose = (try? await composeResult) ?? []
+            images = try await imagesResult
+            volumes = try await volumesResult
+            networks = try await networksResult
             failure = nil
-            // Last, and tolerated failing: it is the slowest call and the only
-            // one that is decoration. Losing it must not blank the tables.
-            stats = (try? await docker.stats(target: target)) ?? [:]
+            // Tolerated failing: it is decoration and can fail while the
+            // engine is busy. The resource tables remain useful without it.
+            stats = (try? await statsResult) ?? [:]
         } catch {
             if error is CancellationError { return }
             failure = error.localizedDescription
+        }
+    }
+
+    private func refreshStats() async {
+        guard !containers.isEmpty else { return }
+        do {
+            let target = try monitor.target(for: server)
+            stats = try await monitor.docker.stats(target: target)
+            failure = nil
+        } catch {
+            if error is CancellationError { return }
+            // Preserve the last successful stats during a transient refresh
+            // failure; the resource list is still valid.
         }
     }
 

@@ -288,7 +288,22 @@ struct StatusDockerCard: View {
         // `docker stats` samples twice and takes a couple of seconds, so it is
         // deliberately not part of the 3-second metrics poll; this card asks
         // for it on its own slower cadence instead.
-        .task(id: server.id) { await load() }
+        .task(id: server.id) {
+            await load()
+            guard preloaded == nil else { return }
+            while !Task.isCancelled {
+                do {
+                    // docker stats is a two-sample command and costs more on
+                    // the host than the normal metrics batch. Fifteen seconds
+                    // keeps the card live without turning it into a second
+                    // monitoring loop.
+                    try await Task.sleep(for: .seconds(15))
+                } catch {
+                    break
+                }
+                await refreshStats()
+            }
+        }
     }
 
     @ViewBuilder
@@ -358,6 +373,20 @@ struct StatusDockerCard: View {
             // and must not leave the next host's card showing an error.
             if error is CancellationError { return }
             failure = error.localizedDescription
+        }
+    }
+
+    private func refreshStats() async {
+        guard !containers.isEmpty else { return }
+        do {
+            let target = try monitor.target(for: server)
+            stats = try await monitor.docker.stats(target: target)
+            failure = nil
+        } catch {
+            if error is CancellationError { return }
+            // Keep the previous sample visible during a transient stats
+            // failure; the next scheduled refresh can recover without making
+            // every tile flash back to dashes.
         }
     }
 }

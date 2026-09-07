@@ -59,7 +59,21 @@ struct StatusTrafficCard: View {
         } content: {
             content
         }
-        .task(id: server.id) { await load() }
+        .task(id: server.id) {
+            await load()
+            guard preloaded == nil else { return }
+            while !Task.isCancelled {
+                do {
+                    // vnStat changes on the minute, so refreshing more often
+                    // only repeats a large JSON transfer without improving the
+                    // chart the user sees.
+                    try await Task.sleep(for: .seconds(60))
+                } catch {
+                    break
+                }
+                await refresh()
+            }
+        }
     }
 
     @ViewBuilder
@@ -350,11 +364,21 @@ struct StatusTrafficCard: View {
         // A new server must not show the previous one's chart while its own
         // query is in flight.
         outcome = nil
+        await refresh()
+    }
+
+    /// Refreshes the report without clearing the current chart first. A slow
+    /// host therefore keeps showing the last known traffic while the next
+    /// sample is in flight instead of flashing an empty card every minute.
+    private func refresh() async {
+        loading = true
+        defer { loading = false }
         do {
             // vnstat --json can be a few hundred KB; give it longer than a poll.
             let output = try await monitor.run(VnstatParser.command, on: server, timeout: 45)
             if let parsed = VnstatParser.parse(output) {
                 outcome = parsed
+                failure = nil
             } else {
                 failure = loc.t("traffic.unavailable")
             }
