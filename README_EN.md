@@ -55,7 +55,7 @@ Rules are evaluated by a dedicated backend loop (every 30s by default, `ALERT_IN
 - **Metrics**: CPU, memory and disk usage (%), 1-minute load, network latency (ms), and host offline.
 - **Sustained duration**: a threshold must hold for the configured window before an alert opens, so transient spikes don't page you. Offline rules never fire sooner than 2 minutes, matching the dashboard's online window.
 - **Scope**: target one server, or leave it empty to cover every server you own, including ones added later.
-- **Notifications**: a JSON payload is POSTed to the configured webhook on both firing and recovery (see [API.md](API.md)); "Send test" verifies the endpoint before you save.
+- **Notifications**: a JSON payload is POSTed to the configured webhook on both firing and recovery (see [docs/API.md](docs/API.md)); "Send test" verifies the endpoint before you save.
 - **Durable state**: active alerts live in the database, so a restart neither re-notifies nor loses a pending recovery. If a host disappears for good, threshold alerts resolve instead of hanging open forever.
 
 ### Availability
@@ -141,16 +141,35 @@ Enter multi-select from the dashboard toolbar; both the card and list views beco
 
 ---
 
+## Repository Layout
+
+| Directory | Contents |
+|---|---|
+| `web/` | The web app: `backend/` (Go + Gin), `frontend/` (React) and `docker-compose.yml`, built into images and deployed by GitHub Actions |
+| `macos/` | Native macOS client (SwiftUI, fully local, no server needed) |
+| `windows/` | Native Windows client (.NET 10 + WPF). Plan and kick-off notes in [`windows/PLAN.md`](windows/PLAN.md) |
+| `docs/` | API reference [`API.md`](docs/API.md) and screenshots |
+
+Each client has its own workflow: a change under `web/` deploys the web app, a change under `macos/` or `windows/` only builds that app.
+
+## Native Clients
+
+`macos/` is a fully local SwiftUI menu bar app that does not depend on this project's server: it connects to your hosts over the system `ssh` (Linux and Windows hosts), keeps history in a local SQLite file, and mirrors the SwiftServer layout — dashboard, machine status cards, Docker, SFTP, terminal, snippets, vnStat traffic — while polling and alerting from the menu bar. Build, test and packaging notes are in [`macos/README.md`](macos/README.md).
+
+`windows/` is the feature-equivalent Windows client, equally local and tray-resident. It is at the planning stage; decisions, phases and kick-off notes are in [`windows/PLAN.md`](windows/PLAN.md).
+
+---
+
 ## Quick Start
 
 ```bash
 # Backend
-cd backend
+cd web/backend
 cp .env.example .env   # edit with your config
 go run ./cmd/server
 
 # Frontend
-cd frontend
+cd web/frontend
 npm install && npm run dev
 ```
 
@@ -195,11 +214,11 @@ Add the following secrets in **Settings -> Secrets and variables -> actions**:
 
 | Dashboard |
 |:---:|
-| ![dashboard](screenshots/dashboard.png) |
+| ![dashboard](docs/screenshots/dashboard.png) |
 
 | Server Detail | SSH Terminal |
 |:---:|:---:|
-| ![server-detail](screenshots/server-detail.png) | ![ssh-terminal](screenshots/ssh-terminal.png) |
+| ![server-detail](docs/screenshots/server-detail.png) | ![ssh-terminal](docs/screenshots/ssh-terminal.png) |
 
 ---
 

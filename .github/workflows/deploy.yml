@@ -3,14 +3,12 @@ name: Build and Deploy
 on:
   push:
     branches: [main]
-    # The native apps under macos/ and windows/ have their own builds and
-    # never ship in the Docker image; a change there — or to their
-    # workflows — must not redeploy the web app. Everything else does.
-    paths-ignore:
-      - 'macos/**'
-      - '.github/workflows/macos-app.yml'
-      - 'windows/**'
-      - '.github/workflows/windows-app.yml'
+    # The web app lives entirely under web/. The native apps (macos/,
+    # windows/) have their own workflows and never ship in the Docker image,
+    # so only a change under web/ or to this file redeploys.
+    paths:
+      - 'web/**'
+      - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
 env:
@@ -39,7 +37,7 @@ jobs:
       - name: Build and push backend image
         uses: docker/build-push-action@v6
         with:
-          context: ./backend
+          context: ./web/backend
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/backend:latest
@@ -48,7 +46,7 @@ jobs:
       - name: Build and push frontend image
         uses: docker/build-push-action@v6
         with:
-          context: ./frontend
+          context: ./web/frontend
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/frontend:latest
@@ -90,9 +88,10 @@ jobs:
               git clone https://github.com/${{ github.repository }}.git /opt/server-monitor
             fi
             
-            # 3. 进入目录并拉取最新代码
+            # 3. 进入目录并拉取最新代码；compose 文件与 .env 在 web/ 下
             cd /opt/server-monitor
             git pull origin main
+            cd web
             
             # 4. 生成 .env 文件
             IMAGE_PREFIX=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')

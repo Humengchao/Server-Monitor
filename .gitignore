@@ -2,7 +2,7 @@
 .env
 
 # Build
-backend/cmd/server/server
+web/backend/cmd/server/server
 *.exe
 
 # IDE
@@ -14,8 +14,8 @@ backend/cmd/server/server
 .claude/settings.local.json
 
 # Node
-frontend/node_modules/
-frontend/dist/
+web/frontend/node_modules/
+web/frontend/dist/
 
 # macOS app (SwiftPM)
 macos/.build/

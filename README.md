@@ -55,7 +55,7 @@
 - **指标**：CPU、内存、磁盘使用率（%），1 分钟负载、网络延迟（ms），以及主机离线。
 - **持续时长**：阈值需连续满足设定时长才会开启告警，避免瞬时毛刺造成误报；离线规则最短 2 分钟，与面板的在线判定保持一致。
 - **作用范围**：可指定单台服务器，或留空以覆盖全部服务器（含之后新增的）。
-- **通知**：触发与恢复各向配置的 Webhook 地址 POST 一次 JSON（载荷格式见 [API.md](API.md)），保存前可点「发送测试」验证链路。
+- **通知**：触发与恢复各向配置的 Webhook 地址 POST 一次 JSON（载荷格式见 [docs/API.md](docs/API.md)），保存前可点「发送测试」验证链路。
 - **状态持久化**：进行中的告警以数据库记录表示，服务重启既不会重复通知，也不会漏掉恢复通知；主机长时间失联时阈值类告警自动收敛为已恢复，不会永久挂起。
 
 ### 可用性统计
@@ -142,22 +142,33 @@
 
 ---
 
-## macOS 原生客户端
+## 仓库结构
 
-`macos/` 下是一个纯本地的 SwiftUI 菜单栏应用，不依赖本项目的服务端：它直接用系统 `ssh` 连接各台主机采集指标（Linux 与 Windows），历史存在本机 SQLite，界面对标 SwiftServer——仪表板、机器详情卡片、Docker、SFTP、终端、代码片段、vnStat 流量统计，并常驻菜单栏在后台持续轮询与告警。
+| 目录 | 内容 |
+|---|---|
+| `web/` | 网页版：`backend/`（Go + Gin）、`frontend/`（React）与 `docker-compose.yml`，由 GitHub Actions 构建镜像并部署 |
+| `macos/` | macOS 原生客户端（SwiftUI，纯本地，不依赖服务端） |
+| `windows/` | Windows 原生客户端（.NET 10 + WPF）。计划与开工说明见 [`windows/PLAN.md`](windows/PLAN.md) |
+| `docs/` | 接口文档 [`API.md`](docs/API.md) 与截图 |
 
-构建、测试与打包见 [`macos/README.md`](macos/README.md)。
+三个客户端各有自己的工作流：改 `web/` 触发网页版部署，改 `macos/`、`windows/` 只触发各自的构建，互不影响。
+
+## 原生客户端
+
+`macos/` 下是一个纯本地的 SwiftUI 菜单栏应用，不依赖本项目的服务端：它直接用系统 `ssh` 连接各台主机采集指标（Linux 与 Windows），历史存在本机 SQLite，界面对标 SwiftServer——仪表板、机器详情卡片、Docker、SFTP、终端、代码片段、vnStat 流量统计，并常驻菜单栏在后台持续轮询与告警。构建、测试与打包见 [`macos/README.md`](macos/README.md)。
+
+`windows/` 是功能对等的 Windows 版，同样纯本地、同样直连主机，托盘常驻。目前处于计划阶段，技术决策、分阶段计划与开工说明见 [`windows/PLAN.md`](windows/PLAN.md)。
 
 ## 快速开始
 
 ```bash
 # 后端
-cd backend
+cd web/backend
 cp .env.example .env   # 编辑配置文件
 go run ./cmd/server
 
 # 前端
-cd frontend
+cd web/frontend
 npm install && npm run dev
 ```
 
@@ -202,11 +213,11 @@ npm install && npm run dev
 
 | 主页 / 仪表盘 |
 |:---:|
-| ![dashboard](screenshots/dashboard.png) |
+| ![dashboard](docs/screenshots/dashboard.png) |
 
 | 机器详情 | SSH 终端 |
 |:---:|:---:|
-| ![server-detail](screenshots/server-detail.png) | ![ssh-terminal](screenshots/ssh-terminal.png) |
+| ![server-detail](docs/screenshots/server-detail.png) | ![ssh-terminal](docs/screenshots/ssh-terminal.png) |
 
 
 ---

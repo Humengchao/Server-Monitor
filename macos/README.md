@@ -4,7 +4,7 @@ A native macOS app that monitors Linux servers over SSH. **Fully local**: it
 talks straight to your hosts, stores everything on this Mac, and needs no
 backend, no database server and no account.
 
-Not related to the `backend/` + `frontend/` web deployment in this repo other
+Not related to the `web/` deployment (backend + frontend) in this repo other
 than sharing its collection logic — this app is standalone.
 
 ```

@@ -1,3 +1,8 @@
+# Pinned so the project keeps the name it had when this file lived at the
+# repository root: compose otherwise derives it from the directory ("web"),
+# which would start a second copy next to the running one and fail on ports.
+name: server-monitor
+
 services:
   backend:
     image: ${BACKEND_IMAGE}
