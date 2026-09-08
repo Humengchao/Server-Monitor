@@ -31,7 +31,10 @@
 - **终端**：Windows Terminal 的渲染控件，喂 SSH.NET 的 `ShellStream`。复用采集
   那条连接，所以开终端只多一个 channel，不是又一次握手和又一条 auth.log。
   片段只「键入」不「回车」，`docker exec` 与容器 shell 共用同一个窗口。
-- **SFTP**：浏览、上传、下载、进度、多选、重命名、删除、新建目录。远端名字里
+  Ctrl+= / Ctrl+- 缩放（Ctrl+0 回到设置值，Ctrl+滚轮同理），只影响当前窗口。
+  复制粘贴是 Ctrl+Shift+C/V —— Ctrl+C 要留给对面。
+- **SFTP**：浏览、上传、下载、进度、多选、重命名、删除、新建目录；文件直接拖进
+  窗口即上传（文件夹不收：SFTP 没有递归 put，半做不如说清楚）。远端名字里
   合法而 Windows 不接受的字符（`aux`、结尾空格、冒号）在保存时可见地替换。
 - **Docker**：五张表（容器 / 镜像 / 数据卷 / 网络 / Compose）、`stats`、日志、
   启停重启、容器 shell。
@@ -42,6 +45,9 @@
 - **常驻**：托盘图标带离线计数、关窗驻留、Toast 告警点击跳转到对应主机、
   开机自启、单实例；睡眠唤醒与网络恢复立刻重试；省电模式放慢轮询；
   窗口隐藏时不刷新界面，但采集、入库与告警照常。
+- **键盘与读屏**：仪表板的主机卡片是真正的按钮 —— 可 Tab、Enter/空格激活、
+  有焦点框，读屏报出「web-01 — 离线」。进程为 per-monitor DPI 感知，拖到不同
+  缩放的屏幕上不会被拉伸糊掉。
 - **双语与深浅色**：跟随系统，也可以固定。331 条文案与 macOS 端同源。
 
 ## 要求
@@ -55,7 +61,7 @@
 
 ```powershell
 dotnet build windows/ServerMonitor.slnx
-dotnet test  windows/ServerMonitor.slnx      # 322 通过，14 条 live 用例跳过
+dotnet test  windows/ServerMonitor.slnx      # 344 通过，14 条 live 用例跳过
 dotnet run --project windows/src/ServerMonitor.App
 ```
 
@@ -139,7 +145,7 @@ dotnet run --project windows/src/ServerMonitor.Cli -- probe  my-host --alias -v
 | `src/ServerMonitor.Core/` | 采集、解析、SSH、SQLite、文案。`net10.0`，不依赖 Windows |
 | `src/ServerMonitor.App/` | WPF 外壳：`Views/`、`Controls/`（自绘）、`Theme/`、`Platform/`、`Terminal/` |
 | `src/ServerMonitor.Cli/` | `smctl`，不带界面的采集 |
-| `tests/` | 322 条：解析器、数据库、轮询循环、SFTP 路径、离屏渲染、live |
+| `tests/` | 344 条：解析器、数据库、轮询循环、SFTP 路径、离屏渲染、live |
 | `scripts/package.ps1` · `scripts/installer.iss` | 发布与安装包 |
 | [`PLAN.md`](PLAN.md) | 技术决策（D1–D9）、既有事实（F1–F11）、分阶段计划、风险（R1–R13） |
 | [`../shared/probes/`](../shared/probes/) | 三端共用的采集脚本，改这里而不是各自复制 |
@@ -171,10 +177,14 @@ collection scripts — this app is standalone, and is the counterpart of the
   riding the connection the poll already holds — so opening one costs a channel
   rather than a handshake and another line in the host's auth log. Snippets are
   typed at the prompt, not sent; `docker exec` and a container shell reuse the
-  same window.
+  same window. Ctrl+= / Ctrl+- zoom this window (Ctrl+0 back to the configured
+  size, Ctrl+wheel likewise); copy and paste are Ctrl+Shift+C/V, because
+  Ctrl+C belongs to the far side.
 - **SFTP**: browse, upload, download, progress, multi-select, rename, delete,
-  make directory. Remote names that are legal on ext4 and unrepresentable here
-  (`aux`, a trailing space, a colon) are substituted visibly in the save dialog.
+  make directory, and drop files onto the window to upload them — folders are
+  declined rather than half-handled, since SFTP has no recursive put. Remote
+  names that are legal on ext4 and unrepresentable here (`aux`, a trailing
+  space, a colon) are substituted visibly in the save dialog.
 - **Docker**: five tables (containers, images, volumes, networks, compose),
   `stats`, logs, start/stop/restart, container shell.
 - **SSH keys**: scan `%USERPROFILE%\.ssh` (metadata only — never key material),
@@ -187,6 +197,11 @@ collection scripts — this app is standalone, and is the counterpart of the
   Wake from sleep and a network change retry immediately; energy-saver slows the
   cadence; a hidden window stops redrawing while collection, storage and alerts
   carry on.
+- **Keyboard and screen reader**: the dashboard's host cards are real buttons —
+  tab to them, Enter or Space to open, a focus ring, and a name a reader
+  announces as "web-01 — offline". The process is per-monitor DPI aware, so a
+  window dragged to a differently scaled display is re-laid out rather than
+  stretched.
 - **Bilingual and light/dark**, following the system or pinned. The 331 strings
   come from the same table as the macOS build.
 
@@ -202,7 +217,7 @@ collection scripts — this app is standalone, and is the counterpart of the
 
 ```powershell
 dotnet build windows/ServerMonitor.slnx
-dotnet test  windows/ServerMonitor.slnx      # 322 pass, 14 live cases skipped
+dotnet test  windows/ServerMonitor.slnx      # 344 pass, 14 live cases skipped
 dotnet run --project windows/src/ServerMonitor.App
 
 cd windows; ./scripts/package.ps1 -Version 0.1.0   # zip + installer, x64 + arm64
