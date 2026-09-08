@@ -152,8 +152,10 @@ public partial class MainWindow : Window
             if (isHeader)
             {
                 // A header is a non-selectable label, so the group name cannot
-                // become the current page.
-                Nav.Items.Add(new ListBoxItem
+                // become the current page — and a NavHeader rather than a
+                // ListBoxItem so it reads as a heading to a screen reader
+                // instead of as a disabled page.
+                Nav.Items.Add(new NavHeader
                 {
                     Content = Strings.Get(key),
                     IsEnabled = false,
