@@ -183,6 +183,29 @@ public sealed class AppSettings : INotifyPropertyChanged
         set => Set(ref _theme, value);
     }
 
+    private bool _useMicaBackdrop;
+    /// <summary>
+    /// Whether the window uses the Mica backdrop.
+    /// </summary>
+    /// <remarks>
+    /// Off by default, which is not what D1 hoped for, and the reason is a
+    /// failure mode with no API to detect it: Mica needs the window's own
+    /// background to be transparent, and where DWM declines to composite the
+    /// backdrop — a virtual or indirect display adapter, some remote
+    /// streaming setups — nothing is drawn behind it and the entire client
+    /// area renders black. <c>DwmSetWindowAttribute</c> returns success in
+    /// that case, so the app cannot tell.
+    ///
+    /// An unreadable monitor is a worse outcome than a flat one, so the
+    /// texture is opt-in. The dark title bar, which has no such failure mode,
+    /// is applied either way.
+    /// </remarks>
+    public bool UseMicaBackdrop
+    {
+        get => _useMicaBackdrop;
+        set => Set(ref _useMicaBackdrop, value);
+    }
+
     // Window state, so a relaunch comes back where it was.
     public double WindowWidth { get; set; } = 1280;
     public double WindowHeight { get; set; } = 820;
@@ -293,6 +316,7 @@ public sealed class AppSettings : INotifyPropertyChanged
         public bool CloseToTray { get; set; } = true;
         public AppLanguage Language { get; set; } = AppLanguage.System;
         public AppTheme Theme { get; set; } = AppTheme.System;
+        public bool UseMicaBackdrop { get; set; }
         public double WindowWidth { get; set; } = 1280;
         public double WindowHeight { get; set; } = 820;
         public double WindowLeft { get; set; } = double.NaN;
@@ -319,6 +343,7 @@ public sealed class AppSettings : INotifyPropertyChanged
         CloseToTray = stored.CloseToTray;
         Language = stored.Language;
         Theme = stored.Theme;
+        UseMicaBackdrop = stored.UseMicaBackdrop;
         WindowWidth = stored.WindowWidth;
         WindowHeight = stored.WindowHeight;
         WindowLeft = stored.WindowLeft;
@@ -343,6 +368,7 @@ public sealed class AppSettings : INotifyPropertyChanged
         CloseToTray = CloseToTray,
         Language = Language,
         Theme = Theme,
+        UseMicaBackdrop = UseMicaBackdrop,
         WindowWidth = WindowWidth,
         WindowHeight = WindowHeight,
         WindowLeft = WindowLeft,

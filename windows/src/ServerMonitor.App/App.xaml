@@ -1,0 +1,20 @@
+<Application x:Class="ServerMonitor.App.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ShutdownMode="OnExplicitShutdown">
+    <!--
+        OnExplicitShutdown, not OnLastWindowClose: closing the window leaves
+        the app collecting in the notification area (D6's "close means stay"),
+        which is the whole reason it has a tray icon. Quitting goes through the
+        tray menu or Settings, and App.Shutdown is called explicitly there.
+    -->
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <!-- Controls.xaml merges Styles.xaml itself; see the note
+                     at the top of it. -->
+                <ResourceDictionary Source="Theme/Controls.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

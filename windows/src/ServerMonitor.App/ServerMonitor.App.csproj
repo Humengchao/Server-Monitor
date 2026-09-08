@@ -4,27 +4,53 @@
        Windows-specific lives here; Core stays portable. -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <!-- The version in the TFM is the *target*; SupportedOSPlatformVersion
+         below is the *minimum*. 19041 (2004) is a conservative target that
+         still exposes everything this app calls. -->
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <UseWPF>true</UseWPF>
     <!-- WinForms comes in for the tray icon and the screen-capture helper
          only; no WinForms UI is built. -->
     <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>ServerMonitor.App</RootNamespace>
     <AssemblyName>ServerMonitor</AssemblyName>
-    <ApplicationIcon>Resources\app.ico</ApplicationIcon>
-    <!-- 1809 is the floor (D8): ConPTY and the bundled OpenSSH both start
-         there. Declared so the manifest advertises Windows 10+ behaviour. -->
+    <!-- 1809 is the floor (D8): ConPTY and the in-box OpenSSH client both
+         start there. Declared so the platform-compatibility analyser flags a
+         call to anything newer, which is otherwise a runtime crash on the
+         oldest machine the README says is supported. -->
     <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
-    <!-- Per-monitor v2 so the self-drawn gauges and charts stay crisp when a
-         window moves between displays with different scaling. -->
-    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
 
+  <!-- No WPF-UI, and no H.NotifyIcon — a deliberate departure from D1's
+       shopping list, though not from its reasoning.
+
+       D1 chose WPF-UI for three things: a NavigationView sidebar, Mica, and
+       ToggleSwitch/ProgressRing, because WPF's own Fluent theme is still
+       experimental and lacks them (F6). Of those, Mica is twenty lines of
+       DwmSetWindowAttribute (see Platform/Backdrop.cs) and the sidebar is a
+       ListBox with a template — while the rest of this app's surface is
+       self-drawn anyway, because D6 already decided the gauges and charts
+       would be. That left one third-party dependency supplying styling for
+       controls we are not using, and R6 flagged exactly that risk.
+
+       The tray icon is WinForms' NotifyIcon, which is first-party, has taken
+       a dynamically drawn 16px bitmap since 2002, and needs no wrapper.
+
+       The terminal control (D5) is a different case and its decision stands:
+       there is no first-party alternative to write around. -->
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="$(MvvmToolkitVersion)" />
-    <PackageReference Include="WPF-UI" Version="$(WpfUiVersion)" />
-    <PackageReference Include="H.NotifyIcon.Wpf" Version="$(NotifyIconVersion)" />
+  </ItemGroup>
+
+  <!-- UseWindowsForms adds System.Drawing and System.Windows.Forms to the
+       implicit usings, and both collide with WPF on the names this app uses
+       most: Color, Point, Size, Brush, Pen, Control. Removed here and imported
+       explicitly in the two files that actually draw with GDI+ (the tray icon
+       and the screen-capture helper), where no WPF type appears. -->
+  <ItemGroup>
+    <Using Remove="System.Drawing" />
+    <Using Remove="System.Windows.Forms" />
   </ItemGroup>
 
   <ItemGroup>
@@ -32,7 +58,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="Resources\app.ico" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The controls and helpers are internal on purpose: nothing outside the
+         app builds a view. The render tests are the exception, and they are
+         the only reason any of this is testable without a desktop session. -->
+    <InternalsVisibleTo Include="ServerMonitor.App.Tests" />
   </ItemGroup>
 
 </Project>

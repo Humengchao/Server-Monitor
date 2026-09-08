@@ -5,7 +5,7 @@
        project is the reason the App half is testable at all without a
        desktop session. -->
   <PropertyGroup>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <UseWPF>true</UseWPF>
     <RootNamespace>ServerMonitor.App.Tests</RootNamespace>
     <IsPackable>false</IsPackable>

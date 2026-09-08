@@ -25,3 +25,5 @@ macos/dist/
 windows/**/bin/
 windows/**/obj/
 windows/dist/
+# Offscreen renders (SM_RENDER_CARDS) and hand-taken screenshots
+windows/artifacts/
