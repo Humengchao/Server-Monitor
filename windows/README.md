@@ -118,6 +118,13 @@ dotnet run --project windows/src/ServerMonitor.Cli -- probe  my-host --alias -v
   进程的 TCP 端点数一直是 0–2，说明涨的是事件/等待类句柄，最可能是 SSH.NET
   的 session 对象在等回收。剩下的定位要靠 PerfView，按计划归 P7。
   原始采样在 `windows/artifacts/soak*.csv`。
+- **告警 Toast 也没法在这里验**：告警按「状态跳变」发，而不是按「当前状态」，
+  所以一开始就不可达的主机不会触发（这是对的：否则每次启动都会弹一串）。
+  要看到 Toast 需要一台先在线后离线的主机。
+- **打包后的常驻内存明显更高**：自包含单文件跑起来是 private 约 200 MB
+  （framework-dependent 直接 `dotnet run` 约 115 MB）。原因是
+  `EnableCompressionInSingleFile`，压缩过的镜像启动时要解到内存里 —— 用下载
+  体积换常驻内存。这个取舍要不要改，归 P7。
 - **P7 的加固与性能还没做**：高 DPI 与多显示器、中文 Windows 的 GBK 代码页、
   PerfView 量主线程，都还没逐项核对。
 - **干净机器上的安装 / 卸载全程**（P6 出口）还没在一台干净的 Windows 11 上走过。
@@ -245,6 +252,16 @@ key: it really does write to `authorized_keys`), `SM_WIN_HOST` / `SM_WIN_USER` /
   handles — most likely SSH.NET session objects waiting to be collected.
   Pinning it down wants PerfView, which is P7's job. Raw samples are in
   `windows/artifacts/soak*.csv`.
+- **Toast alerts are unverifiable here too.** Alerts fire on a status
+  *transition*, not a state, so a host that was already unreachable when the
+  app started does not raise one — which is right, or every launch would fire a
+  volley. Seeing a toast needs a host that goes from online to offline.
+- **The packaged build's resident memory is markedly higher**: about 200 MB
+  private for the self-contained single file, against about 115 MB running
+  framework-dependent through `dotnet run`. The cause is
+  `EnableCompressionInSingleFile` — the compressed image is decompressed into
+  memory at startup, trading resident memory for download size. Whether that
+  trade is the right one belongs to P7.
 - **P7's hardening and performance pass is outstanding**: high DPI and multiple
   monitors, the GBK code page on Chinese Windows, and a PerfView measurement of
   the UI thread have not been worked through.
