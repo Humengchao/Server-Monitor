@@ -6,6 +6,7 @@ using ServerMonitor.Core;
 using ServerMonitor.Core.Collect;
 using ServerMonitor.Core.L10n;
 using ServerMonitor.Core.Model;
+using ServerMonitor.Core.Ssh;
 
 namespace ServerMonitor.App.Views;
 
@@ -67,13 +68,58 @@ public sealed class MachinesPage : UserControl, ISearchable
             _root.Children.Add(Ui.Empty(
                 "dashboard.emptyTitle",
                 "dashboard.empty",
-                Ui.Accent(Strings.Get("server.add"), AddServer)));
+                FirstRunActions()));
             return;
         }
 
         _root.Children.Add(Toolbar());
         if (Monitor.Groups.Count > 0) _root.Children.Add(GroupCards());
         _root.Children.Add(Table());
+    }
+
+    /// <summary>
+    /// What to offer someone whose list is empty.
+    /// </summary>
+    /// <remarks>
+    /// Importing from <c>~/.ssh/config</c> used to live only in the toolbar,
+    /// which is drawn once there is at least one host — so the one person who
+    /// most wants it, somebody with a config full of hosts and an empty app,
+    /// could not find it. When the file has hosts in it, the button says how
+    /// many, because "import" alone does not tell you whether it will find
+    /// anything.
+    /// </remarks>
+    private UIElement FirstRunActions()
+    {
+        var row = Ui.Columns(8, Ui.Accent(Strings.Get("server.add"), AddServer));
+
+        var discovered = Discoverable();
+        if (discovered > 0)
+        {
+            var label = $"{Strings.Get("import.title")} ({discovered})";
+            row.Children.Add(Ui.Button(label, ImportSshConfig));
+        }
+        row.HorizontalAlignment = HorizontalAlignment.Center;
+        return row;
+    }
+
+    /// <summary>
+    /// How many hosts <c>~/.ssh/config</c> offers, or zero if it cannot be read.
+    /// </summary>
+    /// <remarks>
+    /// Parsed here rather than cached: the file is small, this runs once per
+    /// rebuild of an empty page, and a stale count on a first-run screen would
+    /// be worse than no count.
+    /// </remarks>
+    private static int Discoverable()
+    {
+        try
+        {
+            return SshConfig.FromDefaultLocation().Discover().Count;
+        }
+        catch (Exception)
+        {
+            return 0;
+        }
     }
 
     private UIElement Toolbar()

@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Security.AccessControl;
+using System.Security.Principal;
 
 namespace ServerMonitor.Core.Ssh;
 
@@ -102,7 +104,9 @@ public static class SshKeyScanner
             parsed.Comment,
             File.Exists(path + ".pub"),
             IsEncrypted(path),
-            SshKeyManager.AclIsTight(path));
+            // ACLs are a Windows concept; everywhere else OpenSSH checks a
+            // permission bitmask, and Core stays platform-neutral.
+            !OperatingSystem.IsWindows() || SshKeyManager.AclIsTight(path));
     }
 
     internal static (int Bits, string Fingerprint, string Comment, string Type)? Parse(string output)
@@ -375,53 +379,53 @@ public static class SshKeyManager
     /// Whether a key's ACL is narrow enough that ssh will use it.
     /// </summary>
     /// <remarks>
-    /// Reads <c>icacls</c>'s own output rather than interpreting the ACL: what
-    /// matters is whether OpenSSH will accept it, and OpenSSH's rule is
-    /// "no access for anyone but the owner, SYSTEM and Administrators". Any
-    /// other principal — <c>Users</c>, <c>Authenticated Users</c>, or an
-    /// inherited entry — is what makes it refuse.
+    /// OpenSSH's rule on Windows is "no access for anyone but the owner,
+    /// SYSTEM and Administrators", so this reads the ACL and compares
+    /// <em>SIDs</em>. Two reasons not to parse <c>icacls</c>'s text, both of
+    /// which this code got wrong before:
+    ///
+    /// Its first line is <c>&lt;path&gt; DOMAIN\\principal:(perms)</c>, and a
+    /// Windows path contains a colon. Splitting on the first one made the
+    /// principal <c>"C"</c>, which matches nobody — so every key on every
+    /// ordinary machine was reported as loose, with a banner offering to
+    /// "tighten" permissions that were already right, and a button that would
+    /// have stripped inheritance from the user's real keys.
+    ///
+    /// And the names are localised: <c>Administrators</c> is
+    /// <c>Administratoren</c> on a German Windows, so a name allowlist is
+    /// wrong there even once the parsing is fixed. A well-known SID is the
+    /// same everywhere.
     /// </remarks>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     public static bool AclIsTight(string path)
     {
         try
         {
-            using var process = Process.Start(new ProcessStartInfo("icacls")
-            {
-                ArgumentList = { path },
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                StandardOutputEncoding = System.Text.Encoding.UTF8,
-            });
-            if (process is null) return true;
-            var output = process.StandardOutput.ReadToEnd();
-            process.WaitForExit(5000);
+            var rules = new FileInfo(path)
+                .GetAccessControl(AccessControlSections.Access)
+                .GetAccessRules(includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier));
 
-            var user = Environment.UserName;
-            foreach (var raw in output.Lines())
+            var me = WindowsIdentity.GetCurrent().User;
+            foreach (FileSystemAccessRule rule in rules)
             {
-                var line = raw.Trim();
-                var colon = line.IndexOf(':');
-                if (colon <= 0) continue;
-                // "<path> DOMAIN\principal:(F)" on the first line, then
-                // "DOMAIN\principal:(F)" on the rest.
-                var principal = line[..colon];
-                var slash = principal.LastIndexOf('\\');
-                if (slash >= 0) principal = principal[(slash + 1)..];
-                principal = principal.Trim();
-                if (principal.Length == 0) continue;
-                if (principal.Equals(user, StringComparison.OrdinalIgnoreCase)) continue;
-                if (principal is "SYSTEM" or "Administrators") continue;
-                // Anything else has access, which is what ssh objects to.
-                if (line.Contains('(')) return false;
+                // A deny entry never widens access, and ssh does not object to
+                // one.
+                if (rule.AccessControlType != AccessControlType.Allow) continue;
+                if (rule.IdentityReference is not SecurityIdentifier sid) continue;
+                if (me is not null && sid.Equals(me)) continue;
+                if (sid.IsWellKnown(WellKnownSidType.LocalSystemSid)) continue;
+                if (sid.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid)) continue;
+                // Anyone else — Users, Authenticated Users, a group the file
+                // inherited the entry from — is what makes ssh refuse it.
+                return false;
             }
             return true;
         }
         catch (Exception)
         {
-            // Cannot tell. Reporting "tight" avoids a warning banner on every
-            // key just because icacls is missing.
+            // An unreadable ACL is not evidence of a loose one. Reporting
+            // "tight" keeps a warning off every key just because the file
+            // could not be examined.
             return true;
         }
     }

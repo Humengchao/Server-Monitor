@@ -8,7 +8,7 @@ using ServerMonitor.Core.Ssh;
 namespace ServerMonitor.App.Views;
 
 /// <summary>
-/// The private keys in <c>%USERPROFILE%\.ssh</c>.
+/// The private keys in <c>%USERPROFILE%\\.ssh</c>.
 /// </summary>
 /// <remarks>
 /// Reads metadata only — fingerprints, types, comments — never key material.
@@ -71,7 +71,16 @@ public sealed class SshKeysPage : UserControl
         }
 
         foreach (var key in _keys) _root.Children.Add(CardFor(key));
-        _root.Children.Add(Ui.Wrapped(Strings.Get("keys.footer"), "Text.Tertiary"));
+        // Not keys.footer: that string says the app never modifies
+        // %USERPROFILE%\\.ssh, which was true of the macOS page it came from
+        // and is contradicted by the four buttons above — generate, import,
+        // delete and tighten all write there. What is still true is that key
+        // material is never read or shown, which is the part worth promising.
+        _root.Children.Add(Ui.Wrapped(
+            Strings.IsChinese
+                ? "密钥留在 %USERPROFILE%\\.ssh 由 OpenSSH 自己管，所以在 ssh.exe、~/.ssh/config 和其他工具里同样可用。本应用只读取指纹、类型、注释这类元信息，从不读取或显示私钥内容；生成与导入的密钥会立即用 icacls 收紧 ACL。"
+                : "Keys stay in %USERPROFILE%\\.ssh where OpenSSH owns them, so a key here works the same in ssh.exe, in ~/.ssh/config and in every other tool. This app reads only metadata — fingerprint, type, comment — and never reads or displays key material; a key it generates or imports has its ACL tightened with icacls straight away.",
+            "Text.Tertiary"));
     }
 
     private UIElement CardFor(SshKeyFile key)
@@ -82,7 +91,13 @@ public sealed class SshKeysPage : UserControl
         // DSA is the one to warn about: modern sshd refuses it outright, while
         // RSA still works because OpenSSH negotiates rsa-sha2.
         if (key.IsLegacyAlgorithm) heading.Children.Add(Badge("keys.legacy", Theme.Palette.Warning));
-        if (!key.AclIsTight) heading.Children.Add(Badge("common.error", Theme.Palette.Offline));
+        if (!key.AclIsTight)
+        {
+            // Not "error": the key is fine, its permissions are not. Saying
+            // "error" next to a fingerprint reads as a corrupt key.
+            heading.Children.Add(BadgeText(
+                Strings.IsChinese ? "权限过宽" : "Permissions", Theme.Palette.Offline));
+        }
 
         foreach (var child in heading.Children.OfType<FrameworkElement>())
         {
@@ -135,9 +150,12 @@ public sealed class SshKeysPage : UserControl
         return card;
     }
 
-    private static UIElement Badge(string key, System.Windows.Media.Color colour)
+    private static UIElement Badge(string key, System.Windows.Media.Color colour) =>
+        BadgeText(Strings.Get(key), colour);
+
+    private static UIElement BadgeText(string label, System.Windows.Media.Color colour)
     {
-        var text = Ui.Caption(Strings.Get(key));
+        var text = Ui.Caption(label);
         text.Foreground = Theme.Ink.Brush(colour);
         return new Border
         {

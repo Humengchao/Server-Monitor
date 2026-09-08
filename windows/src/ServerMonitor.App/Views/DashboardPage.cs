@@ -86,7 +86,10 @@ public sealed class DashboardPage : UserControl, ISearchable
         if (Monitor.Servers.Count == 0)
         {
             _counters.Visibility = Visibility.Collapsed;
-            _cards.Children.Add(Ui.Empty("dashboard.emptyTitle", "dashboard.empty"));
+            // The same two offers the machines page makes, so a first launch
+            // shows them wherever the user happens to land.
+            _cards.Children.Add(Ui.Empty(
+                "dashboard.emptyTitle", "dashboard.empty", FirstRunActions()));
             return;
         }
         _counters.Visibility = Visibility.Visible;
@@ -102,6 +105,46 @@ public sealed class DashboardPage : UserControl, ISearchable
         _counters.Children.Add(Counter("dashboard.offline", offline, Palette.Offline));
 
         foreach (var server in Visible()) _cards.Children.Add(CardFor(server));
+    }
+
+    private void AddServer()
+    {
+        var editor = new ServerEditorWindow(null) { Owner = Window.GetWindow(this) };
+        if (editor.ShowDialog() == true) Rebuild();
+    }
+
+    private void ImportSshConfig()
+    {
+        var window = new ImportSshConfigWindow { Owner = Window.GetWindow(this) };
+        if (window.ShowDialog() == true) Rebuild();
+    }
+
+    /// <summary>Add a host, or adopt the ones in ~/.ssh/config.</summary>
+    private UIElement FirstRunActions()
+    {
+        // Both open a window rather than navigating: the editor and the import
+        // dialog are the same ones the machines page opens, and routing
+        // through navigation would mean threading two more callbacks into a
+        // page that already has the one it needs.
+        var row = Ui.Columns(8, Ui.Accent(Strings.Get("server.add"), AddServer));
+
+        var discovered = 0;
+        try
+        {
+            discovered = Core.Ssh.SshConfig.FromDefaultLocation().Discover().Count;
+        }
+        catch (Exception)
+        {
+            // No config, or an unreadable one. Nothing to offer.
+        }
+        if (discovered > 0)
+        {
+            row.Children.Add(Ui.Button(
+                $"{Strings.Get("import.title")} ({discovered})",
+                ImportSshConfig));
+        }
+        row.HorizontalAlignment = HorizontalAlignment.Center;
+        return row;
     }
 
     private UIElement Counter(string key, int value, Color tint)
