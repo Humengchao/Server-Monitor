@@ -351,6 +351,29 @@ internal static class Ui
         return box;
     }
 
+    /// <summary>
+    /// Marks the button Enter presses.
+    /// </summary>
+    /// <remarks>
+    /// None of the editors had this, so Enter did nothing in any of them and
+    /// Escape did not close them — while the macOS build marks the same two
+    /// buttons with .defaultAction and .cancelAction. WPF does the rest once
+    /// the flags are set, including leaving Enter alone inside a multi-line
+    /// text box, which is why the notes field still takes a newline.
+    /// </remarks>
+    public static Button Default(Button button)
+    {
+        button.IsDefault = true;
+        return button;
+    }
+
+    /// <summary>Marks the button Escape presses.</summary>
+    public static Button Cancels(Button button)
+    {
+        button.IsCancel = true;
+        return button;
+    }
+
     /// <summary>A labelled row for the editors and settings, from string keys.</summary>
     public static Grid Field(string labelKey, UIElement control, string? helpKey = null) =>
         FieldText(

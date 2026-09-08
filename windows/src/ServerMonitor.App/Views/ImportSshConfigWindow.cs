@@ -42,7 +42,7 @@ public sealed class ImportSshConfigWindow : Window
 
     private UIElement BuildEmpty()
     {
-        var close = Ui.Button(Strings.Get("common.close"), Close);
+        var close = Ui.Cancels(Ui.Button(Strings.Get("common.close"), Close));
         var panel = Ui.Rows(12,
             Ui.Empty("import.none", "import.noneHelp"),
             Ui.Caption(SshConfig.DefaultConfigPath),
@@ -118,9 +118,9 @@ public sealed class ImportSshConfigWindow : Window
         });
         selectAll.HorizontalAlignment = HorizontalAlignment.Left;
 
-        _import = Ui.Accent(Strings.Get("import.action"), Import);
+        _import = Ui.Default(Ui.Accent(Strings.Get("import.action"), Import));
         var buttons = Ui.Columns(8,
-            Ui.Button(Strings.Get("common.cancel"), () => { DialogResult = false; Close(); }),
+            Ui.Cancels(Ui.Button(Strings.Get("common.cancel"), () => { DialogResult = false; Close(); })),
             _import);
         buttons.HorizontalAlignment = HorizontalAlignment.Right;
 

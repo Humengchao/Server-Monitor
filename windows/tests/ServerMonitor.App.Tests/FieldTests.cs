@@ -63,4 +63,23 @@ public class FieldTests
             Strings.Get("server.country"),
             UiThread.Run(() => ((TextBlock)labelledBy!).Text));
     }
+
+    [Fact]
+    public void TheKeyboardHelpersMarkTheRightButtons()
+    {
+        // None of the editors set these, so Enter did nothing in any of them
+        // and Escape did not close them — verified in the running app before
+        // and after. WPF handles the rest once the flags are on.
+        var save = UiThread.Run(() => Ui.Default(Ui.Accent("Save", () => { })));
+        var cancel = UiThread.Run(() => Ui.Cancels(Ui.Button("Cancel", () => { })));
+
+        Assert.True(UiThread.Run(() => save.IsDefault), "Enter does not press Save");
+        Assert.True(UiThread.Run(() => cancel.IsCancel), "Escape does not press Cancel");
+
+        // And they are not the same flag: a button that is both would fire on
+        // either key, which for a Save is how you lose an edit to a stray
+        // Escape.
+        Assert.False(UiThread.Run(() => save.IsCancel), "Save also answers Escape");
+        Assert.False(UiThread.Run(() => cancel.IsDefault), "Cancel also answers Enter");
+    }
 }

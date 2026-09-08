@@ -363,8 +363,8 @@ public sealed class GenerateKeyWindow : Window
         _error.Visibility = Visibility.Collapsed;
 
         var buttons = Ui.Columns(8,
-            Ui.Button(Strings.Get("common.cancel"), () => { DialogResult = false; Close(); }),
-            Ui.Accent(Strings.Get("keys.generate"), () => _ = GenerateAsync()));
+            Ui.Cancels(Ui.Button(Strings.Get("common.cancel"), () => { DialogResult = false; Close(); })),
+            Ui.Default(Ui.Accent(Strings.Get("keys.generate"), () => _ = GenerateAsync())));
         buttons.HorizontalAlignment = HorizontalAlignment.Right;
         buttons.Margin = new Thickness(0, 14, 0, 0);
 
@@ -430,8 +430,8 @@ public sealed class NameKeyWindow : Window
         Background = (System.Windows.Media.Brush)FindResource("Brush.Background");
 
         var buttons = Ui.Columns(8,
-            Ui.Button(Strings.Get("common.cancel"), () => { DialogResult = false; Close(); }),
-            Ui.Accent(Strings.Get("common.save"), () => { DialogResult = true; Close(); }));
+            Ui.Cancels(Ui.Button(Strings.Get("common.cancel"), () => { DialogResult = false; Close(); })),
+            Ui.Default(Ui.Accent(Strings.Get("common.save"), () => { DialogResult = true; Close(); })));
         buttons.HorizontalAlignment = HorizontalAlignment.Right;
         buttons.Margin = new Thickness(0, 14, 0, 0);
 
@@ -464,8 +464,8 @@ public sealed class PickServerWindow : Window
             server => Selected = server);
 
         var buttons = Ui.Columns(8,
-            Ui.Button(Strings.Get("common.cancel"), () => { DialogResult = false; Close(); }),
-            Ui.Accent(Strings.Get("common.save"), () => { DialogResult = true; Close(); }));
+            Ui.Cancels(Ui.Button(Strings.Get("common.cancel"), () => { DialogResult = false; Close(); })),
+            Ui.Default(Ui.Accent(Strings.Get("common.save"), () => { DialogResult = true; Close(); })));
         buttons.HorizontalAlignment = HorizontalAlignment.Right;
         buttons.Margin = new Thickness(0, 14, 0, 0);
 

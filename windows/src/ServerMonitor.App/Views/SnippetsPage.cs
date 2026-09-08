@@ -170,8 +170,8 @@ public sealed class SnippetEditorWindow : Window
         _error.Visibility = Visibility.Collapsed;
 
         var buttons = Ui.Columns(8,
-            Ui.Button(Strings.Get("common.cancel"), () => { DialogResult = false; Close(); }),
-            Ui.Accent(Strings.Get("common.save"), Save));
+            Ui.Cancels(Ui.Button(Strings.Get("common.cancel"), () => { DialogResult = false; Close(); })),
+            Ui.Default(Ui.Accent(Strings.Get("common.save"), Save)));
         buttons.HorizontalAlignment = HorizontalAlignment.Right;
         buttons.Margin = new Thickness(0, 14, 0, 0);
 
@@ -239,7 +239,7 @@ public sealed class SnippetRunWindow : Window
             server => server.Name,
             server => _target = server);
 
-        var run = Ui.Accent(Strings.Get("snippet.run"), () => _ = RunAsync());
+        var run = Ui.Default(Ui.Accent(Strings.Get("snippet.run"), () => _ = RunAsync()));
 
         var command = Ui.Mono(snippet.Command);
         command.TextWrapping = TextWrapping.Wrap;

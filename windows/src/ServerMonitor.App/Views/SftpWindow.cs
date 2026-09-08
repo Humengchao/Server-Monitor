@@ -530,8 +530,8 @@ public sealed class TextPromptWindow : Window
         Background = (System.Windows.Media.Brush)FindResource("Brush.Background");
 
         var buttons = Ui.Columns(8,
-            Ui.Button(Strings.Get("common.cancel"), () => { DialogResult = false; Close(); }),
-            Ui.Accent(Strings.Get("common.save"), Accept));
+            Ui.Cancels(Ui.Button(Strings.Get("common.cancel"), () => { DialogResult = false; Close(); })),
+            Ui.Default(Ui.Accent(Strings.Get("common.save"), Accept)));
         buttons.HorizontalAlignment = HorizontalAlignment.Right;
         buttons.Margin = new Thickness(0, 14, 0, 0);
 
