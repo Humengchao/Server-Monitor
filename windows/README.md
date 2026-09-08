@@ -249,10 +249,15 @@ key: it really does write to `authorized_keys`), `SM_WIN_HOST` / `SM_WIN_USER` /
 
 ### Known gaps
 
-- **The terminal has not been exercised against a live host.** The control
-  loads, the window opens and a failure is reported honestly, but IME input,
-  `vim`, `Ctrl+C` and resize are unverified until host credentials are available
-  (the plan's S3 spike).
+- **The terminal is now exercised against live hosts, and works.** Measured
+  against nine Ubuntu/Debian hosts: the pty follows the window (a drag-resize
+  from 1220x780 to 920x560 took the remote `stty size` from `34 118` to
+  `23 88`, so SIGWINCH propagates); `Ctrl+C` interrupts a running `sleep` and
+  returns the prompt; `vim` renders and restores the primary screen buffer with
+  the scrollback intact on exit; IME-composed Chinese reaches the remote shell;
+  Ctrl+Shift+V pastes; `TERM=xterm-256color` with 256-colour output rendering.
+  One host prints a login banner and another warns on stderr about its key
+  exchange, and neither disturbs the collector's parsing.
 - **Mica is off by default.** It needs the window's own background transparent,
   and where DWM declines to composite the material — a virtual display adapter,
   some remote-streaming setups — the client area renders entirely black while
@@ -273,10 +278,23 @@ key: it really does write to `authorized_keys`), `SM_WIN_HOST` / `SM_WIN_USER` /
   had been appending lines missing the handle column to the same file, and
   those were dropped without altering a number — and the rest are the
   controls.
-- **Toast alerts are unverifiable here too.** Alerts fire on a status
-  *transition*, not a state, so a host that was already unreachable when the
-  app started does not raise one — which is right, or every launch would fire a
-  volley. Seeing a toast needs a host that goes from online to offline.
+- **Toasts had never been implemented, and now reach Windows — but whether a
+  banner draws here is unconfirmed.** The plan asks for
+  `ToastNotificationManagerCompat`; what existed was
+  `NotifyIcon.ShowBalloonTip`, which on Windows 11 registers no AUMID and
+  displays nothing at all, so every alert the app raised was discarded in
+  silence. It was doubly invisible because alerts were not logged either.
+  Found by setting a threshold that real hosts were breaching: the sustain
+  logic fires correctly (three consecutive polls, then a 15-minute cooldown)
+  and now says so in the log. With the toast path in place Windows registers
+  the app and counts the notifications — its per-app entry reached
+  `PeriodicNotificationCount: 15` — but no banner appeared in three captures
+  taken a second after the log recorded a fire, and this desktop's
+  notification state could not be read back to say why. The tray balloon
+  remains as a fallback when the toast API refuses outright.
+- Alerts fire on a status *transition*, not a state, so a host that was already
+  unreachable when the app started does not raise one — which is right, or
+  every launch would fire a volley.
 - **The packaged build's resident memory is markedly higher**: about 200 MB
   private for the self-contained single file, against about 115 MB running
   framework-dependent through `dotnet run`. The cause is

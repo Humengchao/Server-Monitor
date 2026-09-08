@@ -23,7 +23,15 @@ public delegate void AlertDelivery(Guid serverId, string title, string body);
 /// latency: a threshold must be breached for several consecutive polls before
 /// it fires, and each alert then goes quiet for a cooldown period.
 /// </remarks>
-public sealed class AlertService(AppSettings settings, AlertDelivery deliver)
+/// <param name="log">
+/// Optional trace of what the thresholds decided. An alert that does not
+/// arrive is otherwise undiagnosable from outside: "the limit was never
+/// crossed", "it was crossed but not for long enough" and "it fired and
+/// Windows dropped the toast" look identical, and each needs a different
+/// fix. Written at most once per metric per poll.
+/// </param>
+public sealed class AlertService(
+    AppSettings settings, AlertDelivery deliver, Action<string>? log = null)
 {
     public enum Metric { Cpu, Memory, Disk }
 
@@ -50,7 +58,11 @@ public sealed class AlertService(AppSettings settings, AlertDelivery deliver)
     /// </summary>
     public void Evaluate(Server server, ServerStatus status, MetricSnapshot? snapshot)
     {
-        if (!settings.NotificationsEnabled) return;
+        if (!settings.NotificationsEnabled)
+        {
+            log?.Invoke("alerts: off, nothing evaluated");
+            return;
+        }
 
         var isOnline = status.IsOnline;
         var hadPrevious = _previousOnline.TryGetValue(server.Id, out var wasOnline);
@@ -108,6 +120,9 @@ public sealed class AlertService(AppSettings settings, AlertDelivery deliver)
         }
         var run = _breachRun.GetValueOrDefault(key) + 1;
         _breachRun[key] = run;
+        log?.Invoke(
+            $"alerts: {server.Name} {metric} {value:F1}% over {limit}%, "
+            + $"run {run}/{SustainedPolls}");
         // Exactly at the threshold, not at or above it: the cooldown handles
         // repetition, and firing on every later poll would defeat it.
         if (run != SustainedPolls) return;

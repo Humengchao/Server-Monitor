@@ -32,6 +32,10 @@
     <!-- R3: an unofficial package wrapping Windows Terminal's control, pinned
          to the version the terminal was actually proven against. -->
     <TerminalControlVersion>1.0.38</TerminalControlVersion>
+    <!-- Toasts for an unpackaged app (plan §D: ToastNotificationManagerCompat).
+         NotifyIcon.ShowBalloonTip, which this replaced, silently shows nothing
+         on Windows 11. -->
+    <ToastVersion>7.1.3</ToastVersion>
     <XUnitVersion>2.9.3</XUnitVersion>
     <XUnitRunnerVersion>3.1.5</XUnitRunnerVersion>
     <TestSdkVersion>18.9.0</TestSdkVersion>

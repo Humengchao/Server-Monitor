@@ -137,7 +137,7 @@ public partial class App : Application
             IsEnergySaverOn = SystemWatchers.IsEnergySaverOn,
         };
 
-        Monitor.Alerts = new AlertService(Settings, DeliverAlert);
+        Monitor.Alerts = new AlertService(Settings, DeliverAlert, Log);
 
         // Every window, not just this one's: a class handler fires for each
         // Window the app ever loads, so the terminal, the file browser, the
@@ -176,6 +176,14 @@ public partial class App : Application
         Monitor.Published += () => _tray.Refresh();
 
         _instance.ListenForActivation(() => Dispatcher.Invoke(ShowWindow));
+
+        // Clicking a toast opens the host it is about (plan §D). The callback
+        // arrives on a thread-pool thread, so it marshals here.
+        Toasts.OnClicked(serverId => Dispatcher.Invoke(() =>
+        {
+            ShowWindow();
+            OpenServer(serverId);
+        }));
 
         if (_startMinimised)
         {
@@ -221,8 +229,27 @@ public partial class App : Application
         }
     }
 
-    private void DeliverAlert(Guid serverId, string title, string body) =>
+    /// <summary>
+    /// Hands an alert to the notification area.
+    /// </summary>
+    /// <remarks>
+    /// Logged as well as shown. An alert that does not appear is otherwise
+    /// impossible to diagnose: there is no way to tell "the threshold never
+    /// tripped" from "it tripped and Windows swallowed the toast", and the
+    /// two need completely different fixes. Found while chasing exactly that
+    /// against real hosts.
+    /// </remarks>
+    private void DeliverAlert(Guid serverId, string title, string body)
+    {
+        Log($"alert: {title} — {body}");
+        // A real toast, per the plan. The tray balloon is the fallback and not
+        // the other way round: on Windows 11 ShowBalloonTip displays nothing
+        // whatsoever for an unpackaged app, so for a year of this app's life
+        // every alert it raised went nowhere. See Platform/Toasts.
+        if (Toasts.Show(title, body, serverId)) return;
+        Log("alert: toast unavailable, falling back to the tray balloon");
         Dispatcher.Invoke(() => _tray?.Notify(title, body, serverId));
+    }
 
     // MARK: - Window
 
@@ -412,6 +439,7 @@ public partial class App : Application
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
         Monitor?.Stop();
         Settings?.Flush();
+        Toasts.Clear();
         _tray?.Dispose();
         _watchers?.Dispose();
         _instance?.Dispose();

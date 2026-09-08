@@ -63,6 +63,7 @@
          wired up. Everything that touches it is behind Terminal/TerminalHost,
          per R3. -->
     <PackageReference Include="EasyWindowsTerminalControl" Version="$(TerminalControlVersion)" />
+    <PackageReference Include="Microsoft.Toolkit.Uwp.Notifications" Version="$(ToastVersion)" />
   </ItemGroup>
 
   <!-- The terminal renderer ships an 85 MB PDB per architecture. Useful to
