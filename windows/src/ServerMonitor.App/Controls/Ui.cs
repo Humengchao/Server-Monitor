@@ -205,7 +205,15 @@ internal static class Ui
     public static TextBox Input(string value = "", double width = double.NaN)
     {
         var box = new TextBox { Text = value };
-        if (!double.IsNaN(width)) box.Width = width;
+        if (!double.IsNaN(width))
+        {
+            box.Width = width;
+            // A fixed width with the default Stretch alignment leaves WPF to
+            // centre the box in its cell, so the port and country fields sat
+            // in the middle of a column every other input starts at the left
+            // of. Narrow does not mean centred.
+            box.HorizontalAlignment = HorizontalAlignment.Left;
+        }
         return box;
     }
 
@@ -242,7 +250,13 @@ internal static class Ui
     }
 
     /// <summary>A labelled row for the editors and settings.</summary>
-    public static Grid Field(string labelKey, UIElement control, string? helpKey = null)
+    /// <param name="help">
+    /// Literal help text, for the places where the shared string says
+    /// something that is only true on macOS. Ignored when
+    /// <paramref name="helpKey"/> is given.
+    /// </param>
+    public static Grid Field(
+        string labelKey, UIElement control, string? helpKey = null, string? help = null)
     {
         var label = Caption(Strings.Get(labelKey));
         label.VerticalAlignment = VerticalAlignment.Center;
@@ -250,9 +264,10 @@ internal static class Ui
         label.TextTrimming = TextTrimming.None;
         label.TextWrapping = TextWrapping.Wrap;
 
-        var right = helpKey is null
+        var note = helpKey is not null ? Strings.Get(helpKey) : help;
+        var right = note is null
             ? control
-            : Rows(4, control, Wrapped(Strings.Get(helpKey), "Text.Tertiary"));
+            : Rows(4, control, Wrapped(note, "Text.Tertiary"));
 
         var grid = Grid("150,*", label, right);
         grid.Margin = new Thickness(0, 0, 0, 10);
