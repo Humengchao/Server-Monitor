@@ -19,7 +19,7 @@ public class DatabaseTests
     [Fact]
     public void MigrationsRunOnAFreshStore()
     {
-        var database = Database.InMemory();
+        using var database = Database.InMemory();
         Assert.Empty(database.AllServers());
         Assert.Empty(database.AllIdentities());
         Assert.Empty(database.AllGroups());
@@ -35,24 +35,31 @@ public class DatabaseTests
         var path = Path.Combine(Path.GetTempPath(), $"sm-test-{Guid.NewGuid():N}.sqlite");
         try
         {
-            var first = Database.Open(path);
-            first.Save(NewServer());
-            var second = Database.Open(path);
-            Assert.Single(second.AllServers());
+            using (var first = Database.Open(path))
+            {
+                first.Save(NewServer());
+                using var second = Database.Open(path);
+                Assert.Single(second.AllServers());
+            }
         }
         finally
         {
+            // Disposed above, so these deletes now actually succeed. They
+            // used to throw every time — a file-backed store pools its
+            // connections, so nothing had closed the file — and the catch
+            // hid it, leaving a scratch database in %TEMP% per run.
             foreach (var suffix in new[] { "", "-wal", "-shm" })
             {
                 try { File.Delete(path + suffix); } catch (IOException) { /* WAL may linger */ }
             }
+            Assert.False(File.Exists(path), $"{path} outlived the test");
         }
     }
 
     [Fact]
     public void AServerRoundTripsEveryColumn()
     {
-        var database = Database.InMemory();
+        using var database = Database.InMemory();
         var server = NewServer();
         server.Port = 2222;
         server.AuthKind = AuthKind.IdentityFile;
@@ -89,7 +96,7 @@ public class DatabaseTests
     {
         // Two different things, and the difference is load-bearing: null
         // follows the global setting, 0 disables the alert for that metric.
-        var database = Database.InMemory();
+        using var database = Database.InMemory();
         var server = NewServer();
         server.CpuThreshold = null;
         server.DiskThreshold = 0;
@@ -114,7 +121,7 @@ public class DatabaseTests
     [Fact]
     public void SavingAnExistingServerUpdatesRatherThanDuplicates()
     {
-        var database = Database.InMemory();
+        using var database = Database.InMemory();
         var server = NewServer();
         database.Save(server);
         server.Name = "renamed";
@@ -127,7 +134,7 @@ public class DatabaseTests
     [Fact]
     public void DeletingAServerTakesItsHistoryWithIt()
     {
-        var database = Database.InMemory();
+        using var database = Database.InMemory();
         var server = NewServer();
         database.Save(server);
         database.Insert(new MetricSample(server.Id, new MetricSnapshot { CpuPercent = 10 }));
@@ -143,7 +150,7 @@ public class DatabaseTests
     [Fact]
     public void DeletingAGroupKeepsItsMachines()
     {
-        var database = Database.InMemory();
+        using var database = Database.InMemory();
         var group = new MachineGroup { Name = "prod" };
         database.Save(group);
         var server = NewServer();
@@ -158,7 +165,7 @@ public class DatabaseTests
     [Fact]
     public void DeletingAnIdentityLeavesItsServersOnTheirOwnSettings()
     {
-        var database = Database.InMemory();
+        using var database = Database.InMemory();
         var identity = new Identity { Name = "deploy", Username = "deploy" };
         database.Save(identity);
         var server = NewServer();
@@ -174,7 +181,7 @@ public class DatabaseTests
     public void SessionHistoryOutlivesTheServerItRefersTo()
     {
         // Nulled rather than cascaded: the name column carries the label.
-        var database = Database.InMemory();
+        using var database = Database.InMemory();
         var server = NewServer();
         database.Save(server);
         database.Save(new SessionRecord
@@ -193,7 +200,7 @@ public class DatabaseTests
     [Fact]
     public void DanglingSessionsAreClosedOnRelaunch()
     {
-        var database = Database.InMemory();
+        using var database = Database.InMemory();
         var started = DateTime.UtcNow.AddMinutes(-5);
         database.Save(new SessionRecord
         {
@@ -213,7 +220,7 @@ public class DatabaseTests
     [Fact]
     public void ReorderWritesZeroToNMinusOne()
     {
-        var database = Database.InMemory();
+        using var database = Database.InMemory();
         var a = NewServer("a", 5);
         var b = NewServer("b", 9);
         var c = NewServer("c", 1);
@@ -227,7 +234,7 @@ public class DatabaseTests
     [Fact]
     public void SnippetUseIsCounted()
     {
-        var database = Database.InMemory();
+        using var database = Database.InMemory();
         var snippet = new Snippet { Name = "df", Command = "df -h" };
         database.Save(snippet);
         database.MarkSnippetUsed(snippet.Id);
@@ -241,7 +248,7 @@ public class DatabaseTests
     [Fact]
     public async Task RecordPollWritesTheSampleAndTheFactsInOneGo()
     {
-        var database = Database.InMemory();
+        using var database = Database.InMemory();
         var server = NewServer();
         database.Save(server);
 
@@ -271,7 +278,7 @@ public class DatabaseTests
         // The row is re-read inside the transaction rather than saved from the
         // poll's copy, precisely so an edit made while the poll was in flight
         // survives.
-        var database = Database.InMemory();
+        using var database = Database.InMemory();
         var server = NewServer();
         server.OsKind = OSKind.Windows;
         database.Save(server);
@@ -283,7 +290,7 @@ public class DatabaseTests
     [Fact]
     public async Task RecordPollForADeletedServerDoesNotResurrectIt()
     {
-        var database = Database.InMemory();
+        using var database = Database.InMemory();
         var server = NewServer();
         database.Save(server);
         database.DeleteServer(server.Id);
@@ -298,7 +305,7 @@ public class DatabaseTests
     [Fact]
     public void PruneDropsOnlyWhatIsOlderThanRetention()
     {
-        var database = Database.InMemory();
+        using var database = Database.InMemory();
         var server = NewServer();
         database.Save(server);
 
@@ -314,7 +321,7 @@ public class DatabaseTests
     [Fact]
     public void ReducedSamplesBucketsToTheRequestedCount()
     {
-        var database = Database.InMemory();
+        using var database = Database.InMemory();
         var server = NewServer();
         database.Save(server);
 
@@ -343,7 +350,7 @@ public class DatabaseTests
     [Fact]
     public void ReducedSamplesFallsBackToRawForAZeroSpan()
     {
-        var database = Database.InMemory();
+        using var database = Database.InMemory();
         var server = NewServer();
         database.Save(server);
         var at = DateTime.UtcNow;
@@ -375,7 +382,7 @@ public class DatabaseTests
     [Fact]
     public void GuidsRoundTripThroughTheBlobColumn()
     {
-        var database = Database.InMemory();
+        using var database = Database.InMemory();
         var server = NewServer();
         database.Save(server);
         Assert.Equal(server.Id, Assert.Single(database.AllServers()).Id);

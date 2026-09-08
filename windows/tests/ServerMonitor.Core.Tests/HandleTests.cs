@@ -17,10 +17,13 @@ namespace ServerMonitor.Core.Tests;
 /// handles a minute — and this is the same question asked in a second rather
 /// than half an hour.
 ///
-/// Deliberately not a tight bound. The runtime opens and closes handles of its
-/// own (timers, thread-pool waits, the SQLite connections other tests leave to
-/// the GC), so the assertion is about the difference between a leak per attempt
-/// and no leak per attempt, not about an exact count.
+/// The bound is loose but no longer arbitrary. It was 40, which was really a
+/// noise budget: the count belongs to the process, so whatever else xUnit was
+/// running in parallel landed in the measurement window, and the test failed
+/// about one solution run in ten at 54 handles. With this assembly serialised
+/// (see AssemblyInfo.cs) the measured delta is 0 across repeated runs, so what
+/// is left is headroom for the runtime's own timers and thread-pool waits
+/// rather than for other tests.
 /// </remarks>
 public class HandleTests
 {
@@ -47,9 +50,11 @@ public class HandleTests
 
         // Before the fix this was a handle per attempt: the client that failed
         // to connect kept the socket it had opened, and only the catch's hop
-        // release ran. 100 attempts leaked ~100 handles.
+        // release ran. 100 attempts leaked ~100 handles. Measured at 0 now, so
+        // 20 is a fifth of what the original bug cost and twenty times the
+        // observed value.
         Assert.True(
-            after - before < 40,
+            after - before < 20,
             $"100 failed connections added {after - before} handles ({before} -> {after})");
     }
 

@@ -38,19 +38,26 @@ public sealed class SettingsPage : UserControl
         var launchToggle = Ui.Toggle(
             Strings.Get("settings.launchAtLogin"),
             StartupRegistration.IsEnabled,
-            value =>
+            // The registry is the source of truth, not the setting. Returning
+            // false is what actually puts the box back — the previous version
+            // only said so in a comment, so a refused write left the toggle
+            // on and the app not starting with Windows.
+            bool (value) =>
             {
-                // The registry is the source of truth, not the setting: if the
-                // write is refused, the toggle goes back rather than claiming
-                // a state that is not real.
-                if (StartupRegistration.Set(value))
+                if (StartupRegistration.Set(value, out var error))
                 {
                     Settings.LaunchAtLogin = value;
+                    return true;
                 }
-                else
-                {
-                    Ui.Complain(Window.GetWindow(this), Strings.Get("common.error"));
-                }
+
+                // Named rather than Strings.Get("common.error"), which is the
+                // single word "Error" — true, and useless. A locked Run key
+                // is the realistic cause and says nothing about itself, so
+                // the reason the registry gave goes in the message.
+                Ui.Complain(Window.GetWindow(this), Strings.IsChinese
+                    ? $"无法修改开机启动项：{error}。\n\n注册表 {StartupRegistration.KeyDescription} 可能被组策略或安全软件锁定。"
+                    : $"Could not change the startup entry: {error}.\n\nThe registry key {StartupRegistration.KeyDescription} may be locked by group policy or security software.");
+                return false;
             });
 
         return Ui.Rows(0,
@@ -77,7 +84,10 @@ public sealed class SettingsPage : UserControl
                 },
                 language => Settings.Language = language)),
 
-            Ui.Field("settings.general", Ui.Picker(
+            // Not settings.general: that is this section's own title, so the
+            // row read "General" inside the General card. There is no shared
+            // key — macOS follows the system appearance with no picker.
+            Ui.FieldText(Strings.IsChinese ? "外观" : "Appearance", Ui.Picker(
                 new[] { AppTheme.System, AppTheme.Light, AppTheme.Dark },
                 Settings.Theme,
                 theme => theme switch
@@ -99,8 +109,13 @@ public sealed class SettingsPage : UserControl
                 "Text.Tertiary"),
 
             // D3 in the UI: which transport hosts use by default, with the
-            // trade-off stated rather than left to the README.
-            Ui.Field("nav.settings", Ui.Picker(
+            // trade-off stated rather than left to the README. FieldText, not
+            // Field: this setting exists only on Windows, so the shared table
+            // has no key for it — and the label used to be nav.settings,
+            // which rendered the row as "Settings" inside the Settings page.
+            Ui.FieldText(
+                Strings.IsChinese ? "SSH 传输方式" : "SSH transport",
+                Ui.Picker(
                 new[] { TransportKind.Library, TransportKind.OpenSshExe },
                 Settings.Transport,
                 kind => kind == TransportKind.Library
@@ -196,23 +211,25 @@ public sealed class SettingsPage : UserControl
         var databasePath = Core.Store.Database.DefaultPath;
         var logs = System.IO.Path.Combine(Core.Store.Database.DefaultDirectory, "logs");
 
+        // Labelled, because two bare grey paths one under the other do not
+        // say which is which — and selectable, because a path you cannot copy
+        // is one you retype. Clearing history is deliberately not here: it
+        // lives on the sessions screen, where the list empties in front of
+        // you. The copy that used to be here showed a dialog reading "Save"
+        // and refreshed nothing, which is what a second call site drifts into.
         return Ui.Rows(8,
-            Ui.Caption(databasePath),
-            Ui.Caption(logs),
+            Ui.FieldText(
+                Strings.IsChinese ? "数据库" : "Database",
+                Ui.Selectable(databasePath)),
+            Ui.FieldText(
+                Strings.IsChinese ? "日志" : "Logs",
+                Ui.Selectable(logs)),
             Ui.Columns(8,
                 Ui.Button(
                     Strings.IsChinese ? "打开数据目录" : "Open data folder",
-                    () => Reveal(Core.Store.Database.DefaultDirectory)),
-                Ui.Button(Strings.Get("history.clear"), ClearHistory)),
+                    () => Reveal(Core.Store.Database.DefaultDirectory))),
             Ui.Separator(),
             Ui.Columns(8, Ui.Danger(Strings.Get("menubar.quit"), () => App.Current.QuitApp())));
-    }
-
-    private void ClearHistory()
-    {
-        if (!Ui.Confirm(Window.GetWindow(this), Strings.Get("history.clearConfirm"))) return;
-        App.Current.Monitor.Database.ClearSessionHistory();
-        Ui.Inform(Window.GetWindow(this), Strings.Get("common.save"));
     }
 
     private void Reveal(string path)

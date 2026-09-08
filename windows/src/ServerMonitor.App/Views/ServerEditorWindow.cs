@@ -122,14 +122,19 @@ public sealed class ServerEditorWindow : Window
             // Not identity.name ("Name"): that is the label inside the
             // identity editor, and here it sits four rows under the server's
             // own name field. What this row picks is which shared identity to
-            // use, so it says so.
-            Ui.Field("nav.identities", Ui.Picker(
+            // use, so it says so — as FieldText, because macOS has no such
+            // picker and the shared table therefore has no singular key for
+            // it (nav.identities is the plural nav label).
+            Ui.FieldText(Strings.IsChinese ? "身份" : "Identity", Ui.Picker(
                 identities,
                 identities.FirstOrDefault(i => i?.Id == _identityId),
                 identity => identity is null ? Strings.Get("common.none") : identity.Summary,
                 identity => _identityId = identity?.Id)),
 
-            Ui.Field("group.title", Ui.Picker(
+            // group.assign ("Move to group"), the key macOS labels this same
+            // picker with. group.title is "Machine groups", a section
+            // heading, which read as though the row listed them all.
+            Ui.Field("group.assign", Ui.Picker(
                 groups,
                 groups.FirstOrDefault(g => g?.Id == _groupId),
                 group => group?.Name ?? Strings.Get("group.none"),
@@ -146,7 +151,7 @@ public sealed class ServerEditorWindow : Window
                 },
                 kind => _osKind = kind), "server.osHelp"),
 
-            CountryField(),
+            Ui.Field("server.country", _country, "server.countryHelp"),
             Ui.Field("server.tags", _tags, "server.tagsHelp"),
             Ui.Field("server.notes", _notes),
 
@@ -184,24 +189,6 @@ public sealed class ServerEditorWindow : Window
         root.Margin = new Thickness(20);
         return root;
     }
-
-    /// <summary>
-    /// The country code, with help that matches what Windows can draw.
-    /// </summary>
-    /// <remarks>
-    /// server.countryHelp says the code is used to show a flag, which is true
-    /// on macOS and not here: no Windows font has glyphs for
-    /// regional-indicator pairs, so the code appears as a small badge instead
-    /// (see Ui.CountryBadge). Promising a flag that never appears reads as a
-    /// bug in the font.
-    /// </remarks>
-    private UIElement CountryField() => Ui.Field(
-        "server.country",
-        _country,
-        helpKey: null,
-        help: Strings.IsChinese
-            ? "两位 ISO 代码，如 CN、US、JP。Windows 没有国旗字形，因此显示为国家代码徽章。"
-            : "A two-letter ISO code such as CN, US or JP. No Windows font has flag glyphs, so it appears as a country badge.");
 
     private static string LabelFor(AuthKind kind) => kind switch
     {

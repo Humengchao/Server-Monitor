@@ -10,11 +10,14 @@ namespace ServerMonitor.Core.L10n;
 /// from that file needs no new keys and the two clients cannot drift into
 /// saying different things.
 ///
-/// Thirteen entries deliberately differ in wording where the macOS text names a
+/// Fourteen entries deliberately differ in wording where the macOS text names a
 /// macOS thing: <c>~/.ssh</c> becomes <c>%USERPROFILE%\.ssh</c>, "Reveal in
 /// Finder" becomes "Show in File Explorer", "Launch at login" becomes "Start
-/// with Windows", and the credential notes name the credential manager rather
-/// than the keychain. Seeded by <c>scripts/extract-l10n.py</c> plus
+/// with Windows", the credential notes name the credential manager rather than
+/// the keychain, and the country code is described as a badge rather than a
+/// flag — no Windows font has glyphs for regional-indicator pairs, so the flag
+/// the macOS text promises would never appear. Seeded by
+/// <c>scripts/extract-l10n.py</c> plus
 /// <c>scripts/emit-strings.py</c>; maintained by hand since.
 /// </remarks>
 public static partial class Strings
@@ -157,7 +160,7 @@ public static partial class Strings
         ["server.alias"] = ("配置别名", "Config alias"),
         ["server.identityPath"] = ("私钥路径", "Key path"),
         ["server.country"] = ("国家/地区代码", "Country code"),
-        ["server.countryHelp"] = ("两位 ISO 代码，如 CN、US、JP，用于显示国旗。", "Two-letter ISO code such as CN, US, JP — shows a flag."),
+        ["server.countryHelp"] = ("两位 ISO 代码，如 CN、US、JP，在卡片上显示为代码徽章。", "Two-letter ISO code such as CN, US, JP — shown as a code badge on the card."),
         ["settings.credentialsNoteLocal"] = ("连接直接由本应用发起，私钥始终留在 %USERPROFILE%\\.ssh，本应用不会复制或存储密钥。", "Connections are made by this app directly; keys stay in %USERPROFILE%\\.ssh and are never copied here."),
         ["import.title"] = ("从 SSH 配置导入", "Import from SSH config"),
         ["import.subtitle"] = ("读取 %USERPROFILE%\\.ssh\\config 中的主机。连接时直接复用该配置，私钥始终留在 %USERPROFILE%\\.ssh。", "Reads hosts from %USERPROFILE%\\.ssh\\config and connects through it; keys never leave %USERPROFILE%\\.ssh."),

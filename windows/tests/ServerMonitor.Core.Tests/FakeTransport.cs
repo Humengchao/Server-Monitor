@@ -164,7 +164,13 @@ internal sealed class TestPump
 }
 
 /// <summary>Shared setup for the service-level tests.</summary>
-internal sealed class Harness
+/// <remarks>
+/// Disposable because it owns an in-memory store, and an in-memory SQLite
+/// database lives exactly as long as a connection to it stays open. Thirty-five
+/// tests each leaving one open put thirty-five live connections — and their
+/// handles — into a process that HandleTests then tries to count.
+/// </remarks>
+internal sealed class Harness : IDisposable
 {
     public Database Database { get; }
     public AppSettings Settings { get; } = new();
@@ -191,6 +197,8 @@ internal sealed class Harness
                 (id, title, body) => Alerts.Add((id, title, body)));
         }
     }
+
+    public void Dispose() => Database.Dispose();
 
     public Server AddServer(string name)
     {

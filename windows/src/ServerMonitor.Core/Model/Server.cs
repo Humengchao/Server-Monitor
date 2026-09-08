@@ -90,6 +90,12 @@ public sealed class Server
     }
 
     /// <summary>Flag emoji for <see cref="CountryCode"/>, or "" when unset or malformed.</summary>
+    /// <remarks>
+    /// Kept for parity with the macOS model, and not for drawing on Windows:
+    /// no Windows font has glyphs for regional-indicator pairs, so this
+    /// renders as two boxed capitals rather than a flag. The Windows views use
+    /// <c>Ui.CountryBadge</c> with <see cref="CountryCode"/> instead.
+    /// </remarks>
     public string Flag => Format.Flag(CountryCode);
 
     /// <summary>

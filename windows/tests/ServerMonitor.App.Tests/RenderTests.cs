@@ -1,3 +1,4 @@
+using System.Windows.Controls;
 using ServerMonitor.App.Controls;
 using ServerMonitor.App.Theme;
 using ServerMonitor.Core;
@@ -45,6 +46,38 @@ public class RenderTests
             "the ring is filled in rather than hollow");
         // And the number is drawn — the gauge is unreadable without it.
         Assert.True(frame.Contains(Palette.Text, tolerance: 24), "the percentage is missing");
+    }
+
+    /// <summary>
+    /// A country renders as its letters, not as a flag that is not there.
+    /// </summary>
+    /// <remarks>
+    /// The model carries <c>Server.Flag</c>, a regional-indicator pair, which
+    /// on macOS is a flag and on Windows is two boxed capitals: no shipped
+    /// font has those glyphs. The server detail header asked for it anyway
+    /// until this test went in alongside the fix. Asserted on the pixels
+    /// because the failure was entirely a rendering one — the string was
+    /// exactly what macOS wanted.
+    /// </remarks>
+    [Fact]
+    public void ACountryBadgeDrawsItsLettersAndNoEmoji()
+    {
+        var badge = UiThread.Run(() => Ui.CountryBadge("cn"));
+        var frame = UiThread.Render(badge, 44, 22);
+        frame.Save("country-badge");
+
+        // The letters are drawn, in the secondary ink the badge asks for.
+        Assert.True(frame.Painted > 120, $"only {frame.Painted} pixels painted");
+        Assert.True(frame.Contains(Palette.Secondary, tolerance: 40), "the code is not drawn");
+
+        // Upper-cased on the way in, so a lower-case code in the editor does
+        // not show up as a lower-case badge.
+        var text = UiThread.Run(() => ((TextBlock)badge.Child).Text);
+        Assert.Equal("CN", text);
+
+        // And nothing in the tree is a regional-indicator codepoint, which is
+        // what the emoji path put here.
+        Assert.DoesNotContain(text, c => c is >= (char)0xD83C and <= (char)0xD83D);
     }
 
     [Fact]

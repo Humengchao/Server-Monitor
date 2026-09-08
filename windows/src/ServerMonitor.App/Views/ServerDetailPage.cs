@@ -154,12 +154,15 @@ public sealed class ServerDetailPage : UserControl
     private UIElement Header(Server server, ServerStatus status, MetricSnapshot? snapshot)
     {
         var identity = Ui.Columns(10);
-        if (server.Flag.Length > 0)
+        if (server.CountryCode.Length > 0)
         {
-            var flag = Ui.Text(server.Flag);
-            flag.FontSize = 18;
-            flag.FontFamily = new FontFamily("Segoe UI Emoji");
-            identity.Children.Add(flag);
+            // A badge, not server.Flag. That property is Format.Flag's
+            // regional-indicator pair, which no Windows font draws as a flag:
+            // Segoe UI Emoji renders the pair as two boxed capitals wedged
+            // against the hostname. The dashboard and the machines list both
+            // avoid it already (Ui.CountryBadge); this header was the one
+            // place still asking for the emoji.
+            identity.Children.Add(Ui.CountryBadge(server.CountryCode));
         }
         identity.Children.Add(Ui.Headline(server.Name));
         if (server.Tags.Count > 0) identity.Children.Add(Ui.TagChips(server.Tags));

@@ -12,14 +12,14 @@ public class PollBackoffTests
     {
         // One missed poll is not a pattern; backing off immediately would make
         // a single dropped packet look like an outage.
-        var harness = new Harness();
+        using var harness = new Harness();
         Assert.Equal(TimeSpan.Zero, harness.Service.BackoffDelay(1));
     }
 
     [Fact]
     public void TheDelayGrowsGeometricallyFromThePollInterval()
     {
-        var harness = new Harness();
+        using var harness = new Harness();
         harness.Settings.PollInterval = 5;
         Assert.Equal(TimeSpan.FromSeconds(10), harness.Service.BackoffDelay(2));
         Assert.Equal(TimeSpan.FromSeconds(20), harness.Service.BackoffDelay(3));
@@ -29,7 +29,7 @@ public class PollBackoffTests
     [Fact]
     public void TheDelayIsCappedSoARecoveryIsStillNoticed()
     {
-        var harness = new Harness();
+        using var harness = new Harness();
         harness.Settings.PollInterval = 60;
         // A host down all day must still be retried often enough that coming
         // back is seen within a few minutes.
@@ -39,7 +39,7 @@ public class PollBackoffTests
     [Fact]
     public void AFailureSetsARetryTimeAndASuccessClearsIt()
     {
-        var harness = new Harness();
+        using var harness = new Harness();
         var server = harness.AddServer("web-1");
 
         harness.Service.NoteFailure(server.Id);
@@ -70,7 +70,7 @@ public class PollBackoffTests
     [Fact]
     public async Task AHostInsideItsBackoffWindowIsSkipped()
     {
-        var harness = new Harness();
+        using var harness = new Harness();
         var server = harness.AddServer("web-1");
         harness.Transport.Handlers[server.Id] = FakeTransport.LinuxHost();
 
@@ -87,7 +87,7 @@ public class PollBackoffTests
     {
         // A user-driven refresh is an explicit "try now", so it must not
         // silently skip the hosts that need it most.
-        var harness = new Harness();
+        using var harness = new Harness();
         var server = harness.AddServer("web-1");
         harness.Transport.Handlers[server.Id] = FakeTransport.LinuxHost();
         harness.Service.NoteFailure(server.Id);
@@ -103,7 +103,7 @@ public class PollBackoffTests
     [Fact]
     public async Task WakingUpClearsEveryBackoffAndPollsAtOnce()
     {
-        var harness = new Harness();
+        using var harness = new Harness();
         var server = harness.AddServer("web-1");
         harness.Transport.Handlers[server.Id] = FakeTransport.LinuxHost();
         harness.Service.NoteFailure(server.Id);
@@ -137,7 +137,7 @@ public class TickBarrierTests
         // because hosts finish about a second apart. Every publish is a full
         // dashboard pass, so that was three layouts to show one tick's
         // numbers.
-        var harness = new Harness();
+        using var harness = new Harness();
         var servers = new[] { harness.AddServer("a"), harness.AddServer("b"), harness.AddServer("c") };
         foreach (var server in servers)
         {
@@ -165,7 +165,7 @@ public class TickBarrierTests
     [Fact]
     public async Task AResultForACardWithNothingOnScreenIsNotHeld()
     {
-        var harness = new Harness();
+        using var harness = new Harness();
         var slow = harness.AddServer("slow");
         var fast = harness.AddServer("fast");
         harness.Transport.Handlers[fast.Id] = FakeTransport.LinuxHost();
@@ -187,7 +187,7 @@ public class TickBarrierTests
     {
         // A host that has gone away takes the full connect timeout, and the
         // cap is what keeps one dead host from delaying eight live ones.
-        var harness = new Harness();
+        using var harness = new Harness();
         harness.Service.TickCap = TimeSpan.FromMilliseconds(150);
         var live = harness.AddServer("live");
         var gone = harness.AddServer("gone");
@@ -211,7 +211,7 @@ public class TickBarrierTests
         // It stays in flight for its whole timeout, and with it still a member
         // every later tick could only close by the cap — eight live hosts
         // waiting the cap each round for the one that is gone.
-        var harness = new Harness();
+        using var harness = new Harness();
         harness.Service.TickCap = TimeSpan.FromMilliseconds(100);
         var gone = harness.AddServer("gone");
         harness.Transport.Handlers[gone.Id] = FakeTransport.LinuxHost(
@@ -228,7 +228,7 @@ public class TickBarrierTests
     public async Task AHostAlreadyInFlightIsNotPolledTwice()
     {
         // A stall must not pile up a queue of connections behind it.
-        var harness = new Harness();
+        using var harness = new Harness();
         var server = harness.AddServer("slow");
         harness.Transport.Handlers[server.Id] = FakeTransport.LinuxHost(
             async () => await Task.Delay(300));
@@ -249,7 +249,7 @@ public class TickBarrierTests
         // Collection, the database and alerts are unaffected; only the UI
         // update is held. Turning the window back on applies whatever
         // accumulated, so the first frame shown is current.
-        var harness = new Harness();
+        using var harness = new Harness();
         var server = harness.AddServer("web-1");
         harness.Transport.Handlers[server.Id] = FakeTransport.LinuxHost();
 
@@ -271,7 +271,7 @@ public class TickBarrierTests
         // With the window hidden, an append-only queue grew by one closure
         // holding a full snapshot per host per poll — tens of megabytes an
         // hour on the macOS build — until the window was next shown.
-        var harness = new Harness();
+        using var harness = new Harness();
         var server = harness.AddServer("web-1");
         harness.Transport.Handlers[server.Id] = FakeTransport.LinuxHost();
 
@@ -292,7 +292,7 @@ public class TickBarrierTests
     [Fact]
     public async Task AResultForADeletedServerIsDroppedRatherThanResurrectingIt()
     {
-        var harness = new Harness();
+        using var harness = new Harness();
         var server = harness.AddServer("web-1");
         harness.Transport.Handlers[server.Id] = FakeTransport.LinuxHost();
 
@@ -313,7 +313,7 @@ public class PollResultTests
     [Fact]
     public async Task ASuccessfulPollFillsTheSnapshotAndTheHostFacts()
     {
-        var harness = new Harness();
+        using var harness = new Harness();
         var server = harness.AddServer("web-1");
         harness.Transport.Handlers[server.Id] = FakeTransport.LinuxHost(cpu: 37);
 
@@ -341,7 +341,7 @@ public class PollResultTests
     [Fact]
     public async Task AFailedPollGoesOfflineWithTheReasonAttached()
     {
-        var harness = new Harness();
+        using var harness = new Harness();
         var server = harness.AddServer("web-1");
         harness.Transport.Handlers[server.Id] =
             _ => Task.FromException<string>(SshException.CommandFailed(255, "Connection refused"));
@@ -362,7 +362,7 @@ public class PollResultTests
         // The transport exits 0 with no usable stdout when a channel is torn
         // down mid-read. Returning that would paint a real host as 0 cores,
         // 0 memory and no filesystems on the dashboard.
-        var harness = new Harness();
+        using var harness = new Harness();
         var server = harness.AddServer("web-1");
         harness.Transport.Handlers[server.Id] = command =>
             Task.FromResult(command == Probes.OsDetect ? "Linux\n" : "");
@@ -381,7 +381,7 @@ public class PollResultTests
         // The card is driven by the poll rather than its own round trip, so
         // "no Docker" has to mean "no entry" — not a stale entry from a host
         // that does have it.
-        var harness = new Harness();
+        using var harness = new Harness();
         var withDocker = harness.AddServer("has-docker");
         var without = harness.AddServer("no-docker");
         harness.Transport.Handlers[withDocker.Id] = FakeTransport.LinuxHost();
@@ -406,7 +406,7 @@ public class PollResultTests
         // image is pulled, not every five seconds — so it is sampled every 30 s
         // and carried forward. An empty version in between would read as
         // "Docker was removed" and hide the card.
-        var harness = new Harness();
+        using var harness = new Harness();
         var server = harness.AddServer("web-1");
         harness.Transport.Handlers[server.Id] = FakeTransport.LinuxHost();
 
@@ -446,7 +446,7 @@ public class PollResultTests
     {
         // `ps` over every process costs the host ~30 ms per poll, and only the
         // machine screen shows it.
-        var harness = new Harness();
+        using var harness = new Harness();
         var server = harness.AddServer("web-1");
         harness.Transport.Handlers[server.Id] = FakeTransport.LinuxHost();
 
@@ -476,7 +476,7 @@ public class PollResultTests
         // reconnect; and editing a failing host is usually the fix for it —
         // sitting out a five-minute backoff would look like the edit did
         // nothing.
-        var harness = new Harness();
+        using var harness = new Harness();
         var server = harness.AddServer("web-1");
         harness.Service.NoteFailure(server.Id);
         harness.Service.NoteFailure(server.Id);
@@ -496,7 +496,7 @@ public class PollResultTests
     {
         // Otherwise the cards are empty until the first poll lands, which on a
         // 60-second interval is a minute of blank dashboard.
-        var harness = new Harness();
+        using var harness = new Harness();
         var server = harness.AddServer("web-1");
         harness.Database.Insert(new MetricSample(
             server.Id, new MetricSnapshot { CpuPercent = 42, MemoryTotal = 16_000_000_000 }));
@@ -508,7 +508,7 @@ public class PollResultTests
     [Fact]
     public async Task AnIdentityGivesItsUsernameAndAuthToEveryServerUsingIt()
     {
-        var harness = new Harness();
+        using var harness = new Harness();
         var identity = new Identity
         {
             Name = "deploy",
@@ -535,7 +535,7 @@ public class PollResultTests
     {
         // The whole point of choosing "ssh config alias": OpenSSH — or, on the
         // library route, our own config parser — applies the entire Host block.
-        var harness = new Harness();
+        using var harness = new Harness();
         var server = new Server
         {
             Name = "web",
@@ -561,7 +561,7 @@ public class AlertServiceTests
     {
         // ~15 seconds of sustained load at the default interval, which filters
         // out the spike from a build or a backup starting.
-        var harness = new Harness(withAlerts: true);
+        using var harness = new Harness(withAlerts: true);
         harness.Settings.NotificationsEnabled = true;
         harness.Settings.NotifyOnOffline = false;
         harness.Settings.CpuThreshold = 80;
@@ -580,7 +580,7 @@ public class AlertServiceTests
     [Fact]
     public void APersistentBreachDoesNotRepeatWithinTheCooldown()
     {
-        var harness = new Harness(withAlerts: true);
+        using var harness = new Harness(withAlerts: true);
         harness.Settings.NotificationsEnabled = true;
         harness.Settings.NotifyOnOffline = false;
         harness.Settings.CpuThreshold = 80;
@@ -596,7 +596,7 @@ public class AlertServiceTests
     [Fact]
     public void RecoveringResetsTheRunSoTheNextBreachMustBuildUpAgain()
     {
-        var harness = new Harness(withAlerts: true);
+        using var harness = new Harness(withAlerts: true);
         harness.Settings.NotificationsEnabled = true;
         harness.Settings.NotifyOnOffline = false;
         harness.Settings.CpuThreshold = 80;
@@ -614,7 +614,7 @@ public class AlertServiceTests
     [Fact]
     public void AServersOwnLimitOverridesTheGlobalOne()
     {
-        var harness = new Harness(withAlerts: true);
+        using var harness = new Harness(withAlerts: true);
         harness.Settings.NotificationsEnabled = true;
         harness.Settings.NotifyOnOffline = false;
         harness.Settings.CpuThreshold = 90;
@@ -634,7 +634,7 @@ public class AlertServiceTests
     {
         // 0 is "off for this metric", which is a different thing from null,
         // meaning "follow the global setting".
-        var harness = new Harness(withAlerts: true);
+        using var harness = new Harness(withAlerts: true);
         harness.Settings.NotificationsEnabled = true;
         harness.Settings.NotifyOnOffline = false;
         harness.Settings.CpuThreshold = 50;
@@ -651,7 +651,7 @@ public class AlertServiceTests
     [Fact]
     public void GoingOfflineAndComingBackAreTransitionsNotStates()
     {
-        var harness = new Harness(withAlerts: true);
+        using var harness = new Harness(withAlerts: true);
         harness.Settings.NotificationsEnabled = true;
         harness.Settings.NotifyOnOffline = true;
         var server = harness.AddServer("web-1");
@@ -678,7 +678,7 @@ public class AlertServiceTests
     [Fact]
     public void TheAlertTextFollowsTheSelectedLanguage()
     {
-        var harness = new Harness(withAlerts: true);
+        using var harness = new Harness(withAlerts: true);
         harness.Settings.NotificationsEnabled = true;
         harness.Settings.NotifyOnOffline = true;
         var server = harness.AddServer("web-1");
@@ -695,7 +695,7 @@ public class AlertServiceTests
     [Fact]
     public void AnOfflineHostIsNotAlsoJudgedAgainstItsThresholds()
     {
-        var harness = new Harness(withAlerts: true);
+        using var harness = new Harness(withAlerts: true);
         harness.Settings.NotificationsEnabled = true;
         harness.Settings.NotifyOnOffline = false;
         harness.Settings.CpuThreshold = 1;
@@ -711,7 +711,7 @@ public class AlertServiceTests
     [Fact]
     public void NothingFiresWhileNotificationsAreOff()
     {
-        var harness = new Harness(withAlerts: true);
+        using var harness = new Harness(withAlerts: true);
         harness.Settings.NotificationsEnabled = false;
         harness.Settings.CpuThreshold = 10;
         var server = harness.AddServer("web-1");
@@ -726,7 +726,7 @@ public class AlertServiceTests
     [Fact]
     public void TheAlertCarriesTheServerIdSoAToastCanOpenThatHost()
     {
-        var harness = new Harness(withAlerts: true);
+        using var harness = new Harness(withAlerts: true);
         harness.Settings.NotificationsEnabled = true;
         harness.Settings.NotifyOnOffline = true;
         var server = harness.AddServer("web-1");

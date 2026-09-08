@@ -23,7 +23,7 @@ namespace ServerMonitor.Core.Store;
 /// wait, which is the same reason the macOS build uses a pool rather than a
 /// queue.
 /// </remarks>
-public sealed class Database
+public sealed class Database : IDisposable
 {
     private readonly string _connectionString;
     /// <summary>Serialises writers, so two polls cannot collide on a BUSY.</summary>
@@ -974,5 +974,41 @@ public sealed class Database
         command.Transaction = transaction;
         command.CommandText = sql;
         command.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Closes the store: the in-memory keep-alive, and the connection pool.
+    /// </summary>
+    /// <remarks>
+    /// The app opens one store for the life of the process and does not need
+    /// this; the tests do, and what they were missing is why two unrelated
+    /// things were wrong.
+    ///
+    /// A file-backed store is opened with <c>Pooling=true</c>, so disposing
+    /// the per-operation connection returns its handle to the pool rather than
+    /// to the OS and the file stays open. Test cleanup that deleted the file
+    /// therefore always threw, and the <c>catch (IOException)</c> around it
+    /// swallowed the failure — 36 scratch databases had accumulated in
+    /// <c>%TEMP%</c>. The in-memory case leaked differently: nothing ever
+    /// closed <see cref="_keepAlive"/>, so every <see cref="InMemory"/> store
+    /// a test made stayed open for the whole run.
+    ///
+    /// Which is also what made <c>HandleTests</c> flaky. It measures the
+    /// process's handle count across a hundred failed connections, and those
+    /// two leaks are handles appearing in the same process from whatever else
+    /// xUnit is running in parallel — enough of them inside the measurement
+    /// window and the delta cleared the threshold. Emptying the pool is the
+    /// fix for the test as much as for the files.
+    /// </remarks>
+    public void Dispose()
+    {
+        _keepAlive?.Dispose();
+        // ClearPool identifies the pool by connection string; the connection
+        // handed to it is never opened.
+        using (var key = new SqliteConnection(_connectionString))
+        {
+            SqliteConnection.ClearPool(key);
+        }
+        _writeLock.Dispose();
     }
 }

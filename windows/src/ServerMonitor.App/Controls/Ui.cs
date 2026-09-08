@@ -40,6 +40,40 @@ internal static class Ui
     public static TextBlock Headline(string text) => Text(text, "Text.Headline");
     public static TextBlock Mono(string text) => Text(text, "Text.Mono");
 
+    /// <summary>
+    /// A path or other value the user will want to copy.
+    /// </summary>
+    /// <remarks>
+    /// A read-only TextBox rather than a TextBlock, because a WPF TextBlock
+    /// cannot be selected at all — the macOS settings screen turns selection
+    /// on explicitly for the same path, and a path shown but not copyable is
+    /// something the user has to retype by hand. Styled down to look like the
+    /// caption it replaces: no border, no background, no caret of its own.
+    /// </remarks>
+    public static TextBox Selectable(string text)
+    {
+        var box = new TextBox
+        {
+            Text = text,
+            IsReadOnly = true,
+            IsReadOnlyCaretVisible = false,
+            BorderThickness = new Thickness(0),
+            Background = System.Windows.Media.Brushes.Transparent,
+            Padding = new Thickness(0),
+            Margin = new Thickness(0),
+            Foreground = Ink.Brush(Theme.Palette.Secondary),
+            FontSize = 11,
+            // The paths are long and the settings card is not wide; wrapping
+            // beats a box the user has to scroll sideways to read.
+            TextWrapping = TextWrapping.Wrap,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        // The template's own placeholder and focus chrome are for input
+        // fields; this is a label that happens to be selectable.
+        box.SetValue(FrameworkElement.FocusVisualStyleProperty, null);
+        return box;
+    }
+
     /// <summary>A number, with tabular figures so it does not jitter as it changes.</summary>
     public static TextBlock Number(string text, double size = 13, Color? colour = null)
     {
@@ -249,27 +283,69 @@ internal static class Ui
         return box;
     }
 
-    /// <summary>A labelled row for the editors and settings.</summary>
-    /// <param name="help">
-    /// Literal help text, for the places where the shared string says
-    /// something that is only true on macOS. Ignored when
-    /// <paramref name="helpKey"/> is given.
-    /// </param>
-    public static Grid Field(
-        string labelKey, UIElement control, string? helpKey = null, string? help = null)
+    /// <summary>
+    /// A toggle whose new state has to be accepted before it sticks.
+    /// </summary>
+    /// <remarks>
+    /// For the settings whose real home is somewhere outside the app — the
+    /// startup entry lives in the registry, and the write can be refused by
+    /// group policy. Returning false from <paramref name="onChange"/> puts the
+    /// box back, so it shows what is true rather than what was clicked.
+    ///
+    /// Assigning IsChecked inside the handler raises the opposite event, which
+    /// would call back in and, for a setting that is failing, open a second
+    /// dialog on the way back. The flag is what stops that.
+    /// </remarks>
+    public static CheckBox Toggle(string text, bool value, Func<bool, bool> onChange)
     {
-        var label = Caption(Strings.Get(labelKey));
-        label.VerticalAlignment = VerticalAlignment.Center;
-        label.Margin = new Thickness(0, 0, 12, 0);
-        label.TextTrimming = TextTrimming.None;
-        label.TextWrapping = TextWrapping.Wrap;
+        var box = new CheckBox { Content = text, IsChecked = value };
+        var reverting = false;
 
-        var note = helpKey is not null ? Strings.Get(helpKey) : help;
-        var right = note is null
+        void Handle(bool wanted)
+        {
+            if (reverting) return;
+            if (onChange(wanted)) return;
+            reverting = true;
+            box.IsChecked = !wanted;
+            reverting = false;
+        }
+
+        box.Checked += (_, _) => Handle(true);
+        box.Unchecked += (_, _) => Handle(false);
+        return box;
+    }
+
+    /// <summary>A labelled row for the editors and settings, from string keys.</summary>
+    public static Grid Field(string labelKey, UIElement control, string? helpKey = null) =>
+        FieldText(
+            Strings.Get(labelKey),
+            control,
+            helpKey is null ? null : Strings.Get(helpKey));
+
+    /// <summary>
+    /// The same row, from text that is already in the right language.
+    /// </summary>
+    /// <remarks>
+    /// For the settings that exist only on Windows — the SSH transport, the
+    /// data paths — which have no key in the shared table and must not get
+    /// one, since the table is asserted to match the macOS side key for key.
+    /// Passing such a label to <see cref="Field"/> appears to work only
+    /// because a missing key renders as itself, which makes a real typo
+    /// indistinguishable from a deliberate literal.
+    /// </remarks>
+    public static Grid FieldText(string label, UIElement control, string? help = null)
+    {
+        var labelBlock = Caption(label);
+        labelBlock.VerticalAlignment = VerticalAlignment.Center;
+        labelBlock.Margin = new Thickness(0, 0, 12, 0);
+        labelBlock.TextTrimming = TextTrimming.None;
+        labelBlock.TextWrapping = TextWrapping.Wrap;
+
+        var right = help is null
             ? control
-            : Rows(4, control, Wrapped(note, "Text.Tertiary"));
+            : Rows(4, control, Wrapped(help, "Text.Tertiary"));
 
-        var grid = Grid("150,*", label, right);
+        var grid = Grid("150,*", labelBlock, right);
         grid.Margin = new Thickness(0, 0, 0, 10);
         return grid;
     }

@@ -112,27 +112,101 @@ public class LocalizationTests
     [Fact]
     public void TheWindowsSpecificWordingReplacedTheMacOne()
     {
-        // Thirteen entries deliberately differ: ~/.ssh becomes
-        // %USERPROFILE%\.ssh, Finder becomes File Explorer, and the credential
-        // notes name the credential manager rather than the keychain.
+        // Fourteen entries deliberately differ: ~/.ssh becomes
+        // %USERPROFILE%\.ssh, Finder becomes File Explorer, the credential
+        // notes name the credential manager rather than the keychain, and the
+        // country code is a badge rather than a flag.
         using var _ = new LanguageScope(AppLanguage.En);
         Assert.Contains("File Explorer", Strings.Get("keys.reveal"), StringComparison.Ordinal);
         Assert.Contains("%USERPROFILE%", Strings.Get("keys.empty"), StringComparison.Ordinal);
         Assert.Contains("credential manager", Strings.Get("auth.passwordHelp"), StringComparison.Ordinal);
         Assert.Contains("Start with Windows", Strings.Get("settings.launchAtLogin"), StringComparison.Ordinal);
+        Assert.Contains("badge", Strings.Get("server.countryHelp"), StringComparison.Ordinal);
+    }
 
-        // And nothing still says Keychain or Finder.
+    /// <summary>
+    /// No string promises something only macOS can do.
+    /// </summary>
+    /// <remarks>
+    /// The table is seeded from the Swift one, so every row starts out
+    /// describing a Mac. Two got through the eye: "Reveal in Finder", caught
+    /// during the port, and server.countryHelp, which said the country code
+    /// "shows a flag" — true on macOS, where the code renders as an emoji
+    /// flag, and false here, because no Windows font has glyphs for
+    /// regional-indicator pairs. The app draws a code badge instead, so the
+    /// help described a flag the user would never see and the app looked like
+    /// it had a missing font.
+    ///
+    /// A sweep rather than four more Assert.Contains lines: the next borrowed
+    /// row will name some other Mac thing, and this fails on it without
+    /// anyone thinking to add a case.
+    /// </remarks>
+    [Fact]
+    public void NoStringNamesSomethingOnlyMacOsHas()
+    {
+        // Word-for-word, not substrings: "flag" appears inside "flags" and
+        // any -flag option, and 命令 is an ordinary word that ⌘ is not.
+        (string Term, string Why)[] macOnly =
+        [
+            ("Keychain", "the credential manager is the Windows equivalent"),
+            ("钥匙串", "the credential manager is the Windows equivalent"),
+            ("Finder", "File Explorer is the Windows equivalent"),
+            ("访达", "File Explorer is the Windows equivalent"),
+            ("flag", "no Windows font has regional-indicator glyphs; the app draws a badge"),
+            ("国旗", "no Windows font has regional-indicator glyphs; the app draws a badge"),
+            ("⌘", "Windows has no Command key"),
+            ("⌥", "Windows has no Option key"),
+            ("Launchpad", "there is no Launchpad"),
+            ("Spotlight", "there is no Spotlight"),
+            ("Dock", "the taskbar is the Windows equivalent"),
+            ("菜单栏", "the notification area is the Windows equivalent"),
+            ("menu bar", "the notification area is the Windows equivalent"),
+            ("System Settings", "Windows calls it Settings"),
+            ("System Preferences", "Windows calls it Settings"),
+            ("系统偏好设置", "Windows calls it 设置"),
+            ("Terminal.app", "the app has its own terminal"),
+        ];
+
+        var found = new List<string>();
         foreach (var language in new[] { AppLanguage.En, AppLanguage.Zh })
         {
             using var scope = new LanguageScope(language);
             foreach (var key in Strings.Keys)
             {
                 var text = Strings.Get(key);
-                Assert.DoesNotContain("Keychain", text, StringComparison.OrdinalIgnoreCase);
-                Assert.DoesNotContain("Finder", text, StringComparison.Ordinal);
-                Assert.DoesNotContain("钥匙串", text, StringComparison.Ordinal);
-                Assert.DoesNotContain("访达", text, StringComparison.Ordinal);
+                foreach (var (term, why) in macOnly)
+                {
+                    if (!Mentions(text, term)) continue;
+                    found.Add($"{key} ({language}) says \"{term}\" — {why}: {text}");
+                }
             }
+        }
+
+        Assert.True(found.Count == 0, string.Join("\n", found));
+    }
+
+    /// <summary>
+    /// Whether <paramref name="text"/> uses <paramref name="term"/> as a word.
+    /// </summary>
+    /// <remarks>
+    /// A plain Contains would fire on "flag" inside "flags" or "--flag", and
+    /// on "Dock" inside "Docker" — which the container page says on nearly
+    /// every row. CJK terms have no word boundaries, so those match directly.
+    /// </remarks>
+    private static bool Mentions(string text, string term)
+    {
+        if (!char.IsAscii(term[0])) return text.Contains(term, StringComparison.Ordinal);
+
+        var from = 0;
+        while (true)
+        {
+            var at = text.IndexOf(term, from, StringComparison.OrdinalIgnoreCase);
+            if (at < 0) return false;
+            var before = at == 0 || !char.IsLetter(text[at - 1]);
+            var afterAt = at + term.Length;
+            var after = afterAt >= text.Length || !char.IsLetter(text[afterAt]);
+            if (before && after) return true;
+            from = at + 1;
         }
     }
 

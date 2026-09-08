@@ -130,6 +130,15 @@ public static class StartupRegistration
     private const string KeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string ValueName = "ServerMonitor";
 
+    /// <summary>
+    /// The key, for a message that has to name it.
+    /// </summary>
+    /// <remarks>
+    /// Derived rather than written out again: a path retyped in the settings
+    /// page would keep pointing at the old key after this one moved.
+    /// </remarks>
+    public static string KeyDescription => @"HKCU\" + KeyPath;
+
     public static bool IsEnabled
     {
         get
@@ -150,16 +159,31 @@ public static class StartupRegistration
     /// Turns it on or off. Returns false when the registry refused, so the UI
     /// can put the toggle back rather than showing a state that is not real.
     /// </summary>
-    public static bool Set(bool enabled)
+    /// <param name="error">
+    /// Why it was refused, for the message. The realistic cause is a policy or
+    /// a security product locking <c>HKCU\…\Run</c>, and neither announces
+    /// itself — without the exception's own text the dialog can only say
+    /// "Error", which tells the user nothing they can act on.
+    /// </param>
+    public static bool Set(bool enabled, out string? error)
     {
+        error = null;
         try
         {
             using var key = Registry.CurrentUser.CreateSubKey(KeyPath, writable: true);
-            if (key is null) return false;
+            if (key is null)
+            {
+                error = $@"HKCU\{KeyPath}";
+                return false;
+            }
             if (enabled)
             {
                 var executable = Environment.ProcessPath;
-                if (string.IsNullOrEmpty(executable)) return false;
+                if (string.IsNullOrEmpty(executable))
+                {
+                    error = "Environment.ProcessPath";
+                    return false;
+                }
                 // --minimised, or starting with Windows means a window in the
                 // user's face at every sign-in, which is not what a background
                 // monitor should do.
@@ -171,8 +195,9 @@ public static class StartupRegistration
             }
             return true;
         }
-        catch (Exception)
+        catch (Exception failure)
         {
+            error = failure.Message;
             return false;
         }
     }
