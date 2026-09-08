@@ -89,7 +89,11 @@ public partial class App : Application
             args.Handled = true;
         };
 
-        Settings = AppSettings.Load();
+        // A settings read or write that fails says so in the log. It used to
+        // say nothing, and what it was not saying was that none of them
+        // worked. Passed to Load rather than assigned after it, so the first
+        // read's own failure is covered too.
+        Settings = AppSettings.Load(onError: message => Log($"settings: {message}"));
         Strings.Language = Settings.Language;
 
         try

@@ -215,6 +215,18 @@ public sealed class AppSettings : INotifyPropertyChanged
 
     // MARK: - Persistence
 
+    /// <summary>
+    /// Where a failed read or write goes.
+    /// </summary>
+    /// <remarks>
+    /// Set by the app to its log. Not a thrown exception, because a settings
+    /// write happens on a timer thread in the middle of a session and there is
+    /// nobody to catch it; and not silence, because silence is what let a
+    /// serialisation bug drop every settings change on a fresh profile for as
+    /// long as this class existed.
+    /// </remarks>
+    public Action<string>? OnError { get; set; }
+
     /// <summary>An unbacked instance, for tests and previews.</summary>
     public AppSettings() { }
 
@@ -222,20 +234,42 @@ public sealed class AppSettings : INotifyPropertyChanged
 
     public static string DefaultPath => Path.Combine(Database.DefaultDirectory, "settings.json");
 
-    public static AppSettings Load(string? path = null)
+    /// <param name="onError">
+    /// Where a failed read goes. Taken here rather than assigned afterwards
+    /// because the first read happens inside this call, and a hook set on the
+    /// returned object could never hear about it.
+    /// </param>
+    public static AppSettings Load(string? path = null, Action<string>? onError = null)
     {
         path ??= DefaultPath;
-        var settings = new AppSettings(path);
+        var settings = new AppSettings(path) { OnError = onError };
         try
         {
-            var stored = JsonSerializer.Deserialize<Stored>(File.ReadAllText(path));
+            // StoredOptions, the same as the write side. Without them the
+            // enums are the difference between a file that round-trips and one
+            // that silently reverts: the writer turns Theme into "Dark" via
+            // JsonStringEnumConverter, and a reader without that converter
+            // cannot turn "Dark" back into AppTheme.Dark — it throws, the
+            // catch below took it, and the defaults came back. Every stored
+            // file has three enums in it, so nothing ever loaded.
+            var stored = JsonSerializer.Deserialize<Stored>(
+                File.ReadAllText(path), StoredOptions);
             if (stored is not null) settings.Apply(stored);
         }
-        catch (Exception)
+        catch (FileNotFoundException)
         {
-            // A missing file is the first run; an unparsable one is a crash
-            // mid-write. Both mean "use the defaults" — and the next save
-            // repairs the file.
+            // The first run. Not worth a word.
+        }
+        catch (DirectoryNotFoundException)
+        {
+            // Likewise: nothing has been written yet.
+        }
+        catch (Exception error)
+        {
+            // An unparsable file is a crash mid-write, and the next save
+            // repairs it — but a file that exists and will not load is worth
+            // saying out loud, because the user sees their settings revert.
+            settings.OnError?.Invoke($"could not read {path}: {error.Message}");
         }
         return settings;
     }
@@ -278,10 +312,15 @@ public sealed class AppSettings : INotifyPropertyChanged
             File.WriteAllText(temporary, json);
             File.Move(temporary, _path, overwrite: true);
         }
-        catch (Exception)
+        catch (Exception error)
         {
             // Settings that will not persist are a nuisance, not a reason to
-            // take the app down mid-session.
+            // take the app down mid-session — but they must not be a silent
+            // one. An empty catch here hid a serialisation failure that
+            // dropped every settings change on a fresh profile, and it hid it
+            // for as long as the code existed, because the only symptom was
+            // defaults coming back after a restart.
+            OnError?.Invoke($"could not write {_path}: {error.Message}");
         }
     }
 
@@ -319,8 +358,21 @@ public sealed class AppSettings : INotifyPropertyChanged
         public bool UseMicaBackdrop { get; set; }
         public double WindowWidth { get; set; } = 1280;
         public double WindowHeight { get; set; } = 820;
-        public double WindowLeft { get; set; } = double.NaN;
-        public double WindowTop { get; set; } = double.NaN;
+
+        /// <summary>
+        /// Where the window was, or null if it has never been positioned.
+        /// </summary>
+        /// <remarks>
+        /// Nullable rather than NaN, which is what the live property uses:
+        /// JSON has no NaN, and <c>JsonSerializer</c> throws
+        /// <c>ArgumentException</c> rather than writing one. That threw inside
+        /// WriteNow's catch, so on a fresh profile — where these are NaN until
+        /// the window is first closed — every settings change was dropped
+        /// without a word, settings.json was never created, and every launch
+        /// came up with the defaults.
+        /// </remarks>
+        public double? WindowLeft { get; set; }
+        public double? WindowTop { get; set; }
         public bool WindowMaximized { get; set; }
     }
 
@@ -346,8 +398,8 @@ public sealed class AppSettings : INotifyPropertyChanged
         UseMicaBackdrop = stored.UseMicaBackdrop;
         WindowWidth = stored.WindowWidth;
         WindowHeight = stored.WindowHeight;
-        WindowLeft = stored.WindowLeft;
-        WindowTop = stored.WindowTop;
+        WindowLeft = stored.WindowLeft ?? double.NaN;
+        WindowTop = stored.WindowTop ?? double.NaN;
         WindowMaximized = stored.WindowMaximized;
     }
 
@@ -369,10 +421,14 @@ public sealed class AppSettings : INotifyPropertyChanged
         Language = Language,
         Theme = Theme,
         UseMicaBackdrop = UseMicaBackdrop,
-        WindowWidth = WindowWidth,
-        WindowHeight = WindowHeight,
-        WindowLeft = WindowLeft,
-        WindowTop = WindowTop,
+        // Every double crossing into JSON is checked for finiteness, not just
+        // the two that default to NaN: RestoreBounds is Rect.Empty for a
+        // window that was never shown, and Rect.Empty's Width is negative
+        // infinity, which JSON cannot express either.
+        WindowWidth = double.IsFinite(WindowWidth) && WindowWidth > 0 ? WindowWidth : 1280,
+        WindowHeight = double.IsFinite(WindowHeight) && WindowHeight > 0 ? WindowHeight : 820,
+        WindowLeft = double.IsFinite(WindowLeft) ? WindowLeft : null,
+        WindowTop = double.IsFinite(WindowTop) ? WindowTop : null,
         WindowMaximized = WindowMaximized,
     };
 
@@ -388,10 +444,18 @@ public sealed class AppSettings : INotifyPropertyChanged
     public void SaveWindowState(
         double left, double top, double width, double height, bool maximized)
     {
-        WindowLeft = left;
-        WindowTop = top;
-        WindowWidth = width;
-        WindowHeight = height;
+        // Rejected rather than stored: RestoreBounds is Rect.Empty for a
+        // window that has not been shown, and Rect.Empty is
+        // (infinity, infinity, -infinity, -infinity). Storing that would put
+        // the window off-screen at the next launch, and ToStored would have to
+        // throw it away anyway.
+        if (double.IsFinite(left) && double.IsFinite(top))
+        {
+            WindowLeft = left;
+            WindowTop = top;
+        }
+        if (double.IsFinite(width) && width > 0) WindowWidth = width;
+        if (double.IsFinite(height) && height > 0) WindowHeight = height;
         WindowMaximized = maximized;
         ScheduleSave();
     }
