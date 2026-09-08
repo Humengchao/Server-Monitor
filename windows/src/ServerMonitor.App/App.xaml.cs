@@ -154,6 +154,10 @@ public partial class App : Application
         };
 
         _window = new MainWindow();
+        // A closed Window cannot be shown again, so forget it when it goes and
+        // let ShowWindow build a fresh one. Without this, reopening from the
+        // tray after any real close threw out of ShowWindow.
+        _window.Closed += (_, _) => _window = null;
         _tray = new TrayIcon(Monitor, ShowWindow, QuitApp, OpenServer);
         // Redrawn on publish rather than on a timer, so the icon's number is
         // never a tick behind what the window shows.
@@ -212,7 +216,11 @@ public partial class App : Application
 
     public void ShowWindow()
     {
-        _window ??= new MainWindow();
+        if (_window is null)
+        {
+            _window = new MainWindow();
+            _window.Closed += (_, _) => _window = null;
+        }
         if (!_window.IsVisible) _window.Show();
         if (_window.WindowState == WindowState.Minimized)
         {
@@ -241,12 +249,30 @@ public partial class App : Application
         _window?.OpenServer(serverId);
     }
 
+    /// <summary>
+    /// Stops collecting, saves, and ends the process.
+    /// </summary>
+    /// <remarks>
+    /// Guarded because there are two ways in: the tray menu and the Settings
+    /// page call it directly, and the window's close handler calls it when
+    /// "keep running in the notification area" is off. Shutdown then closes
+    /// the window, which can re-enter the close handler — so without the flag
+    /// the monitor would be stopped and the settings flushed twice.
+    ///
+    /// Nothing here bypasses the close-to-tray interception, because nothing
+    /// needs to: Application.Shutdown closes its windows ignoring Cancel.
+    /// Measured, after assuming the opposite and writing a fix for it.
+    /// </remarks>
     public void QuitApp()
     {
+        if (_quitting) return;
+        _quitting = true;
         Monitor.Stop();
         Settings.Flush();
         Shutdown();
     }
+
+    private bool _quitting;
 
     // MARK: - Theme
 

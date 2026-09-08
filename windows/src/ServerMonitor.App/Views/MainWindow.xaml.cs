@@ -48,22 +48,6 @@ public partial class MainWindow : Window
     private Page _page = Page.Dashboard;
     private Guid? _openServerId;
     private bool _navigating;
-    /// <summary>
-    /// Set when the user really means to quit, so the close handler stops
-    /// intercepting. Written by <see cref="CloseForReal"/>, which the
-    /// settings page calls.
-    /// </summary>
-    private bool _closingForReal;
-
-    /// <summary>
-    /// Closes the window without the close-to-tray interception.
-    /// </summary>
-    public void CloseForReal()
-    {
-        _closingForReal = true;
-        Close();
-    }
-
     public MainWindow()
     {
         InitializeComponent();
@@ -396,17 +380,27 @@ public partial class MainWindow : Window
     {
         SaveGeometry();
 
-        if (!_closingForReal && Settings.CloseToTray)
+        switch (CloseBehaviour.For(Settings.CloseToTray))
         {
-            // Closing leaves the app collecting in the notification area —
-            // the counterpart of the macOS build's menu-bar residency, and
-            // the reason a monitor can be "closed" without stopping.
-            e.Cancel = true;
-            Hide();
-            App.Current.WindowHidden();
-            return;
+            case CloseAction.HideToTray:
+                // Closing leaves the app collecting in the notification area —
+                // the counterpart of the macOS build's menu-bar residency, and
+                // the reason a monitor can be "closed" without stopping.
+                e.Cancel = true;
+                Hide();
+                App.Current.WindowHidden();
+                return;
+
+            default:
+                // The setting is off, so closing the window means closing the
+                // app — and it has to be said explicitly, because
+                // ShutdownMode is OnExplicitShutdown. Without this the window
+                // went away and the process stayed: polling, with no UI, and
+                // no way back since a closed Window cannot be shown again.
+                base.OnClosing(e);
+                if (!e.Cancel) App.Current.QuitApp();
+                return;
         }
-        base.OnClosing(e);
     }
 
     private void SaveGeometry()
