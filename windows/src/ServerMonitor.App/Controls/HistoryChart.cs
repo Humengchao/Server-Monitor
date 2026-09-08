@@ -34,6 +34,19 @@ public sealed record ChartSeries(
 /// </remarks>
 public sealed class HistoryChart : Control
 {
+    /// <summary>Keeps this drawing out of the tab order.</summary>
+    /// <remarks>
+    /// Not focusable. This is a drawing, and Control makes its subclasses
+    /// focusable by default — so every one of these was a tab stop that did
+    /// nothing. Two ring gauges per dashboard card meant moving from one host
+    /// to the next took three Tab presses, two of which landed on no visible
+    /// focus at all. Measured by pressing Tab and reading the focused element
+    /// back; nothing about the screen says it.
+    /// </remarks>
+    static HistoryChart() =>
+        FocusableProperty.OverrideMetadata(
+            typeof(HistoryChart), new FrameworkPropertyMetadata(false));
+
     private IReadOnlyList<ChartSeries> _series = [];
     /// <summary>
     /// The y-axis top. Null auto-scales to the data; a fixed value is right
@@ -222,6 +235,19 @@ public sealed class HistoryChart : Control
 /// </remarks>
 public sealed class BarChart : Control
 {
+    /// <summary>Keeps this drawing out of the tab order.</summary>
+    /// <remarks>
+    /// Not focusable. This is a drawing, and Control makes its subclasses
+    /// focusable by default — so every one of these was a tab stop that did
+    /// nothing. Two ring gauges per dashboard card meant moving from one host
+    /// to the next took three Tab presses, two of which landed on no visible
+    /// focus at all. Measured by pressing Tab and reading the focused element
+    /// back; nothing about the screen says it.
+    /// </remarks>
+    static BarChart() =>
+        FocusableProperty.OverrideMetadata(
+            typeof(BarChart), new FrameworkPropertyMetadata(false));
+
     private IReadOnlyList<(string Label, double Down, double Up)> _bars = [];
 
     public BarChart()

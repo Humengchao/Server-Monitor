@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -122,6 +123,12 @@ public partial class MainWindow : Window
         RefreshButton.Content = Strings.Get("common.refresh");
         Search.Tag = Strings.Get("common.search");
         ToolTipService.SetToolTip(Search, Strings.Get("common.search"));
+        // Named for assistive technology, here rather than in the XAML so a
+        // runtime language switch renames them too. A screen reader otherwise
+        // met an unnamed edit field and two unnamed lists on every page.
+        AutomationProperties.SetName(Search, Strings.Get("common.search"));
+        AutomationProperties.SetName(Nav, Strings.Get("nav.goTo"));
+        AutomationProperties.SetName(ServerList, Strings.Get("nav.servers"));
         ToolTipService.SetToolTip(RefreshButton, $"{Strings.Get("common.refresh")} (F5)");
         BuildNavigation();
         PageTitle.Text = TitleFor(_page);

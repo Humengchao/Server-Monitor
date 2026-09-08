@@ -80,6 +80,10 @@ public sealed class DockerPage : UserControl
                 _ = LoadAsync();
             });
 
+        // The picker shows a host name and carries no label of its own.
+        System.Windows.Automation.AutomationProperties.SetName(
+            picker, Strings.Get("nav.machines"));
+
         var toolbar = Ui.Columns(8,
             picker,
             Ui.Quiet(Strings.Get("common.refresh"), () => _ = LoadAsync()));

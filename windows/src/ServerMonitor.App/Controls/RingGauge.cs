@@ -25,6 +25,19 @@ namespace ServerMonitor.App.Controls;
 /// </remarks>
 public sealed class RingGauge : Control
 {
+    /// <summary>Keeps this drawing out of the tab order.</summary>
+    /// <remarks>
+    /// Not focusable. This is a drawing, and Control makes its subclasses
+    /// focusable by default — so every one of these was a tab stop that did
+    /// nothing. Two ring gauges per dashboard card meant moving from one host
+    /// to the next took three Tab presses, two of which landed on no visible
+    /// focus at all. Measured by pressing Tab and reading the focused element
+    /// back; nothing about the screen says it.
+    /// </remarks>
+    static RingGauge() =>
+        FocusableProperty.OverrideMetadata(
+            typeof(RingGauge), new FrameworkPropertyMetadata(false));
+
     public static readonly DependencyProperty ValueProperty = DependencyProperty.Register(
         nameof(Value),
         typeof(double),
@@ -168,6 +181,19 @@ public sealed class RingGauge : Control
 /// </remarks>
 public sealed class MeterBar : Control
 {
+    /// <summary>Keeps this drawing out of the tab order.</summary>
+    /// <remarks>
+    /// Not focusable. This is a drawing, and Control makes its subclasses
+    /// focusable by default — so every one of these was a tab stop that did
+    /// nothing. Two ring gauges per dashboard card meant moving from one host
+    /// to the next took three Tab presses, two of which landed on no visible
+    /// focus at all. Measured by pressing Tab and reading the focused element
+    /// back; nothing about the screen says it.
+    /// </remarks>
+    static MeterBar() =>
+        FocusableProperty.OverrideMetadata(
+            typeof(MeterBar), new FrameworkPropertyMetadata(false));
+
     public static readonly DependencyProperty ValueProperty = DependencyProperty.Register(
         nameof(Value),
         typeof(double),

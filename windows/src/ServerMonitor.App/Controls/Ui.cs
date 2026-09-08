@@ -377,6 +377,13 @@ internal static class Ui
         labelBlock.TextTrimming = TextTrimming.None;
         labelBlock.TextWrapping = TextWrapping.Wrap;
 
+        // The label names the control for assistive technology too. Without
+        // this the two are only visually adjacent — a screen reader on the
+        // settings page found seven unnamed combo boxes, and on the editor a
+        // row of unnamed text fields, because a sibling TextBlock means
+        // nothing to the automation tree.
+        System.Windows.Automation.AutomationProperties.SetLabeledBy(control, labelBlock);
+
         var right = help is null
             ? control
             : Rows(4, control, Wrapped(help, "Text.Tertiary"));

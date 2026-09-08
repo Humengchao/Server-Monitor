@@ -94,7 +94,10 @@ public sealed class MachinesPage : UserControl, ISearchable
         {
             var options = new List<string?> { null };
             options.AddRange(tags.Cast<string?>());
-            row.Children.Add(Ui.Picker(
+            // Named from the same string its empty state shows: this picker
+            // has no label beside it, so without a name it announced as an
+            // unnamed combo box.
+            var tagFilter = Ui.Picker(
                 options,
                 _tagFilter,
                 tag => tag ?? Strings.Get("server.allTags"),
@@ -102,7 +105,10 @@ public sealed class MachinesPage : UserControl, ISearchable
                 {
                     _tagFilter = tag;
                     Rebuild();
-                }));
+                });
+            System.Windows.Automation.AutomationProperties.SetName(
+                tagFilter, Strings.Get("server.allTags"));
+            row.Children.Add(tagFilter);
         }
 
         row.Children.Add(Ui.Button(Strings.Get("import.title"), ImportSshConfig));
@@ -195,6 +201,9 @@ public sealed class MachinesPage : UserControl, ISearchable
         // way to reach them. Horizontal nesting has none of the wheel
         // ambiguity that vertical nesting does, because the wheel is vertical.
         ScrollViewer.SetHorizontalScrollBarVisibility(list, ScrollBarVisibility.Auto);
+
+        System.Windows.Automation.AutomationProperties.SetName(
+            list, Strings.Get("machines.all"));
 
         var view = new GridView { AllowsColumnReorder = false };
         void Column(string headerKey, string path, double width, bool tooltip = false) =>
