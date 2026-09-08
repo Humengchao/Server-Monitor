@@ -220,6 +220,53 @@ public class AppSettingsTests
     }
 
     [Fact]
+    public async Task ReadingSettingsDoesNotRewriteThem()
+    {
+        // Apply assigns through the properties to clamp a hand-edited file,
+        // and every one of those assignments called ScheduleSave — so merely
+        // loading marked the settings dirty and rewrote the file 400ms later,
+        // on every launch, with identical content. What made it visible was
+        // these tests: a file deleted at the end of one reappeared while the
+        // next was running, so the suite leaked three of them per run.
+        var path = Temp();
+        try
+        {
+            var settings = AppSettings.Load(path);
+            settings.Theme = AppTheme.Dark;
+            settings.Flush();
+            var written = File.GetLastWriteTimeUtc(path);
+
+            // A fresh load of that file, then past the debounce window.
+            var reloaded = AppSettings.Load(path);
+            Assert.Equal(AppTheme.Dark, reloaded.Theme);
+            await Task.Delay(700);
+
+            Assert.Equal(written, File.GetLastWriteTimeUtc(path));
+        }
+        finally
+        {
+            Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task AFileDeletedAfterAReadStaysDeleted()
+    {
+        // The leak itself, stated directly: nothing may recreate the file
+        // behind the test that removed it.
+        var path = Temp();
+        var settings = AppSettings.Load(path);
+        settings.Theme = AppTheme.Dark;
+        settings.Flush();
+        _ = AppSettings.Load(path);
+
+        File.Delete(path);
+        await Task.Delay(700);
+
+        Assert.False(File.Exists(path), "a pending save recreated the file");
+    }
+
+    [Fact]
     public void AnUnbackedInstanceNeitherWritesNorComplains()
     {
         // What the tests and the design previews use. It has no path, so a

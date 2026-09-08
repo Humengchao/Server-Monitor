@@ -291,7 +291,7 @@ public sealed class AppSettings : INotifyPropertyChanged
 
     private void ScheduleSave()
     {
-        if (_path is null) return;
+        if (_path is null || _applying) return;
         lock (_saveLock)
         {
             _saveTimer?.Dispose();
@@ -376,7 +376,34 @@ public sealed class AppSettings : INotifyPropertyChanged
         public bool WindowMaximized { get; set; }
     }
 
+    /// <summary>
+    /// Set while <see cref="Apply"/> runs, so loading does not schedule a save.
+    /// </summary>
+    /// <remarks>
+    /// Apply assigns through the properties on purpose, to clamp a
+    /// hand-edited file — and every one of those assignments went through
+    /// Set, which calls ScheduleSave. So reading settings marked them dirty
+    /// and rewrote the file 400 ms later, on every launch, for no change.
+    /// Harmless in the app, since the content was identical; visible in the
+    /// tests, where a file deleted at the end of a test reappeared while the
+    /// next one ran.
+    /// </remarks>
+    private bool _applying;
+
     private void Apply(Stored stored)
+    {
+        _applying = true;
+        try
+        {
+            ApplyCore(stored);
+        }
+        finally
+        {
+            _applying = false;
+        }
+    }
+
+    private void ApplyCore(Stored stored)
     {
         // Through the properties, so a hand-edited file with a poll interval of
         // 0 is clamped to something sane rather than spinning the loop.

@@ -61,7 +61,7 @@
 
 ```powershell
 dotnet build windows/ServerMonitor.slnx
-dotnet test  windows/ServerMonitor.slnx      # 384 通过，14 条 live 用例跳过
+dotnet test  windows/ServerMonitor.slnx      # 386 通过，14 条 live 用例跳过
 dotnet run --project windows/src/ServerMonitor.App
 ```
 
@@ -147,7 +147,7 @@ dotnet run --project windows/src/ServerMonitor.Cli -- probe  my-host --alias -v
 | `src/ServerMonitor.Core/` | 采集、解析、SSH、SQLite、文案。`net10.0`，不依赖 Windows |
 | `src/ServerMonitor.App/` | WPF 外壳：`Views/`、`Controls/`（自绘）、`Theme/`、`Platform/`、`Terminal/` |
 | `src/ServerMonitor.Cli/` | `smctl`，不带界面的采集 |
-| `tests/` | 384 条：解析器、数据库、轮询循环、SFTP 路径、离屏渲染、live |
+| `tests/` | 386 条：解析器、数据库、轮询循环、SFTP 路径、离屏渲染、live |
 | `scripts/package.ps1` · `scripts/installer.iss` | 发布与安装包 |
 | [`PLAN.md`](PLAN.md) | 技术决策（D1–D9）、既有事实（F1–F11）、分阶段计划、风险（R1–R13） |
 | [`../shared/probes/`](../shared/probes/) | 三端共用的采集脚本，改这里而不是各自复制 |
@@ -219,7 +219,7 @@ collection scripts — this app is standalone, and is the counterpart of the
 
 ```powershell
 dotnet build windows/ServerMonitor.slnx
-dotnet test  windows/ServerMonitor.slnx      # 384 pass, 14 live cases skipped
+dotnet test  windows/ServerMonitor.slnx      # 386 pass, 14 live cases skipped
 dotnet run --project windows/src/ServerMonitor.App
 
 cd windows; ./scripts/package.ps1 -Version 0.1.0   # zip + installer, x64 + arm64
