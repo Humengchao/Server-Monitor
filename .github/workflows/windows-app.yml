@@ -1,0 +1,162 @@
+name: Windows app
+
+# Builds, tests and packages the native app under windows/ on every push that
+# touches it, and publishes a GitHub Release when a windows/v* tag is pushed.
+#
+# The tag is prefixed on purpose (D7): macOS releases already use bare `v*`,
+# and an unprefixed tag here would trigger both workflows for one platform's
+# release. deploy.yml only fires for web/**, so none of these three run for
+# each other's changes.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'windows/**'
+      - 'shared/**'
+      - '.github/workflows/windows-app.yml'
+    tags: ['windows/v*']
+  pull_request:
+    paths:
+      - 'windows/**'
+      - 'shared/**'
+      - '.github/workflows/windows-app.yml'
+  workflow_dispatch:
+
+# A newer push to the same branch supersedes a build still running.
+concurrency:
+  group: windows-app-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+  # Nothing here should reach the network mid-build.
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 'true'
+
+jobs:
+  build:
+    name: Build, test, package
+    # Windows Server 2025, which ships the .NET SDK, Inno Setup 6 and WiX (F8).
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: windows
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Tags and history, so the version can come from the tag.
+          fetch-depth: 0
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache NuGet
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('windows/**/*.csproj', 'windows/Directory.Build.props') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore ServerMonitor.slnx
+
+      - name: Build
+        # Warnings are errors (Directory.Build.props), and this is where a
+        # nullability or analyser regression gets caught rather than on the
+        # developer machine where it can be ignored.
+        run: dotnet build ServerMonitor.slnx -c Release --no-restore
+
+      - name: Test
+        # Everything is offline: the live suites only run when SM_LIVE_ALIAS /
+        # SM_WIN_HOST are set, and nothing sets them here. They report as
+        # skipped, which is not a failure.
+        run: dotnet test ServerMonitor.slnx -c Release --no-build --logger 'console;verbosity=normal'
+
+      - name: Offscreen card render
+        # The App's render tests write PNGs of each card, kept as an artifact
+        # so a layout regression is visible rather than only measurable.
+        # Terminal and DataGrid need a real window and come out blank offscreen
+        # (plan §8), so those are not part of it.
+        env:
+          SM_RENDER_CARDS: ${{ runner.temp }}/cards
+        run: |
+          dotnet test tests/ServerMonitor.App.Tests/ServerMonitor.App.Tests.csproj \
+            -c Release --no-build --logger 'console;verbosity=minimal' || true
+          ls -la "${SM_RENDER_CARDS}" 2>/dev/null || echo "no cards rendered"
+
+      - name: Upload rendered cards
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cards-${{ github.run_number }}
+          path: ${{ runner.temp }}/cards
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Version
+        id: version
+        # windows/v1.2.3 -> 1.2.3; anything else -> 0.1.0-dev+<short sha>, so a
+        # build downloaded from the Actions tab still says which commit it is.
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/windows/v* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/windows/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.1.0-dev+${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: pwsh
+        working-directory: windows
+        run: ./scripts/package.ps1 -Version $env:VERSION
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: Server-Monitor-${{ steps.version.outputs.version }}
+          path: |
+            windows/dist/*.zip
+            windows/dist/*.exe
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/windows/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: Server-Monitor-*
+          merge-multiple: true
+          path: out
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/windows/v}"
+          cat > notes.md <<EOF
+          Native Windows app, ${VERSION}. Requires Windows 10 1809 or later; designed for Windows 11.
+
+          Two downloads: the installer (\`Server-Monitor-${VERSION}-x64-setup.exe\`) and a
+          portable zip that needs no install. Both are self-contained — no .NET runtime required.
+
+          The build is not code-signed, so SmartScreen will warn on first run: choose
+          **More info** then **Run anyway**. Some antivirus products also flag unsigned
+          self-contained executables; the source for this build is the \`windows/v${VERSION}\` tag.
+          EOF
+          gh release create "windows/v${VERSION}" out/* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "Server Monitor for Windows ${VERSION}" \
+            --notes-file notes.md

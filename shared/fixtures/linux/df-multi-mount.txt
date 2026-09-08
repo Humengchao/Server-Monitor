@@ -1,0 +1,4 @@
+Filesystem     1B-blocks       Used  Available Capacity Mounted on
+/dev/vda2      84421599232 30799843328 49318871040      39% /
+/dev/vdb1     210301161472 52343545856 157957615616      25% /data
+tmpfs           4194304000          0  4194304000       0% /dev/shm

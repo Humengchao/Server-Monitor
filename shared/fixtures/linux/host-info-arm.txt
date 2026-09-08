@@ -1,0 +1,6 @@
+host=arm-1
+kern=6.8.0-1030-oracle
+arch=aarch64
+os=Ubuntu 24.04.4 LTS
+ips=10.0.0.5
+cpu= Neoverse-N1

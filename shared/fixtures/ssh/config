@@ -1,0 +1,30 @@
+# Defaults for every host: a pattern, not a machine, so the importer skips it.
+Host *
+    ServerAliveInterval 30
+    ControlMaster auto
+    ControlPath ~/.ssh/cm-%r@%h:%p
+
+Host web-1
+    HostName 203.0.113.10
+    User deploy
+    Port 2222
+    IdentityFile ~/.ssh/id_ed25519
+
+Host db-1 db-primary
+    HostName 203.0.113.11
+    User postgres
+    IdentityFile "~/.ssh/keys/db key"
+
+# No HostName: the alias itself is the address.
+Host bastion.example.com
+    User jump
+
+Host behind-jump
+    HostName 10.10.0.5
+    User root
+    ProxyJump bastion.example.com
+
+# `=` instead of whitespace is legal and appears in generated configs.
+Host equals-style
+    HostName=198.51.100.7
+    User=admin

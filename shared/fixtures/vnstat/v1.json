@@ -1,0 +1,9 @@
+{"vnstatversion":"1.18","jsonversion":"1","interfaces":[
+ {"id":"eth0","nick":"eth0",
+  "traffic":{"total":{"rx":896484375,"tx":411132812},
+   "hours":[{"id":13,"date":{"year":2026,"month":8,"day":26},"rx":50781,"tx":17578},
+            {"id":14,"date":{"year":2026,"month":8,"day":26},"rx":20507,"tx":6835}],
+   "days":[{"id":1,"date":{"year":2026,"month":8,"day":25},"rx":1269531,"tx":390625}],
+   "months":[{"id":1,"date":{"year":2026,"month":7},"rx":40039062,"tx":11718750}],
+   "tops":[]}}
+]}

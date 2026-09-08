@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The shell (macOS side: the ServerMonitor executable target). Everything
+       Windows-specific lives here; Core stays portable. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <!-- WinForms comes in for the tray icon and the screen-capture helper
+         only; no WinForms UI is built. -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>ServerMonitor.App</RootNamespace>
+    <AssemblyName>ServerMonitor</AssemblyName>
+    <ApplicationIcon>Resources\app.ico</ApplicationIcon>
+    <!-- 1809 is the floor (D8): ConPTY and the bundled OpenSSH both start
+         there. Declared so the manifest advertises Windows 10+ behaviour. -->
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+    <!-- Per-monitor v2 so the self-drawn gauges and charts stay crisp when a
+         window moves between displays with different scaling. -->
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="$(MvvmToolkitVersion)" />
+    <PackageReference Include="WPF-UI" Version="$(WpfUiVersion)" />
+    <PackageReference Include="H.NotifyIcon.Wpf" Version="$(NotifyIconVersion)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ServerMonitor.Core\ServerMonitor.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Resources\app.ico" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,49 @@
+# The batched Linux collection. One section per line, in the order the
+# parser's section enum expects; see README.md before reordering anything.
+#
+# Comments and blank lines are not sections and do not shift the numbering.
+
+# startClock — brackets the run so the host can say how long it spent, which
+# is what makes the latency figure mean "time on the wire".
+date +%s%N
+
+# statFirst / statSecond — two reads half a second apart. The sleep happens
+# *remotely* so CPU usage still comes from two samples without a second round
+# trip. `sleep 0.5 || sleep 1` because some /bin/sh only take whole seconds.
+cat /proc/stat
+sleep 0.5 || sleep 1; cat /proc/stat
+
+cat /proc/meminfo
+cat /proc/loadavg
+cat /proc/net/dev
+cat /proc/diskstats
+cat /proc/uptime
+nproc
+
+# diskUsage — every local filesystem, not just /: the storage card lists
+# mounts and the headline figure still comes from /. The fallback is for hosts
+# whose df has no -x, which is why the pseudo-filesystem check has to be
+# repeated locally on whatever comes back.
+df -P -B1 %DF_EXCLUDE% 2>/dev/null || df -P -B1
+
+# processes — sorted by CPU share and trimmed here rather than locally, so the
+# round trip stays small on a busy host. Substituted with `true` unless a
+# machine screen is open.
+%PROCESSES%
+
+# hostInfo — key=value rather than one fact per line. Empty lines are dropped
+# when the output is split, so a host where any of these produced nothing used
+# to shift every later field up: the CPU model would arrive as the IP list.
+echo host=$(hostname); echo kern=$(uname -r); echo arch=$(uname -m); echo os=$(. /etc/os-release 2>/dev/null && echo $PRETTY_NAME); echo ips=$(hostname -I 2>/dev/null); echo cpu=$(grep -m1 '^model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2-)
+
+# gpu — short-circuits to nothing on the ~all hosts with no NVIDIA card, so it
+# costs one `command -v` there. key=value for the same reason hostInfo is.
+command -v nvidia-smi >/dev/null 2>&1 && { nvidia-smi | grep -m1 'Driver Version' | sed -E 's/.*Driver Version: *([^ ]+).*CUDA Version: *([^ ]+).*/driver=\1\ncuda=\2/'; nvidia-smi --query-gpu=index,name,utilization.gpu,memory.total,memory.used,temperature.gpu,fan.speed,power.draw,power.limit --format=csv,noheader,nounits | sed 's/^/gpu=/'; nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader,nounits | sed 's/^/proc=/'; } || true
+
+# docker — the engine counts cost nothing extra: this call was already being
+# made for the version alone, and asking for all five fields saves the machine
+# screen and the Docker page a round trip each.
+%DOCKER%
+
+# endClock
+date +%s%N

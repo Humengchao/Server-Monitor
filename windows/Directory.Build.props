@@ -1,0 +1,47 @@
+<Project>
+
+  <PropertyGroup>
+    <!-- One place for the whole solution. .NET 10 is the LTS the plan settled
+         on (D2); C# 14 comes with it. -->
+    <LangVersion>14.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
+    <InvariantGlobalization>false</InvariantGlobalization>
+
+    <!-- WPF's XAML compiler is a Windows-only, x86 .NET Framework program
+         (F5). This flag lets the App project *compile* on a non-Windows host
+         so Core and the tests stay buildable from the Mac; it cannot run
+         there, which is fine — the plan develops and verifies on Windows. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+
+    <!-- The version the CI overrides with the tag; a local build says dev. -->
+    <Version>0.1.0</Version>
+    <Company>Server Monitor</Company>
+    <Product>Server Monitor</Product>
+
+    <!-- Deterministic output so two builds of the same commit match. -->
+    <Deterministic>true</Deterministic>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+
+    <!-- Central package versions, so the three projects cannot drift apart.
+         SSH.NET and the terminal control are pinned deliberately (D3, R3). -->
+    <SshNetVersion>2026.0.0</SshNetVersion>
+    <SqliteVersion>10.0.11</SqliteVersion>
+    <MvvmToolkitVersion>8.4.2</MvvmToolkitVersion>
+    <WpfUiVersion>4.3.0</WpfUiVersion>
+    <NotifyIconVersion>2.4.1</NotifyIconVersion>
+    <XUnitVersion>2.9.3</XUnitVersion>
+    <XUnitRunnerVersion>3.1.5</XUnitRunnerVersion>
+    <TestSdkVersion>18.9.0</TestSdkVersion>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <!-- The published app is self-contained and single-file (D2). Trimming is
+         off on purpose: WPF is not trim-safe, and the reflection the XAML
+         loader does would break in ways that only show at runtime. -->
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+</Project>

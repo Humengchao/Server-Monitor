@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>ServerMonitor.Core.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <!-- The live suites are skipped, not failed, when their environment
+         variables are absent; xUnit reports that as a skip, and a skip must
+         not be an error. -->
+    <NoWarn>$(NoWarn);xUnit1004</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="$(TestSdkVersion)" />
+    <PackageReference Include="xunit" Version="$(XUnitVersion)" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="$(XUnitRunnerVersion)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\ServerMonitor.Core\ServerMonitor.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Real host output, shared with the Swift tests (D9). Copied rather than
+         embedded so a failing assertion can be diffed against the file on
+         disk. -->
+    <Content Include="..\..\..\shared\fixtures\**\*" LinkBase="Fixtures"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

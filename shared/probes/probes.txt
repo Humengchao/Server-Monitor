@@ -1,0 +1,41 @@
+# One-line probes and the substitutions for linux-metrics.txt.
+#
+# Format: `key = value`, first `=` splits. Blank lines and `#` are comments.
+# Values are shell (or a plain list, for pseudo-filesystem-types).
+
+# What linux-metrics.txt's %PROCESSES% becomes when a machine screen is open.
+# The command is everything after the five fixed columns, kept whole so a path
+# with spaces survives; rss is in kB.
+processes = ps -eo pid=,user=,pcpu=,pmem=,rss=,args= --sort=-pcpu 2>/dev/null | head -n 30
+
+# What %DOCKER% becomes on a poll that samples the engine (every 30 s).
+docker-info = D="{{.ServerVersion}}|{{.Images}}|{{.ContainersRunning}}|{{.ContainersStopped}}|{{.ContainersPaused}}"; docker info --format "$D" || sudo -n docker info --format "$D" || true
+
+# The format string on its own, for the Docker page's standalone `docker info`.
+docker-info-format = {{.ServerVersion}}|{{.Images}}|{{.ContainersRunning}}|{{.ContainersStopped}}|{{.ContainersPaused}}
+
+# OS detection. A Windows host answers by *failing* — it has no uname — so a
+# non-zero exit from the remote shell is the Windows signal. ssh's own 255 is
+# a different thing and must not be read as Windows.
+os-detect = uname -s
+
+# Where /proc/cpuinfo has no model name — every aarch64 host — lscpu derives
+# one from the implementer/part tables. It walks every core's sysfs topology to
+# do it, so ask once per host, not per poll.
+cpu-model-fallback = lscpu 2>/dev/null | grep -m1 -i '^model name' | cut -d: -f2-
+
+# vnStat. SM_NO_VNSTAT rather than a non-zero exit: most hosts have no vnStat,
+# and the card explains how to install it instead of reporting a failure.
+vnstat = command -v vnstat >/dev/null 2>&1 && vnstat --json 2>/dev/null || echo SM_NO_VNSTAT
+
+# Which package manager the host has, and whether we are root. Read-only: the
+# install line it implies is shown to the user before anything runs.
+vnstat-install-probe = for m in apt-get dnf yum apk pacman zypper; do command -v $m >/dev/null 2>&1 && { echo $m; break; }; done; echo SM_PROBE_END; id -u
+
+# Filesystem types that are kernel interfaces rather than storage. One list,
+# two uses: it builds df's -x flags (%DF_EXCLUDE%) and it is the check applied
+# to whatever comes back, because the fallback df on a host without -x returns
+# everything. Type alone is not enough — efivarfs slipped through and put the
+# 128 KB firmware variable store on the storage card of every UEFI host — so
+# the check also drops anything mounted under /sys, /proc or /dev.
+pseudo-filesystem-types = tmpfs devtmpfs overlay squashfs udev none efivarfs ramfs

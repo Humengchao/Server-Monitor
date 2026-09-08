@@ -1,0 +1,4 @@
+{"vnstatversion":"2.10","jsonversion":"2","interfaces":[
+ {"name":"eth0","alias":"","traffic":{"total":{"rx":0,"tx":0},
+  "fiveminute":[],"hour":[],"day":[],"month":[],"year":[],"top":[]}}
+]}

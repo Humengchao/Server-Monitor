@@ -1,0 +1,3 @@
+Filesystem 1B-blocks Used Available Capacity Mounted on
+/dev/mapper/a-very-long-logical-volume-group-name-here
+           84421599232 30799843328 49318871040 39% /

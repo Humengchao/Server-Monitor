@@ -1,0 +1,6 @@
+host=web-1
+kern=6.8.0-134-generic
+arch=x86_64
+os=Ubuntu 24.04.4 LTS
+ips=192.168.9.132 172.17.0.1 169.254.1.1 127.0.0.1
+cpu=Intel(R) Xeon(R) Platinum 8269CY CPU @ 2.50GHz

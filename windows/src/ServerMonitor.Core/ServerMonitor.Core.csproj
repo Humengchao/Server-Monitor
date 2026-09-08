@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The library half of the "library + shell" split the macOS side uses
+       (ServerMonitorKit ↔ this). Deliberately net10.0 rather than
+       net10.0-windows: nothing here may touch a Windows API, so the whole
+       collection chain stays compilable and testable on any host. Anything
+       platform-specific (credential manager, tray, toasts) belongs in the App
+       behind an interface declared here. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>ServerMonitor.Core</RootNamespace>
+    <AssemblyName>ServerMonitor.Core</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SSH.NET" Version="$(SshNetVersion)" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="$(SqliteVersion)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- D9: the probe scripts are the single source shared with the Go and
+         Swift collectors. Embedded rather than copied so a published
+         single-file exe carries them with no loose files to lose. -->
+    <EmbeddedResource Include="..\..\..\shared\probes\**\*" LinkBase="Probes" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ServerMonitor.Core.Tests" />
+    <InternalsVisibleTo Include="ServerMonitor.App" />
+    <InternalsVisibleTo Include="ServerMonitor.App.Tests" />
+    <InternalsVisibleTo Include="ServerMonitor.Cli" />
+  </ItemGroup>
+
+</Project>

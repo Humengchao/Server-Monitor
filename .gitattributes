@@ -1,0 +1,32 @@
+# Let git normalise line endings in the working copy by platform, except where
+# the content is bound for somewhere else.
+* text=auto
+
+# The shared probes are sent to remote hosts, not run locally. A Linux host
+# handed a CRLF shell command sees a literal \r as part of the last argument on
+# every line, so these must stay LF whatever platform checks them out.
+#
+# The readers strip \r anyway (see Text.Lines) — belt and braces, because the
+# failure is remote, obscure, and looks like a parser bug rather than a
+# checkout artefact.
+shared/probes/*.txt text eol=lf
+shared/probes/*.sh  text eol=lf
+
+# Fixtures are captured host output; the parsers are tested against exactly
+# what a host sent, so the bytes must not be rewritten. The one exception is
+# the Windows fixture, which really is CRLF on the wire — but it is stored LF
+# and the CRLF case is covered by a live test against a real host.
+shared/fixtures/** text eol=lf
+
+# PowerShell run on Windows; CRLF is what every other tool there writes.
+*.ps1 text eol=crlf
+*.iss text eol=crlf
+
+# Windows-side sources: CRLF locally, LF in the repository, which is what
+# `text=auto` above already does — spelled out so a future .editorconfig
+# discussion has something to point at.
+*.cs   text
+*.xaml text
+*.csproj text
+*.slnx text
+*.props text

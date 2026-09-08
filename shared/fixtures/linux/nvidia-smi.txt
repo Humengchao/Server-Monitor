@@ -1,0 +1,6 @@
+driver=550.90.07
+cuda=12.4
+gpu=0, NVIDIA A100-SXM4-40GB, 87, 40960, 32768, 61, [N/A], 245.31, 400.00
+gpu=1, NVIDIA GeForce RTX 4090, 12, 24564, 1024, 44, 31, 55.12, 450.00
+proc=3241, /usr/bin/python3, 30720
+proc=8899, ollama, 900

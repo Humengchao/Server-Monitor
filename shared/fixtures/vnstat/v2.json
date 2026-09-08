@@ -1,0 +1,18 @@
+{"vnstatversion":"2.10","jsonversion":"2","interfaces":[
+ {"name":"eth0","alias":"","created":{"date":{"year":2026,"month":1,"day":3}},
+  "updated":{"date":{"year":2026,"month":8,"day":26},"time":{"hour":14,"minute":25}},
+  "traffic":{"total":{"rx":918000000000,"tx":421000000000},
+   "fiveminute":[{"id":1,"date":{"year":2026,"month":8,"day":26},"time":{"hour":14,"minute":15},"rx":1200000,"tx":340000},
+                 {"id":2,"date":{"year":2026,"month":8,"day":26},"time":{"hour":14,"minute":20},"rx":900000,"tx":210000}],
+   "hour":[{"id":1,"date":{"year":2026,"month":8,"day":26},"time":{"hour":13,"minute":0},"rx":52000000,"tx":18000000},
+           {"id":2,"date":{"year":2026,"month":8,"day":26},"time":{"hour":14,"minute":0},"rx":21000000,"tx":7000000}],
+   "day":[{"id":1,"date":{"year":2026,"month":8,"day":25},"rx":1300000000,"tx":400000000},
+          {"id":2,"date":{"year":2026,"month":8,"day":26},"rx":700000000,"tx":250000000}],
+   "month":[{"id":1,"date":{"year":2026,"month":7},"rx":41000000000,"tx":12000000000},
+            {"id":2,"date":{"year":2026,"month":8},"rx":33000000000,"tx":9000000000}],
+   "year":[{"id":1,"date":{"year":2026},"rx":300000000000,"tx":100000000000}],
+   "top":[]}},
+ {"name":"docker0","alias":"","traffic":{"total":{"rx":999999999999,"tx":999999999999},
+   "fiveminute":[],"hour":[],"day":[{"id":1,"date":{"year":2026,"month":8,"day":26},"rx":1,"tx":1}],
+   "month":[],"year":[],"top":[]}}
+]}

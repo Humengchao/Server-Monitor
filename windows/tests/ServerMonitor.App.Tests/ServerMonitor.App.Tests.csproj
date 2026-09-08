@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Offscreen rendering and view-model tests. net10.0-windows because
+       RenderTargetBitmap and the controls under test are WPF types; this
+       project is the reason the App half is testable at all without a
+       desktop session. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>ServerMonitor.App.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <NoWarn>$(NoWarn);xUnit1004</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="$(TestSdkVersion)" />
+    <PackageReference Include="xunit" Version="$(XUnitVersion)" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="$(XUnitRunnerVersion)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\ServerMonitor.App\ServerMonitor.App.csproj" />
+    <ProjectReference Include="..\..\src\ServerMonitor.Core\ServerMonitor.Core.csproj" />
+  </ItemGroup>
+
+</Project>

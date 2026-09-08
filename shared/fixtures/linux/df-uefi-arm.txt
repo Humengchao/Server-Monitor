@@ -1,0 +1,5 @@
+Filesystem 1B-blocks Used Available Capacity Mounted on
+efivarfs 131072 7509 118411 6% /sys/firmware/efi/efivars
+/dev/sda1 47373041664 11703223296 33228500992 26% /
+/dev/sda16 1006632960 202375168 733417472 22% /boot
+/dev/sda15 111149056 6427648 104721408 6% /boot/efi

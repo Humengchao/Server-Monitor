@@ -1,0 +1,3 @@
+WARN[0000] /home/deploy/stack/docker-compose.yml: `version` is obsolete
+[{"Name":"server-monitor","Status":"running(2)","ConfigFiles":"/home/deploy/stack/docker-compose.yml"},
+ {"Name":"legacy","Status":"exited(2), running(1)","ConfigFiles":"/srv/legacy/docker-compose.yml"}]
