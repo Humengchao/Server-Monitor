@@ -137,7 +137,10 @@ public sealed class DashboardPage : UserControl, ISearchable
 
         var card = Ui.ClickableCard(
             Ui.Rows(10, Header(server, status, snapshot), Facts(server, snapshot), Ui.Separator(), metrics),
-            () => _openServer(server.Id));
+            () => _openServer(server.Id),
+            // The host's name and state, so tabbing through the dashboard
+            // reads as "web-01, offline" rather than as ten unnamed panes.
+            name: $"{server.Name} — {StatusWord(status.Kind)}");
         // Right-click for the two things you would otherwise open the detail
         // page to reach.
         card.ContextMenu = CardMenu(server);
@@ -145,6 +148,21 @@ public sealed class DashboardPage : UserControl, ISearchable
         card.Margin = new Thickness(0, 0, 14, 14);
         return card;
     }
+
+    /// <summary>
+    /// The state in a word, for the card's accessible name.
+    /// </summary>
+    /// <remarks>
+    /// Localised, because it is read aloud. The visible badge says the same
+    /// thing in colour and shape, which a screen reader cannot see.
+    /// </remarks>
+    private static string StatusWord(StatusKind kind) => kind switch
+    {
+        StatusKind.Online => Strings.Get("common.online"),
+        StatusKind.Offline => Strings.Get("common.offline"),
+        StatusKind.Polling => Strings.Get("common.connecting"),
+        _ => Strings.Get("common.unknown"),
+    };
 
     private ContextMenu CardMenu(Server server)
     {

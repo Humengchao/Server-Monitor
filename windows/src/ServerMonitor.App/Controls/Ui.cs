@@ -124,22 +124,24 @@ internal static class Ui
     }
 
     /// <summary>A card that responds to hover and click, for the dashboard.</summary>
-    public static Border ClickableCard(UIElement content, Action onClick, double padding = 14)
+    /// <summary>
+    /// A card you can click, tab to, and activate from the keyboard.
+    /// </summary>
+    /// <param name="name">
+    /// What assistive technology should call it — the host's name, for the
+    /// dashboard. Without it a screen reader announces the card's contents and
+    /// no identity.
+    /// </param>
+    public static Border ClickableCard(
+        UIElement content, Action onClick, double padding = 14, string? name = null)
     {
-        var border = Card(content, padding);
-        border.Cursor = Cursors.Hand;
-        border.MouseEnter += (_, _) =>
+        var card = new CardButton(onClick, name)
         {
-            border.Background = (Brush)Application.Current.FindResource("Brush.CardHover");
-            border.BorderBrush = Ink.Brush(Palette.Accent);
+            Style = (Style)Application.Current.FindResource("Card"),
+            Padding = new Thickness(padding),
+            Child = content,
         };
-        border.MouseLeave += (_, _) =>
-        {
-            border.Background = (Brush)Application.Current.FindResource("Brush.Card");
-            border.BorderBrush = (Brush)Application.Current.FindResource("Brush.Border");
-        };
-        border.MouseLeftButtonUp += (_, _) => onClick();
-        return border;
+        return card;
     }
 
     public static Border Separator() => new()
