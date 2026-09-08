@@ -75,13 +75,13 @@ public sealed class SftpWindow : Window
         _path.KeyDown += (_, e) =>
         {
             if (e.Key != Key.Enter) return;
-            _ = GoAsync(SftpPath.Normalise(_path.Text.Trim()));
+            _ = RunAsync(() => GoAsync(SftpPath.Normalise(_path.Text.Trim())));
         };
 
         var toolbar = Ui.Columns(6,
             Ui.Quiet(Strings.Get("sftp.back"), Back),
-            Ui.Quiet(Strings.Get("sftp.up"), () => _ = GoAsync(SftpPath.Parent(_directory))),
-            Ui.Quiet(Strings.Get("common.refresh"), () => _ = ReloadAsync()));
+            Ui.Quiet(Strings.Get("sftp.up"), () => _ = RunAsync(() => GoAsync(SftpPath.Parent(_directory)))),
+            Ui.Quiet(Strings.Get("common.refresh"), () => _ = RunAsync(ReloadAsync)));
         toolbar.VerticalAlignment = VerticalAlignment.Center;
 
         var actions = Ui.Columns(6,
@@ -98,7 +98,7 @@ public sealed class SftpWindow : Window
             value =>
             {
                 _showHidden = value;
-                _ = ReloadAsync();
+                _ = RunAsync(ReloadAsync);
             });
         hidden.VerticalAlignment = VerticalAlignment.Center;
 
@@ -157,7 +157,7 @@ public sealed class SftpWindow : Window
         list.MouseDoubleClick += (_, _) =>
         {
             if (Selected().FirstOrDefault() is not { } entry) return;
-            if (entry.IsDirectory) _ = GoAsync(entry.Path);
+            if (entry.IsDirectory) _ = RunAsync(() => GoAsync(entry.Path));
             else Download();
         };
         list.KeyDown += (_, e) =>
@@ -165,10 +165,10 @@ public sealed class SftpWindow : Window
             switch (e.Key)
             {
                 case Key.Enter when Selected().FirstOrDefault() is { IsDirectory: true } directory:
-                    _ = GoAsync(directory.Path);
+                    _ = RunAsync(() => GoAsync(directory.Path));
                     break;
                 case Key.Back:
-                    _ = GoAsync(SftpPath.Parent(_directory));
+                    _ = RunAsync(() => GoAsync(SftpPath.Parent(_directory)));
                     break;
                 case Key.Delete:
                     Delete();
@@ -183,19 +183,15 @@ public sealed class SftpWindow : Window
 
     // MARK: - Navigation
 
-    private async Task StartAsync()
+    private Task StartAsync()
     {
         Say(Strings.Get("terminal.connect"));
-        try
+        return RunAsync(async () =>
         {
             var home = await _browser.HomeAsync(Monitor.Target(_server)).ConfigureAwait(true);
             StartSession();
             await GoAsync(home).ConfigureAwait(true);
-        }
-        catch (Exception error)
-        {
-            Fail(error);
-        }
+        });
     }
 
     private void Back()
@@ -204,12 +200,11 @@ public sealed class SftpWindow : Window
         var previous = _back[^1];
         _back.RemoveAt(_back.Count - 1);
         // Popped before navigating, and GoAsync is told not to push it back.
-        _ = GoAsync(previous, remember: false);
+        _ = RunAsync(() => GoAsync(previous, remember: false));
     }
 
     private async Task GoAsync(string path, bool remember = true)
     {
-        if (_busy) return;
         var destination = SftpPath.Normalise(path.Length == 0 ? "/" : path);
         if (remember && destination != _directory) _back.Add(_directory);
         _directory = destination;
@@ -217,29 +212,25 @@ public sealed class SftpWindow : Window
         await ReloadAsync().ConfigureAwait(true);
     }
 
+    /// <summary>
+    /// Re-lists the current directory.
+    /// </summary>
+    /// <remarks>
+    /// No in-flight guard of its own, deliberately: every action ends by
+    /// refreshing, and a guard here would be held by the action that is
+    /// calling it — so the listing would silently never update after a
+    /// delete, an upload or a rename.
+    /// </remarks>
     private async Task ReloadAsync()
     {
-        if (_busy) return;
-        _busy = true;
         Say(Strings.Get("common.refresh"));
-        try
-        {
-            var entries = await _browser
-                .ListAsync(Monitor.Target(_server), _directory, _showHidden)
-                .ConfigureAwait(true);
-            _list.ItemsSource = entries.Select(entry => new Row(entry)).ToList();
-            Say(entries.Count == 0
-                ? Strings.Get("sftp.emptyDir")
-                : $"{entries.Count} — {_directory}");
-        }
-        catch (Exception error)
-        {
-            Fail(error);
-        }
-        finally
-        {
-            _busy = false;
-        }
+        var entries = await _browser
+            .ListAsync(Monitor.Target(_server), _directory, _showHidden)
+            .ConfigureAwait(true);
+        _list.ItemsSource = entries.Select(entry => new Row(entry)).ToList();
+        Say(entries.Count == 0
+            ? Strings.Get("sftp.emptyDir")
+            : $"{entries.Count} — {_directory}");
     }
 
     // MARK: - Actions

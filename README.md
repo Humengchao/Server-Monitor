@@ -148,7 +148,7 @@
 |---|---|
 | `web/` | 网页版：`backend/`（Go + Gin）、`frontend/`（React）与 `docker-compose.yml`，由 GitHub Actions 构建镜像并部署 |
 | `macos/` | macOS 原生客户端（SwiftUI，纯本地，不依赖服务端） |
-| `windows/` | Windows 原生客户端（.NET 10 + WPF）。计划与开工说明见 [`windows/PLAN.md`](windows/PLAN.md) |
+| `windows/` | Windows 原生客户端（.NET 10 + WPF，纯本地，不依赖服务端） |
 | `docs/` | 接口文档 [`API.md`](docs/API.md) 与截图 |
 
 三个客户端各有自己的工作流：改 `web/` 触发网页版部署，改 `macos/`、`windows/` 只触发各自的构建，互不影响。
@@ -157,7 +157,9 @@
 
 `macos/` 下是一个纯本地的 SwiftUI 菜单栏应用，不依赖本项目的服务端：它直接用系统 `ssh` 连接各台主机采集指标（Linux 与 Windows），历史存在本机 SQLite，界面对标 SwiftServer——仪表板、机器详情卡片、Docker、SFTP、终端、代码片段、vnStat 流量统计，并常驻菜单栏在后台持续轮询与告警。构建、测试与打包见 [`macos/README.md`](macos/README.md)。
 
-`windows/` 是功能对等的 Windows 版，同样纯本地、同样直连主机，托盘常驻。目前处于计划阶段，技术决策、分阶段计划与开工说明见 [`windows/PLAN.md`](windows/PLAN.md)。
+`windows/` 是功能对等的 Windows 版（.NET 10 + WPF），同样纯本地、同样直连主机，托盘常驻：仪表板、机器详情、Docker 五表、SFTP、终端、代码片段、SSH 密钥、会话历史、Toast 告警与开机自启，界面文案与 macOS 端同源。默认走进程内的 SSH 长连接（相当于 macOS 端的 ControlMaster；Windows 自带的 ssh.exe 不支持连接复用），需要 Match 块、证书或真正的 ssh-agent 的主机可以逐台改用系统 ssh.exe。构建、测试、打包与已知缺口见 [`windows/README.md`](windows/README.md)，技术决策与分阶段计划见 [`windows/PLAN.md`](windows/PLAN.md)。
+
+发布包是自包含单文件，目标机器不需要装 .NET；但**没有代码签名**，首次运行 SmartScreen 会拦一次。
 
 ## 快速开始
 

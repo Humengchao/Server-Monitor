@@ -62,6 +62,17 @@
     </ItemGroup>
   </Target>
 
+  <!-- And again for publish, which builds its file list separately: without
+       this the 85 MB PDB is what the release zip is mostly made of. -->
+  <Target Name="DropTerminalRendererSymbolsOnPublish"
+          AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish
+          Remove="@(ResolvedFileToPublish)"
+          Condition="'%(Filename)%(Extension)' == 'Microsoft.Terminal.Control.pdb'" />
+    </ItemGroup>
+  </Target>
+
   <!-- UseWindowsForms adds System.Drawing and System.Windows.Forms to the
        implicit usings, and both collide with WPF on the names this app uses
        most: Color, Point, Size, Brush, Pen, Control. Removed here and imported

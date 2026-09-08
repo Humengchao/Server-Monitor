@@ -251,6 +251,7 @@ public sealed class SshNetTransport : ISshTransport
     {
         var hops = new List<SshClient>();
         var forwards = new List<ForwardedPortLocal>();
+        TClient? client = null;
         try
         {
             var host = resolved.HostName;
@@ -276,7 +277,7 @@ public sealed class SshNetTransport : ISshTransport
             }
 
             var info = BuildInfo(resolved with { HostName = host, Port = port }, target.ServerId);
-            var client = build(info);
+            client = build(info);
             Arm(client, resolved.HostName);
             await client.ConnectAsync(cancellationToken).ConfigureAwait(false);
 
@@ -289,6 +290,11 @@ public sealed class SshNetTransport : ISshTransport
         }
         catch
         {
+            // The client too, not just the hops. A failed ConnectAsync leaves
+            // the socket it opened inside the client, and an unreachable host
+            // is retried forever — a 30-minute soak against five dead hosts
+            // climbed by about three handles a minute until this disposed it.
+            try { client?.Dispose(); } catch (Exception) { /* already broken */ }
             Release(hops, forwards);
             throw;
         }
