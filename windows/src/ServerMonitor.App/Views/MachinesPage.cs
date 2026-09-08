@@ -268,6 +268,17 @@ public sealed class MachinesPage : UserControl, ISearchable
         return new DataTemplate { VisualTree = factory };
     }
 
+    /// <summary>SFTP has no L10n key of its own — it is the same word everywhere.</summary>
+    private MenuItem FilesItem(ListView list)
+    {
+        var item = new MenuItem { Header = "SFTP" };
+        item.Click += (_, _) =>
+        {
+            if (list.SelectedItem is Row row) Windows.Files(Window.GetWindow(this), row.Server);
+        };
+        return item;
+    }
+
     private ContextMenu RowMenu(ListView list)
     {
         var menu = new ContextMenu();
@@ -283,6 +294,8 @@ public sealed class MachinesPage : UserControl, ISearchable
         }
 
         Item("nav.overview", row => _openServer(row.Id));
+        Item("nav.terminal", row => Windows.Terminal(Window.GetWindow(this), row.Server));
+        menu.Items.Add(FilesItem(list));
         Item("common.edit", row => EditServer(row.Server));
         Item("common.testConnection", row => TestConnection(row.Server));
         menu.Items.Add(new Separator());

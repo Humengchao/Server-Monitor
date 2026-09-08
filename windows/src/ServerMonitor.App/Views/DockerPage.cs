@@ -262,9 +262,28 @@ public sealed class DockerPage : UserControl
             Item("docker.start", () => _ = PerformAsync(ContainerAction.Start, container));
         }
         menu.Items.Add(new Separator());
+        if (container.IsRunning)
+        {
+            // A shell in the container, through the same terminal window a
+            // host gets: docker exec -it needs a pty, which is exactly what
+            // the shell channel is.
+            var shell = new MenuItem { Header = Strings.IsChinese ? "容器 Shell" : "Container shell" };
+            shell.Click += (_, _) => OpenShell(container);
+            menu.Items.Add(shell);
+        }
         Item("docker.logs", () => _ = ShowLogsAsync(container));
         Item("common.copy", () => Ui.Copy(container.Id));
         return menu;
+    }
+
+    private void OpenShell(DockerContainer container)
+    {
+        if (_host is not { } host) return;
+        Windows.Terminal(
+            Window.GetWindow(this),
+            host,
+            DockerClient.ExecShellCommand(container.Id),
+            $"{container.Name} — {host.Name}");
     }
 
     private async Task PerformAsync(ContainerAction action, DockerContainer container)

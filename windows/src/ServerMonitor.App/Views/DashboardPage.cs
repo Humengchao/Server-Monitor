@@ -138,9 +138,29 @@ public sealed class DashboardPage : UserControl, ISearchable
         var card = Ui.ClickableCard(
             Ui.Rows(10, Header(server, status, snapshot), Facts(server, snapshot), Ui.Separator(), metrics),
             () => _openServer(server.Id));
+        // Right-click for the two things you would otherwise open the detail
+        // page to reach.
+        card.ContextMenu = CardMenu(server);
         card.Width = 400;
         card.Margin = new Thickness(0, 0, 14, 14);
         return card;
+    }
+
+    private ContextMenu CardMenu(Server server)
+    {
+        var menu = new ContextMenu();
+
+        void Item(string header, Action action)
+        {
+            var item = new MenuItem { Header = header };
+            item.Click += (_, _) => action();
+            menu.Items.Add(item);
+        }
+
+        Item(Strings.Get("nav.overview"), () => _openServer(server.Id));
+        Item(Strings.Get("nav.terminal"), () => Windows.Terminal(Window.GetWindow(this), server));
+        Item("SFTP", () => Windows.Files(Window.GetWindow(this), server));
+        return menu;
     }
 
     private UIElement Header(Server server, ServerStatus status, MetricSnapshot? snapshot)

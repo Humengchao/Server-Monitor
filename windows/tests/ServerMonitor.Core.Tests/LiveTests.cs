@@ -253,6 +253,87 @@ public class LiveLinuxTests
             Assert.Equal(0, left.Trim().ToInt());
         }
     }
+
+    /// <summary>
+    /// Upload, list, download, rename, delete — the SFTP half of P4's exit
+    /// criterion.
+    /// </summary>
+    /// <remarks>
+    /// Everything happens under one directory in the login user's home, made
+    /// and removed by this test, so a failure leaves at most one directory
+    /// named after the run rather than files scattered in <c>/tmp</c>.
+    /// </remarks>
+    [RequiresEnv("SM_LIVE_ALIAS")]
+    public async Task AnSftpRoundTripKeepsTheBytes()
+    {
+        await using var transport = new SshNetTransport(new InMemoryCredentialStore());
+        var target = Target();
+        var browser = new SftpBrowser((t, token) => transport.LeaseSftpAsync(t, token));
+
+        var home = await browser.HomeAsync(target);
+        var directory = SftpPath.Combine(home, $"sm-live-{Guid.NewGuid():N}");
+        // 1 MB of pseudo-random bytes: big enough that the transfer is
+        // chunked and the progress callback fires more than once, small enough
+        // to be quick over a real link.
+        var payload = new byte[1024 * 1024];
+        new Random(4242).NextBytes(payload);
+
+        var local = Path.Combine(Path.GetTempPath(), $"sm-live-{Guid.NewGuid():N}.bin");
+        var readBack = local + ".down";
+        await File.WriteAllBytesAsync(local, payload);
+
+        var uploads = 0;
+        var downloads = 0;
+
+        try
+        {
+            await browser.CreateDirectoryAsync(target, directory);
+
+            var remote = SftpPath.Combine(directory, "payload.bin");
+            await browser.UploadAsync(
+                target, local, remote,
+                new Progress<TransferProgress>(_ => Interlocked.Increment(ref uploads)));
+
+            var listing = await browser.ListAsync(target, directory);
+            var entry = Assert.Single(listing);
+            Assert.Equal("payload.bin", entry.Name);
+            Assert.False(entry.IsDirectory);
+            Assert.Equal(payload.Length, entry.Size);
+
+            await browser.DownloadAsync(
+                target, remote, readBack,
+                new Progress<TransferProgress>(_ => Interlocked.Increment(ref downloads)));
+            Assert.Equal(payload, await File.ReadAllBytesAsync(readBack));
+            // The .part file must not survive a completed download.
+            Assert.False(File.Exists(readBack + ".part"));
+
+            var renamed = SftpPath.Combine(directory, "payload.renamed");
+            await browser.RenameAsync(target, remote, renamed);
+            Assert.Equal("payload.renamed", Assert.Single(await browser.ListAsync(target, directory)).Name);
+
+            // A nested directory, so the recursive delete is the one under
+            // test rather than a single unlink.
+            var nested = SftpPath.Combine(directory, "nested");
+            await browser.CreateDirectoryAsync(target, nested);
+            await browser.UploadAsync(target, local, SftpPath.Combine(nested, "copy.bin"));
+            Assert.Equal(2, (await browser.ListAsync(target, directory)).Count);
+
+            Console.WriteLine($"sftp: {uploads} upload callbacks, {downloads} download callbacks");
+        }
+        finally
+        {
+            try { await browser.DeleteAsync(target, directory); }
+            catch (Exception error) { Console.WriteLine($"cleanup: {error.Message}"); }
+            foreach (var path in new[] { local, readBack })
+            {
+                try { File.Delete(path); } catch (Exception) { /* best effort */ }
+            }
+        }
+
+        // And nothing left behind.
+        var remaining = await browser.ListAsync(target, home);
+        Assert.DoesNotContain(remaining, item => item.Path == directory);
+    }
 }
 
 /// <summary>

@@ -187,6 +187,8 @@ public sealed class ServerDetailPage : UserControl
         }
 
         var actions = Ui.Columns(6,
+            Ui.Quiet(Strings.Get("nav.terminal"), OpenTerminal),
+            Ui.Quiet("SFTP", OpenFiles),
             Ui.Quiet(Strings.Get("common.refresh"), () => _ = Monitor.PollAllAsync()),
             Ui.Quiet(Strings.Get("common.edit"), Edit),
             Ui.Quiet(Strings.Get("nav.dashboard"), _goBack));
@@ -208,6 +210,16 @@ public sealed class ServerDetailPage : UserControl
         if (server.Notes.Length > 0) children.Add(Ui.Wrapped(server.Notes, "Text.Tertiary"));
 
         return Ui.Rows(6, [.. children]);
+    }
+
+    private void OpenTerminal()
+    {
+        if (Monitor.Server(_serverId) is { } server) Windows.Terminal(Window.GetWindow(this), server);
+    }
+
+    private void OpenFiles()
+    {
+        if (Monitor.Server(_serverId) is { } server) Windows.Files(Window.GetWindow(this), server);
     }
 
     private void Edit()

@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using ServerMonitor.App.Controls;
 using ServerMonitor.App.Platform;
 using ServerMonitor.App.Theme;
 using ServerMonitor.Core.Collect;
@@ -337,7 +338,7 @@ public partial class MainWindow : Window
     private void InstallShortcuts()
     {
         void Bind(Key key, ModifierKeys modifiers, Action action) =>
-            InputBindings.Add(new KeyBinding(new Relay(action), key, modifiers));
+            InputBindings.Add(new KeyBinding(new Ui.Command(action), key, modifiers));
 
         Bind(Key.D1, ModifierKeys.Control, () => Show(Page.Dashboard));
         Bind(Key.D2, ModifierKeys.Control, () => Show(Page.Machines));
@@ -353,24 +354,6 @@ public partial class MainWindow : Window
         {
             if (Search.Visibility == Visibility.Visible) Search.Focus();
         });
-    }
-
-    /// <summary>
-    /// A command wrapping an action.
-    /// </summary>
-    /// <remarks>
-    /// Hand-written rather than the toolkit's <c>RelayCommand</c>: these are
-    /// nine key bindings that are always enabled, and pulling in a generated
-    /// command per shortcut buys nothing.
-    /// </remarks>
-    private sealed class Relay(Action action) : ICommand
-    {
-        public event EventHandler? CanExecuteChanged;
-        public bool CanExecute(object? parameter) => true;
-        public void Execute(object? parameter) => action();
-        // Never raised — these are always available. Declared to satisfy the
-        // interface, and the compiler's unused-event warning with it.
-        internal void Refresh() => CanExecuteChanged?.Invoke(this, EventArgs.Empty);
     }
 
     // MARK: - Window state

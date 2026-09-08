@@ -160,6 +160,24 @@ internal static class Ui
         Padding = new Thickness(0),
     };
 
+    /// <summary>
+    /// A command wrapping an action.
+    /// </summary>
+    /// <remarks>
+    /// Hand-written rather than the toolkit's <c>RelayCommand</c>: these are
+    /// key bindings that are always enabled, and a generated command per
+    /// shortcut buys nothing.
+    /// </remarks>
+    internal sealed class Command(Action action) : System.Windows.Input.ICommand
+    {
+        public event EventHandler? CanExecuteChanged;
+        public bool CanExecute(object? parameter) => true;
+        public void Execute(object? parameter) => action();
+        // Never raised — these are always available. Declared to satisfy the
+        // interface, and the compiler's unused-event warning with it.
+        internal void Refresh() => CanExecuteChanged?.Invoke(this, EventArgs.Empty);
+    }
+
     // MARK: - Controls
 
     public static Button Button(string text, Action onClick, string style = "Button.Standard")

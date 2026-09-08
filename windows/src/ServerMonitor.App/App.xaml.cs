@@ -33,6 +33,18 @@ public partial class App : Application
     /// </summary>
     public string? StoreFailure { get; private set; }
 
+    /// <summary>
+    /// The pooled SSH.NET transport, for the two things that need the session
+    /// and not a command: the terminal's shell stream and SFTP.
+    /// </summary>
+    /// <remarks>
+    /// Typed rather than <c>ISshTransport</c> because those two are exactly
+    /// what the interface does not cover — and there is no ssh.exe equivalent,
+    /// so a host pinned to that transport gets told rather than silently
+    /// handed a second connection.
+    /// </remarks>
+    public SshNetTransport? LibraryTransport => _library as SshNetTransport;
+
     private SingleInstance? _instance;
     private SystemWatchers? _watchers;
     private TrayIcon? _tray;

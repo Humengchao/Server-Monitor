@@ -212,6 +212,23 @@ public sealed class SshNetTransport : ISshTransport
         }
     }
 
+    private Task<SshClient> ConnectAsync(
+        ResolvedHost resolved, SshTarget target, CancellationToken cancellationToken) =>
+        ConnectAsync(
+            resolved,
+            target,
+            info =>
+            {
+                var client = new SshClient(info);
+                // Keepalive rather than waiting to discover a dead session on
+                // the next poll: this is the ServerAliveInterval the macOS
+                // build passes ssh, and it also keeps a NAT from dropping an
+                // idle flow between polls of a slow-cadence fleet.
+                client.KeepAliveInterval = TimeSpan.FromSeconds(15);
+                return client;
+            },
+            cancellationToken);
+
     /// <summary>
     /// Opens one connection, including any ProxyJump hops.
     /// </summary>
@@ -220,9 +237,17 @@ public sealed class SshNetTransport : ISshTransport
     /// rather than SSH.NET's own proxy support, which speaks HTTP/SOCKS and
     /// not <c>ProxyJump</c>. Chains resolve outermost-first so
     /// <c>ProxyJump a,b</c> tunnels through a, then b.
+    ///
+    /// Generic in the client type because SFTP is a second connection to the
+    /// same host (see <see cref="_pool"/>) and has to arrive through the same
+    /// bastions, with the same credentials and the same host-key policy.
     /// </remarks>
-    private async Task<SshClient> ConnectAsync(
-        ResolvedHost resolved, SshTarget target, CancellationToken cancellationToken)
+    private async Task<TClient> ConnectAsync<TClient>(
+        ResolvedHost resolved,
+        SshTarget target,
+        Func<ConnectionInfo, TClient> build,
+        CancellationToken cancellationToken)
+        where TClient : BaseClient
     {
         var hops = new List<SshClient>();
         var forwards = new List<ForwardedPortLocal>();
@@ -251,18 +276,13 @@ public sealed class SshNetTransport : ISshTransport
             }
 
             var info = BuildInfo(resolved with { HostName = host, Port = port }, target.ServerId);
-            var client = new SshClient(info);
-            // Keepalive rather than waiting to discover a dead session on the
-            // next poll: this is the ServerAliveInterval the macOS build
-            // passes ssh, and it also keeps a NAT from dropping an idle flow
-            // between polls of a slow-cadence fleet.
-            client.KeepAliveInterval = TimeSpan.FromSeconds(15);
+            var client = build(info);
             Arm(client, resolved.HostName);
             await client.ConnectAsync(cancellationToken).ConfigureAwait(false);
 
             // The hops belong to this connection now: closing it must close
             // them, or a bastion session leaks for every poll of a host behind
-            // it. Recorded here and released in Close, since SshClient raises
+            // it. Recorded here and released in Close, since the clients raise
             // no "disconnected" event to hang that off.
             _owned[client] = (hops, forwards);
             return client;
@@ -275,7 +295,7 @@ public sealed class SshNetTransport : ISshTransport
     }
 
     /// <summary>Jump connections and forwards owned by an outer client.</summary>
-    private readonly Dictionary<SshClient, (List<SshClient> Hops, List<ForwardedPortLocal> Forwards)> _owned = [];
+    private readonly Dictionary<BaseClient, (List<SshClient> Hops, List<ForwardedPortLocal> Forwards)> _owned = [];
 
     private static void Release(List<SshClient> hops, List<ForwardedPortLocal> forwards)
     {
@@ -412,7 +432,7 @@ public sealed class SshNetTransport : ISshTransport
     /// contact, and it avoids the trap where an askpass helper answers the
     /// fingerprint question with the password and the connection hangs.
     /// </remarks>
-    private void Arm(SshClient client, string displayHost)
+    private void Arm(BaseClient client, string displayHost)
     {
         client.HostKeyReceived += (_, e) =>
         {
@@ -438,7 +458,11 @@ public sealed class SshNetTransport : ISshTransport
         };
     }
 
-    public async Task DisconnectAsync(SshTarget target) => await EvictAsync(target.ServerId);
+    public async Task DisconnectAsync(SshTarget target)
+    {
+        await EvictAsync(target.ServerId);
+        await EvictSftpAsync(target.ServerId);
+    }
 
     private async Task EvictAsync(Guid serverId)
     {
@@ -505,16 +529,115 @@ public sealed class SshNetTransport : ISshTransport
             {
                 _poolLock.Release();
             }
+
+            await _sftpLock.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+            try
+            {
+                var now = DateTime.UtcNow;
+                foreach (var (id, pooled) in _sftp.ToList())
+                {
+                    if (now - pooled.LastUsed < IdleTimeout && pooled.Client.IsConnected) continue;
+                    _sftp.Remove(id);
+                    CloseSftp(pooled);
+                }
+            }
+            finally
+            {
+                _sftpLock.Release();
+            }
         }
     }
 
     /// <summary>
     /// The live connection for a host, for the things that need the session
-    /// itself rather than one command: SFTP and the terminal's shell stream.
+    /// itself rather than one command: the terminal's shell stream.
     /// </summary>
     public async Task<SshClient> LeaseClientAsync(
         SshTarget target, CancellationToken cancellationToken = default) =>
         (await LeaseAsync(target, cancellationToken).ConfigureAwait(false)).Client;
+
+    /// <summary>
+    /// A connected <see cref="SftpClient"/> for a host.
+    /// </summary>
+    /// <remarks>
+    /// Its own pool, because SSH.NET's SftpClient is a client and not a
+    /// channel factory: it cannot be built from the <see cref="SshClient"/>
+    /// the poll is using, so file browsing is a second connection to the host.
+    /// Pooled all the same — opening one per directory listing would be a
+    /// handshake per click — and swept on the same idle timer, so closing the
+    /// browser eventually closes the connection rather than holding it for the
+    /// life of the app.
+    /// </remarks>
+    public async Task<SftpClient> LeaseSftpAsync(
+        SshTarget target, CancellationToken cancellationToken = default)
+    {
+        var resolved = _config.Resolve(target);
+        var fingerprint = resolved.Fingerprint;
+
+        await _sftpLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_sftp.TryGetValue(target.ServerId, out var existing))
+            {
+                if (existing.Fingerprint == fingerprint && existing.Client.IsConnected)
+                {
+                    existing.LastUsed = DateTime.UtcNow;
+                    return existing.Client;
+                }
+                CloseSftp(existing);
+                _sftp.Remove(target.ServerId);
+            }
+
+            var client = await ConnectAsync(
+                resolved,
+                target,
+                info => new SftpClient(info) { KeepAliveInterval = TimeSpan.FromSeconds(15) },
+                cancellationToken).ConfigureAwait(false);
+            _sftp[target.ServerId] = new PooledSftp { Client = client, Fingerprint = fingerprint };
+            return client;
+        }
+        finally
+        {
+            _sftpLock.Release();
+        }
+    }
+
+    private sealed class PooledSftp
+    {
+        public required SftpClient Client { get; init; }
+        public required string Fingerprint { get; init; }
+        public DateTime LastUsed { get; set; } = DateTime.UtcNow;
+    }
+
+    private readonly Dictionary<Guid, PooledSftp> _sftp = [];
+    private readonly SemaphoreSlim _sftpLock = new(1, 1);
+
+    private void CloseSftp(PooledSftp pooled)
+    {
+        try
+        {
+            if (_owned.Remove(pooled.Client, out var owned)) Release(owned.Hops, owned.Forwards);
+            pooled.Client.Disconnect();
+            pooled.Client.Dispose();
+        }
+        catch (Exception)
+        {
+            // Same as Close: this runs because the connection is finished.
+        }
+    }
+
+    private async Task EvictSftpAsync(Guid serverId)
+    {
+        await _sftpLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_sftp.Remove(serverId, out var pooled)) CloseSftp(pooled);
+        }
+        finally
+        {
+            _sftpLock.Release();
+        }
+    }
 
     public async ValueTask DisposeAsync()
     {
@@ -526,6 +649,8 @@ public sealed class SshNetTransport : ISshTransport
         {
             foreach (var pooled in _pool.Values) Close(pooled);
             _pool.Clear();
+            foreach (var pooled in _sftp.Values) CloseSftp(pooled);
+            _sftp.Clear();
         }
         finally
         {

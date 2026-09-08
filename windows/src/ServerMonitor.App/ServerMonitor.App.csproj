@@ -41,7 +41,26 @@
        there is no first-party alternative to write around. -->
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="$(MvvmToolkitVersion)" />
+    <!-- D5. What is actually used from this package is
+         Microsoft.Terminal.Wpf.TerminalControl and the native renderer it
+         carries; the ConPTY half is for the ssh.exe fallback route and is not
+         wired up. Everything that touches it is behind Terminal/TerminalHost,
+         per R3. -->
+    <PackageReference Include="EasyWindowsTerminalControl" Version="$(TerminalControlVersion)" />
   </ItemGroup>
+
+  <!-- The terminal renderer ships an 85 MB PDB per architecture. Useful to
+       whoever debugs Windows Terminal, three times the size of everything
+       else we would ever ship, and no help to a crash dump from this app. -->
+  <Target Name="DropTerminalRendererSymbols"
+          AfterTargets="ResolveReferences"
+          BeforeTargets="_CopyFilesMarkedCopyLocal">
+    <ItemGroup>
+      <ReferenceCopyLocalPaths
+          Remove="@(ReferenceCopyLocalPaths)"
+          Condition="'%(Filename)%(Extension)' == 'Microsoft.Terminal.Control.pdb'" />
+    </ItemGroup>
+  </Target>
 
   <!-- UseWindowsForms adds System.Drawing and System.Windows.Forms to the
        implicit usings, and both collide with WPF on the names this app uses
