@@ -39,8 +39,12 @@
 
        The terminal control (D5) is a different case and its decision stands:
        there is no first-party alternative to write around. -->
+  <!-- No CommunityToolkit.Mvvm either, and for a duller reason than WPF-UI:
+       nothing here ever used it. There is no view-model layer — the pages
+       build their own trees and read MonitorService directly, which
+       implements INotifyPropertyChanged by hand — so the package was a
+       dependency to keep updated in exchange for nothing. -->
   <ItemGroup>
-    <PackageReference Include="CommunityToolkit.Mvvm" Version="$(MvvmToolkitVersion)" />
     <!-- D5. What is actually used from this package is
          Microsoft.Terminal.Wpf.TerminalControl and the native renderer it
          carries; the ConPTY half is for the ssh.exe fallback route and is not

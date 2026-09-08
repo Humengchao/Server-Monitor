@@ -109,6 +109,15 @@ dotnet run --project windows/src/ServerMonitor.Cli -- probe  my-host --alias -v
 - **Mica 默认关闭**。它需要窗口自身透明，而在虚拟显示器、部分远程串流环境下
   系统并不真的绘制那层材质，客户端区会整片变黑 —— 系统 API 在这种情况下仍然
   返回成功，程序无法自己发现。设置里可以打开。
+- **后台 soak 有一段没解释清楚的漂移**：最小化跑 30 分钟（五台不可达的主机），
+  采集没有中断，但句柄数从 614 涨到 701（约每分钟 3 个），RSS 从 112 MB 涨到
+  120 MB。已经缩小到「轮询路径」：**一台主机也不加**时最小化跑 5 分钟句柄是
+  552→536（不涨），而传输层单独量一百次连接被拒、二十次超时也不涨
+  （`HandleTests`，且强制 GC 后不涨说明不是永久泄漏，更像是等一次 gen2 回收）。
+  托盘图标在摘要不变时根本不重绘，所以不是它。也不是套接字：句柄涨的同时
+  进程的 TCP 端点数一直是 0–2，说明涨的是事件/等待类句柄，最可能是 SSH.NET
+  的 session 对象在等回收。剩下的定位要靠 PerfView，按计划归 P7。
+  原始采样在 `windows/artifacts/soak*.csv`。
 - **P7 的加固与性能还没做**：高 DPI 与多显示器、中文 Windows 的 GBK 代码页、
   PerfView 量主线程，都还没逐项核对。
 - **干净机器上的安装 / 卸载全程**（P6 出口）还没在一台干净的 Windows 11 上走过。
@@ -222,6 +231,20 @@ key: it really does write to `authorized_keys`), `SM_WIN_HOST` / `SM_WIN_USER` /
   and where DWM declines to composite the material — a virtual display adapter,
   some remote-streaming setups — the client area renders entirely black while
   the API still reports success. There is a switch for it in Settings.
+- **The background soak shows an unexplained drift.** Thirty minutes minimised
+  against five unreachable hosts collected without interruption, but the handle
+  count went from 614 to 701 (about three a minute) and RSS from 112 MB to
+  120 MB. It is narrowed to the polling path: **with no hosts at all**, five
+  minutes minimised went 552 → 536, and the transport measured on its own does
+  not move either — a hundred refused connections and twenty timeouts stay flat
+  (`HandleTests`), and staying flat *after a forced GC* says this is not a
+  permanent leak so much as something waiting for a gen2 collection. The tray
+  icon does not redraw at all while the summary is unchanged, so it is not
+  that, and it is not sockets either: the process's TCP endpoint count stays
+  at 0–2 while the handle count climbs, so what is growing is event/wait
+  handles — most likely SSH.NET session objects waiting to be collected.
+  Pinning it down wants PerfView, which is P7's job. Raw samples are in
+  `windows/artifacts/soak*.csv`.
 - **P7's hardening and performance pass is outstanding**: high DPI and multiple
   monitors, the GBK code page on Chinese Windows, and a PerfView measurement of
   the UI thread have not been worked through.

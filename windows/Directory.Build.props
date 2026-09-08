@@ -29,12 +29,9 @@
          SSH.NET and the terminal control are pinned deliberately (D3, R3). -->
     <SshNetVersion>2026.0.0</SshNetVersion>
     <SqliteVersion>10.0.11</SqliteVersion>
-    <MvvmToolkitVersion>8.4.2</MvvmToolkitVersion>
     <!-- R3: an unofficial package wrapping Windows Terminal's control, pinned
          to the version the terminal was actually proven against. -->
     <TerminalControlVersion>1.0.38</TerminalControlVersion>
-    <WpfUiVersion>4.3.0</WpfUiVersion>
-    <NotifyIconVersion>2.4.1</NotifyIconVersion>
     <XUnitVersion>2.9.3</XUnitVersion>
     <XUnitRunnerVersion>3.1.5</XUnitRunnerVersion>
     <TestSdkVersion>18.9.0</TestSdkVersion>
