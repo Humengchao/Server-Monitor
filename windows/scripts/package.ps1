@@ -21,12 +21,19 @@
 .PARAMETER SkipInstaller
     Produce only the portable zips. Useful locally, where Inno Setup may not be
     installed; CI always has it (F8).
+
+.PARAMETER InstallerOnly
+    Build only the installer, from a publish that is already in dist/. CI runs
+    the two halves as separate steps so a failure names which one broke — the
+    step list is readable without downloading a log, and the first packaging
+    run failed in a way that took a local repro to find.
 #>
 [CmdletBinding()]
 param(
     [string] $Version = '0.1.0-dev',
     [string[]] $Runtimes = @('win-x64', 'win-arm64'),
-    [switch] $SkipInstaller
+    [switch] $SkipInstaller,
+    [switch] $InstallerOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,10 +49,13 @@ if ($assemblyVersion -notmatch '^\d+\.\d+\.\d+$') {
     throw "Version '$Version' does not start with a three-part number"
 }
 
-if (Test-Path $dist) { Remove-Item -Recurse -Force $dist }
+if (-not $InstallerOnly) {
+    if (Test-Path $dist) { Remove-Item -Recurse -Force $dist }
+}
 New-Item -ItemType Directory -Force -Path $dist | Out-Null
 
-foreach ($runtime in $Runtimes) {
+$toPublish = if ($InstallerOnly) { @() } else { $Runtimes }
+foreach ($runtime in $toPublish) {
     Write-Host "== publishing $runtime" -ForegroundColor Cyan
     $out = Join-Path $dist $runtime
 
@@ -107,7 +117,10 @@ if (-not (Test-Path $x64)) {
     return
 }
 
-Write-Host '== building the installer' -ForegroundColor Cyan
+$isccVersion = (Get-Item $iscc).VersionInfo.FileVersion
+# The version decides whether x64compatible is available (see installer.iss),
+# so it belongs in the log rather than in a guess after the fact.
+Write-Host "== building the installer with $iscc ($isccVersion)" -ForegroundColor Cyan
 & $iscc `
     "/DMyAppVersion=$assemblyVersion" `
     "/DMyAppFullVersion=$Version" `

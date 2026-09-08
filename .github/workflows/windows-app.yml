@@ -111,21 +111,35 @@ jobs:
             echo "version=0.1.0-dev+${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Package
+      # Two steps rather than one, because a job's step list is readable
+      # without downloading its log — and the first packaging run failed
+      # somewhere inside a single "Package" step, which took a local repro to
+      # narrow down. Now the conclusion says which half.
+      - name: Publish portable zips
         env:
           VERSION: ${{ steps.version.outputs.version }}
         shell: pwsh
         working-directory: windows
-        run: ./scripts/package.ps1 -Version $env:VERSION
+        run: ./scripts/package.ps1 -Version $env:VERSION -SkipInstaller
+
+      - name: Build installer
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: pwsh
+        working-directory: windows
+        run: ./scripts/package.ps1 -Version $env:VERSION -InstallerOnly
 
       - name: Upload packages
+        # always(), so a failed installer still hands over the zips that did
+        # build rather than throwing away the whole job's output.
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: Server-Monitor-${{ steps.version.outputs.version }}
           path: |
             windows/dist/*.zip
             windows/dist/*.exe
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 30
 
   release:

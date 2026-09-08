@@ -34,12 +34,42 @@ public static class WindowsMetrics
     /// </remarks>
     internal static string Stub()
     {
-        var payload = Convert.ToBase64String(Deflate(Probes.WindowsScript));
+        var payload = Convert.ToBase64String(Deflate(ForDelivery(Probes.WindowsScript)));
         return $"""
             $s=[IO.Compression.DeflateStream]::new([IO.MemoryStream]::new([Convert]::FromBase64String('{payload}')),[IO.Compression.CompressionMode]::Decompress)
             iex ([IO.StreamReader]::new($s)).ReadToEnd()
             """;
     }
+
+    /// <summary>
+    /// The script with everything only a reader needs taken out.
+    /// </summary>
+    /// <remarks>
+    /// Comments are 28% of the file, and the file has to survive a round trip
+    /// through cmd.exe's ~8191-character command line: the explanations of why
+    /// CIM rather than Get-Counter, or why two PerfRawData reads, are for
+    /// whoever edits <c>shared/probes/windows-metrics.ps1</c> and are of no
+    /// use to the host running it. Adding one sentence to that file is what
+    /// pushed the command to 8122 characters and tripped the test that guards
+    /// the limit.
+    ///
+    /// Only whole-line comments and blank lines go. A trailing comment after
+    /// code is left alone, because telling a comment from a <c>#</c> inside a
+    /// string needs a parser, and a wrong answer here is a script that no
+    /// longer runs. <c>DeliveryDropsOnlyWholeLineComments</c> also pins that
+    /// the file contains no here-string, which is the one construct where a
+    /// line starting with <c>#</c> would be content rather than a comment.
+    /// </remarks>
+    internal static string ForDelivery(string script) =>
+        string.Join(
+            '\n',
+            script.Split('\n')
+                .Select(line => line.TrimEnd('\r'))
+                .Where(line =>
+                {
+                    var trimmed = line.TrimStart();
+                    return trimmed.Length > 0 && !trimmed.StartsWith('#');
+                }));
 
     /// <summary>Raw DEFLATE of the script's UTF-8 bytes.</summary>
     internal static byte[] Deflate(string text)

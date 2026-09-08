@@ -5,10 +5,18 @@
 # do not exist in English on a Chinese or German Windows, while CIM class and
 # property names are invariant.
 $ErrorActionPreference='SilentlyContinue'
+# Output as UTF-8 whatever the host's code page is. A redirected stdout takes
+# the console's output encoding, which on a Chinese or German Windows is the
+# OEM page (936, 850) — so `$os.Caption` ("Microsoft Windows 11 专业版") or a
+# volume label with an umlaut in it arrives as bytes no client can read, and
+# all three of them decode this stream as UTF-8. Wrapped because assigning it
+# is a terminating error on a host where the handle cannot be re-encoded, and
+# a mangled OS name is a better outcome than no metrics at all.
 # PowerShell otherwise serialises its progress stream into stdout as CLIXML
 # when the output is redirected. Verified on Windows Server 2016, where
 # "preparing modules for first use" records arrived mixed in with the metrics.
 $ProgressPreference='SilentlyContinue'
+try { [Console]::OutputEncoding = New-Object Text.UTF8Encoding $false } catch {}
 $os = Get-CimInstance Win32_OperatingSystem
 $cores = (Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors
 # Win32_PerfRawData_* counters are cumulative despite the "Persec" suffix,
