@@ -74,6 +74,42 @@ internal static class Ui
         return box;
     }
 
+    /// <summary>
+    /// A table column whose text is trimmed rather than clipped.
+    /// </summary>
+    /// <remarks>
+    /// GridViewColumn.DisplayMemberBinding produces a bare TextBlock with no
+    /// trimming, so a name wider than its column stopped mid-character with
+    /// no ellipsis and no way to read the rest — a 58-character hostname
+    /// looked like a drawing bug. This templates the cell instead, with the
+    /// Table.Cell style, which trims with an ellipsis.
+    /// </remarks>
+    /// <param name="tooltip">
+    /// Whether the full value is available on hover. On for the columns whose
+    /// content can outgrow its width — a name, a target, a tag list — and off
+    /// for the ones that cannot, since a tooltip reading "Linux" over a cell
+    /// reading "Linux" is only noise. Conditional on actually being trimmed
+    /// would be better, but TextBlock.IsTextTrimmed is not usable as a style
+    /// trigger here.
+    /// </param>
+    public static GridViewColumn TextColumn(
+        string header, string path, double width, bool tooltip = false)
+    {
+        var cell = new FrameworkElementFactory(typeof(TextBlock));
+        cell.SetBinding(TextBlock.TextProperty, new System.Windows.Data.Binding(path));
+        cell.SetResourceReference(FrameworkElement.StyleProperty, "Table.Cell");
+        if (tooltip)
+        {
+            cell.SetBinding(FrameworkElement.ToolTipProperty, new System.Windows.Data.Binding(path));
+        }
+        return new GridViewColumn
+        {
+            Header = header,
+            Width = width,
+            CellTemplate = new DataTemplate { VisualTree = cell },
+        };
+    }
+
     /// <summary>A number, with tabular figures so it does not jitter as it changes.</summary>
     public static TextBlock Number(string text, double size = 13, Color? colour = null)
     {

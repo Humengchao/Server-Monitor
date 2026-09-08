@@ -196,7 +196,6 @@ public sealed class ServerDetailPage : UserControl
         var actions = Ui.Columns(6,
             Ui.Quiet(Strings.Get("nav.terminal"), OpenTerminal),
             Ui.Quiet("SFTP", OpenFiles),
-            Ui.Quiet(Strings.Get("common.refresh"), () => _ = Monitor.PollAllAsync()),
             Ui.Quiet(Strings.Get("common.edit"), Edit),
             Ui.Quiet(Strings.Get("nav.dashboard"), _goBack));
         actions.HorizontalAlignment = HorizontalAlignment.Right;

@@ -219,6 +219,17 @@ public partial class MainWindow : Window
             ? Visibility.Visible
             : Visibility.Collapsed;
 
+        // The same idea for Refresh. This button re-polls the hosts, which is
+        // what "refresh" means on the screens that show host readings. The
+        // keys page and the container page have their own Refresh — rescan
+        // ~/.ssh, reload the container lists — so both were on screen at once,
+        // twenty pixels apart, same word, different actions. Only one is ever
+        // shown now. F5 still re-polls from anywhere, since a shortcut cannot
+        // be mistaken for the other button.
+        RefreshButton.Visibility = page is Page.SshKeys or Page.Docker
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+
         if (page == Page.ServerDetail)
         {
             _navigating = true;

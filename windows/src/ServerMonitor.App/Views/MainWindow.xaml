@@ -76,8 +76,14 @@
                                                  Margin="0,0,8,0"
                                                  VerticalAlignment="Center"
                                                  Fill="{Binding StatusBrush}" />
+                                        <!-- The sidebar leaves about 190px for
+                                             a name, so trimming is the common
+                                             case rather than the exception,
+                                             and the tooltip is the only way
+                                             to read a long one. -->
                                         <TextBlock Grid.Column="1"
                                                    Text="{Binding Name}"
+                                                   ToolTip="{Binding Name}"
                                                    TextTrimming="CharacterEllipsis" />
                                     </Grid>
                                 </DataTemplate>

@@ -102,6 +102,20 @@
 
     <!-- Applied to every TextBlock with no explicit style, so a label added
          later inherits the theme rather than defaulting to black on Mica. -->
+    <!-- A table cell. Trimmed with an ellipsis, because a GridViewColumn
+         otherwise clips its text mid-character and the result reads as a
+         rendering fault rather than as "there is more here".
+
+         The tooltip is not here. TextBlock.IsTextTrimmed cannot be used as a
+         style trigger in this WPF, so there is no declarative way to show one
+         only for the cells that are actually cut — and an unconditional one
+         would repeat "Linux" back at every hover. Ui.TextColumn asks for it
+         per column instead, on the ones whose values can outgrow their
+         width. -->
+    <Style TargetType="TextBlock" BasedOn="{StaticResource Text.Body}" x:Key="Table.Cell">
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+
     <Style TargetType="TextBlock" BasedOn="{StaticResource Text.Body}" />
 
     <!--

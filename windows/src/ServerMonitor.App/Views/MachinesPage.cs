@@ -189,15 +189,16 @@ public sealed class MachinesPage : UserControl, ISearchable
             MaxHeight = double.PositiveInfinity,
         };
         ScrollViewer.SetVerticalScrollBarVisibility(list, ScrollBarVisibility.Disabled);
+        // Sideways, though. Nine columns need about 1100px and the window may
+        // be 900 wide with 228 of that spent on the sidebar — at which point
+        // memory, disk and tags were simply clipped, with no scrollbar and no
+        // way to reach them. Horizontal nesting has none of the wheel
+        // ambiguity that vertical nesting does, because the wheel is vertical.
+        ScrollViewer.SetHorizontalScrollBarVisibility(list, ScrollBarVisibility.Auto);
 
         var view = new GridView { AllowsColumnReorder = false };
-        void Column(string headerKey, string path, double width) =>
-            view.Columns.Add(new GridViewColumn
-            {
-                Header = Strings.Get(headerKey),
-                DisplayMemberBinding = new System.Windows.Data.Binding(path),
-                Width = width,
-            });
+        void Column(string headerKey, string path, double width, bool tooltip = false) =>
+            view.Columns.Add(Ui.TextColumn(Strings.Get(headerKey), path, width, tooltip));
 
         // The status dot needs a brush, so it is the one templated column.
         view.Columns.Add(new GridViewColumn
@@ -206,14 +207,14 @@ public sealed class MachinesPage : UserControl, ISearchable
             Width = 26,
             CellTemplate = DotTemplate(),
         });
-        Column("server.name", nameof(Row.Name), 170);
-        Column("server.host", nameof(Row.Target), 190);
+        Column("server.name", nameof(Row.Name), 170, tooltip: true);
+        Column("server.host", nameof(Row.Target), 190, tooltip: true);
         Column("server.osKind", nameof(Row.Os), 80);
-        Column("group.title", nameof(Row.Group), 100);
+        Column("group.assign", nameof(Row.Group), 100, tooltip: true);
         Column("metric.cores", nameof(Row.Cores), 60);
         Column("metric.memory", nameof(Row.Memory), 90);
         Column("metric.disk", nameof(Row.Disk), 90);
-        Column("server.tags", nameof(Row.Tags), 140);
+        Column("server.tags", nameof(Row.Tags), 140, tooltip: true);
         list.View = view;
 
         foreach (var server in Visible())

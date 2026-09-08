@@ -20,6 +20,9 @@ public sealed class ImportSshConfigWindow : Window
     private readonly List<(SshConfigHost Host, CheckBox Box, bool AlreadyAdded)> _rows = [];
     private readonly TextBlock _summary = Ui.Wrapped("", "Text.Caption");
 
+    /// <summary>The primary button, disabled until something is chosen.</summary>
+    private Button? _import;
+
     public ImportSshConfigWindow()
     {
         Title = Strings.Get("import.title");
@@ -61,13 +64,25 @@ public sealed class ImportSshConfigWindow : Window
             var already = existingAliases.Contains(host.Alias);
             var box = new CheckBox
             {
-                // A host already added is shown but not selected, so the list
-                // is a complete picture of the config rather than a filtered
-                // one that leaves the user wondering where an alias went.
-                IsChecked = !already,
+                // Nothing is pre-selected, which is what macOS does (its
+                // `chosen` set starts empty) and what this got wrong: it
+                // ticked every host not already added, so opening the dialog
+                // and pressing the primary button adopted the entire ssh
+                // config. On a config with forty hosts that is forty servers
+                // and forty SSH connections nobody asked for. "Select all" is
+                // one click away for people who do want that.
+                //
+                // A host already added is shown but disabled, so the list is
+                // a complete picture of the config rather than a filtered one
+                // that leaves the user wondering where an alias went.
+                IsChecked = false,
                 IsEnabled = !already,
                 VerticalAlignment = VerticalAlignment.Center,
             };
+            // Named, or a screen reader announces an unlabelled checkbox: the
+            // alias it belongs to is a sibling TextBlock, which the tick has
+            // no relationship to as far as automation is concerned.
+            System.Windows.Automation.AutomationProperties.SetName(box, host.Alias);
             box.Checked += (_, _) => RefreshSummary();
             box.Unchecked += (_, _) => RefreshSummary();
 
@@ -103,9 +118,10 @@ public sealed class ImportSshConfigWindow : Window
         });
         selectAll.HorizontalAlignment = HorizontalAlignment.Left;
 
+        _import = Ui.Accent(Strings.Get("import.action"), Import);
         var buttons = Ui.Columns(8,
             Ui.Button(Strings.Get("common.cancel"), () => { DialogResult = false; Close(); }),
-            Ui.Accent(Strings.Get("import.action"), Import));
+            _import);
         buttons.HorizontalAlignment = HorizontalAlignment.Right;
 
         var root = new Grid();
@@ -139,6 +155,10 @@ public sealed class ImportSshConfigWindow : Window
         _summary.Text = Strings.Get(
             "group.machines", selected.ToString(System.Globalization.CultureInfo.InvariantCulture));
         _summary.VerticalAlignment = VerticalAlignment.Center;
+        // Disabled while nothing is chosen, as on macOS. An enabled primary
+        // button over an empty selection is an invitation to press it and
+        // wonder what happened.
+        if (_import is not null) _import.IsEnabled = selected > 0;
     }
 
     private void Import()
