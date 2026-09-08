@@ -164,7 +164,11 @@ public sealed class ServerDetailPage : UserControl
             // place still asking for the emoji.
             identity.Children.Add(Ui.CountryBadge(server.CountryCode));
         }
-        identity.Children.Add(Ui.Headline(server.Name));
+        // Not the name. MainWindow already draws it as the page title, in a
+        // larger font, fifty pixels above this row — macOS puts that title in
+        // the window's toolbar, so there the headline here is the only copy.
+        // What is left is the row of facts the title cannot carry: where the
+        // host is, what it is tagged, and how it is reached.
         if (server.Tags.Count > 0) identity.Children.Add(Ui.TagChips(server.Tags));
         foreach (var child in identity.Children.OfType<FrameworkElement>())
         {

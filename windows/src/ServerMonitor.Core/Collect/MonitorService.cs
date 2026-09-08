@@ -880,8 +880,12 @@ public sealed class MonitorService : INotifyPropertyChanged, IAsyncDisposable
             {
                 if (!HasServer(server.Id)) return;
                 NoteFailure(server.Id);
+                // The log keeps the exception's own words — that is what a bug
+                // report needs. The status carries the sentence the user reads,
+                // which for the failures a monitored host actually produces is
+                // in their language (FailureText).
                 _log?.Invoke($"{server.Name}: {error.Message}");
-                var failure = ServerStatus.Offline(error.Message);
+                var failure = ServerStatus.Offline(Ssh.FailureText.For(error));
                 Commit(server.Id, () => _status[server.Id] = failure);
                 Alerts?.Evaluate(Server(server.Id) ?? server, failure, null);
             });
