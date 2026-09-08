@@ -389,6 +389,54 @@ public class KnownHostsTests
     }
 
     [Fact]
+    public void AFileThatCannotBeReadIsNotRememberedAsIfItHadBeen()
+    {
+        // The dangerous shape of a swallowed read error. A read that fails
+        // partway leaves the parser holding only the hosts it reached; caching
+        // that would make a host recorded further down the file read as
+        // Unknown for the rest of the process — and Unknown is accept-new, so
+        // a key that had in fact changed would be accepted and appended as a
+        // new one. ssh.exe appending while a poll reads is the realistic
+        // cause, so it has to be transient rather than sticky.
+        var path = TempPath();
+        try
+        {
+            File.WriteAllText(path, "host ssh-ed25519 AQID\n");
+            var known = new KnownHosts(path);
+            var errors = new List<string>();
+            known.OnError = errors.Add;
+
+            // Hold the file open for writing with no sharing, so the read
+            // throws the way a concurrent appender would make it throw.
+            using (File.Open(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                Assert.Equal(HostKeyVerdict.Unknown, known.Check("host", "ssh-ed25519", [1, 2, 3]));
+                Assert.NotEmpty(errors);
+            }
+
+            // The lock is gone; the very next check must see the real file
+            // again rather than a cached empty map.
+            Assert.Equal(HostKeyVerdict.Known, known.Check("host", "ssh-ed25519", [1, 2, 3]));
+            Assert.Equal(HostKeyVerdict.Changed, known.Check("host", "ssh-ed25519", [9, 9, 9]));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void AMissingFileIsNotReportedAsAFailure()
+    {
+        // The first run. It is also the one case where caching the empty set
+        // is right, so it must stay distinguishable from a failed read.
+        var errors = new List<string>();
+        var known = new KnownHosts(TempPath()) { OnError = errors.Add };
+        Assert.Equal(HostKeyVerdict.Unknown, known.Check("host", "ssh-ed25519", [1, 2, 3]));
+        Assert.Empty(errors);
+    }
+
+    [Fact]
     public void CommaSeparatedPatternsAreAllMatched()
     {
         var path = TempPath();

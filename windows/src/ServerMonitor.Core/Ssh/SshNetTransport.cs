@@ -98,6 +98,9 @@ public sealed class SshNetTransport : ISshTransport
         _credentials = credentials;
         _config = config ?? SshConfig.FromDefaultLocation();
         _knownHosts = knownHosts ?? KnownHosts.AtDefaultLocation();
+        // So a known_hosts that will not read says so, rather than quietly
+        // downgrading every host after it to "unknown".
+        _knownHosts.OnError ??= message => _log?.Invoke($"known_hosts: {message}");
         _log = log;
         _ = SweepAsync(_sweeper.Token);
     }
