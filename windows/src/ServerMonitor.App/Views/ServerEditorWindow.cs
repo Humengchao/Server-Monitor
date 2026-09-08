@@ -177,11 +177,21 @@ public sealed class ServerEditorWindow : Window
 
             _error);
 
-        var buttons = Ui.Columns(8,
-            Ui.Button(Strings.Get("common.testConnection"), TestConnection),
+        // Delete on the left, Cancel and Save on the right, as macOS lays it
+        // out — and only when there is something to delete. It was missing
+        // entirely: removing a host you were looking at meant cancelling out,
+        // finding its row on the machines page and using the context menu.
+        var left = Ui.Columns(8);
+        if (!_isNew) left.Children.Add(Ui.Danger(Strings.Get("common.delete"), Delete));
+        left.Children.Add(Ui.Button(Strings.Get("common.testConnection"), TestConnection));
+        left.HorizontalAlignment = HorizontalAlignment.Left;
+
+        var right = Ui.Columns(8,
             Ui.Button(Strings.Get("common.cancel"), () => { DialogResult = false; Close(); }),
             Ui.Accent(Strings.Get("common.save"), Save));
-        buttons.HorizontalAlignment = HorizontalAlignment.Right;
+        right.HorizontalAlignment = HorizontalAlignment.Right;
+
+        var buttons = Ui.Grid("*,auto", left, right);
         buttons.Margin = new Thickness(0, 14, 0, 0);
 
         var root = Ui.Rows(0, Ui.Scroll(body), buttons);
@@ -351,6 +361,28 @@ public sealed class ServerEditorWindow : Window
         _server.MemoryThreshold = _memoryThreshold;
         _server.DiskThreshold = _diskThreshold;
         return true;
+    }
+
+    /// <summary>
+    /// Removes the host being edited, after asking.
+    /// </summary>
+    /// <remarks>
+    /// DialogResult true on the way out, the same as a save, because every
+    /// caller rebuilds on true — and after a delete the list it rebuilds is
+    /// exactly what needs to change.
+    /// </remarks>
+    private void Delete()
+    {
+        if (!Ui.Confirm(
+                this,
+                Strings.Get("server.deleteConfirm", _server.Name),
+                confirmLabel: Strings.Get("common.delete")))
+        {
+            return;
+        }
+        Monitor.DeleteServer(_server);
+        DialogResult = true;
+        Close();
     }
 
     private void Save()
