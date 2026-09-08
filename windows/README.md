@@ -61,7 +61,7 @@
 
 ```powershell
 dotnet build windows/ServerMonitor.slnx
-dotnet test  windows/ServerMonitor.slnx      # 344 通过，14 条 live 用例跳过
+dotnet test  windows/ServerMonitor.slnx      # 374 通过，14 条 live 用例跳过
 dotnet run --project windows/src/ServerMonitor.App
 ```
 
@@ -122,7 +122,9 @@ dotnet run --project windows/src/ServerMonitor.Cli -- probe  my-host --alias -v
   留下的 session 对象只能靠终结器释放，而这个程序几乎不分配内存、很久才回收
   一次，所以在任务管理器里看着像泄漏。影响有限（回收即归还，CPU 与 RSS 都
   达标），真正的修法在 SSH.NET 那边；这里能做的是退避 —— 死主机的重试间隔
-  已经会长到 90 秒以上。原始采样在 `windows/artifacts/soak*.csv`。
+  已经会长到 90 秒以上。原始采样在 `windows/artifacts/soak*.csv`：
+  `soak1.csv` 就是上面这次 30 分钟、5 台不可达主机的运行（当时另有一个写入器
+  往同一个文件里追加了缺列的行，已剔除，数值一个没改），其余几个是对照。
 - **告警 Toast 也没法在这里验**：告警按「状态跳变」发，而不是按「当前状态」，
   所以一开始就不可达的主机不会触发（这是对的：否则每次启动都会弹一串）。
   要看到 Toast 需要一台先在线后离线的主机。
@@ -145,7 +147,7 @@ dotnet run --project windows/src/ServerMonitor.Cli -- probe  my-host --alias -v
 | `src/ServerMonitor.Core/` | 采集、解析、SSH、SQLite、文案。`net10.0`，不依赖 Windows |
 | `src/ServerMonitor.App/` | WPF 外壳：`Views/`、`Controls/`（自绘）、`Theme/`、`Platform/`、`Terminal/` |
 | `src/ServerMonitor.Cli/` | `smctl`，不带界面的采集 |
-| `tests/` | 344 条：解析器、数据库、轮询循环、SFTP 路径、离屏渲染、live |
+| `tests/` | 374 条：解析器、数据库、轮询循环、SFTP 路径、离屏渲染、live |
 | `scripts/package.ps1` · `scripts/installer.iss` | 发布与安装包 |
 | [`PLAN.md`](PLAN.md) | 技术决策（D1–D9）、既有事实（F1–F11）、分阶段计划、风险（R1–R13） |
 | [`../shared/probes/`](../shared/probes/) | 三端共用的采集脚本，改这里而不是各自复制 |
@@ -217,7 +219,7 @@ collection scripts — this app is standalone, and is the counterpart of the
 
 ```powershell
 dotnet build windows/ServerMonitor.slnx
-dotnet test  windows/ServerMonitor.slnx      # 344 pass, 14 live cases skipped
+dotnet test  windows/ServerMonitor.slnx      # 374 pass, 14 live cases skipped
 dotnet run --project windows/src/ServerMonitor.App
 
 cd windows; ./scripts/package.ps1 -Version 0.1.0   # zip + installer, x64 + arm64
@@ -266,7 +268,11 @@ key: it really does write to `authorized_keys`), `SM_WIN_HOST` / `SM_WIN_USER` /
   is really a queue. Bounded in practice (returned on collection, and both the
   CPU and RSS criteria pass), properly fixable only in SSH.NET; what this side
   controls is the rate, and a dead host already backs off past 90 seconds. Raw
-  samples are in `windows/artifacts/soak*.csv`.
+  samples are in `windows/artifacts/soak*.csv`: `soak1.csv` is the thirty-
+  minute run described above against five unreachable hosts — a second writer
+  had been appending lines missing the handle column to the same file, and
+  those were dropped without altering a number — and the rest are the
+  controls.
 - **Toast alerts are unverifiable here too.** Alerts fire on a status
   *transition*, not a state, so a host that was already unreachable when the
   app started does not raise one — which is right, or every launch would fire a
