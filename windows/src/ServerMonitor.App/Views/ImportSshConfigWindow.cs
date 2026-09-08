@@ -146,34 +146,70 @@ public sealed class ImportSshConfigWindow : Window
         var monitor = App.Current.Monitor;
         var sortIndex = monitor.Database.NextSortIndex();
         var imported = 0;
+        var skipped = new List<string>();
 
         foreach (var (host, box, already) in _rows)
         {
             if (already || box.IsChecked != true) continue;
-            monitor.AddServer(new Server
+            try
             {
-                Name = host.Alias,
-                // Both are kept: the alias is what gets dialled, and the
-                // resolved address is what the ping probe and the IP card
-                // need without re-reading the config.
-                SshAlias = host.Alias,
-                Host = host.HostName,
-                Port = host.Port,
-                Username = host.User,
-                AuthKind = AuthKind.SshConfigAlias,
-                SortIndex = sortIndex++,
-            });
-            imported++;
+                monitor.AddServer(new Server
+                {
+                    Name = host.Alias,
+                    // Both are kept: the alias is what gets dialled, and the
+                    // resolved address is what the ping probe and the IP card
+                    // need without re-reading the config.
+                    SshAlias = host.Alias,
+                    Host = host.HostName,
+                    Port = host.Port,
+                    Username = host.User,
+                    AuthKind = AuthKind.SshConfigAlias,
+                    SortIndex = sortIndex++,
+                });
+                imported++;
+            }
+            catch (Exception)
+            {
+                // One host that will not store must not take the rest of the
+                // import with it. Without this the loop threw out of the
+                // handler on the first failure: the hosts before it were
+                // already saved, the ones after were not, the window never
+                // closed, and the user got a stack trace instead of a count.
+                // Reported below rather than swallowed, which is the whole
+                // difference.
+                skipped.Add(host.Alias);
+            }
         }
 
         DialogResult = true;
         Close();
 
+        if (ResultMessage(imported, skipped) is { } message) Ui.Inform(Owner, message);
+    }
+
+    /// <summary>
+    /// What to tell the user afterwards, or null when there is nothing to say.
+    /// </summary>
+    /// <remarks>
+    /// Both halves, because either can happen alone: a clean import of three
+    /// hosts, three hosts that would not store, or some of each. Reporting
+    /// only the count — which is what this did — left a user who asked for
+    /// five and got three with no idea which two were missing or why the
+    /// number moved.
+    /// </remarks>
+    internal static string? ResultMessage(int imported, IReadOnlyList<string> skipped)
+    {
+        var lines = new List<string>();
         if (imported > 0)
         {
-            Ui.Inform(
-                Owner,
-                Strings.Get("import.done", imported.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            lines.Add(Strings.Get(
+                "import.done",
+                imported.ToString(System.Globalization.CultureInfo.InvariantCulture)));
         }
+        if (skipped.Count > 0)
+        {
+            lines.Add(Strings.Get("import.skipped", string.Join(", ", skipped)));
+        }
+        return lines.Count == 0 ? null : string.Join("\n\n", lines);
     }
 }
