@@ -525,32 +525,21 @@ internal static class Ui
     }
 
     /// <summary>Confirm-or-cancel, in the app's language.</summary>
-    public static bool Confirm(Window? owner, string message, string? title = null)
-    {
-        var result = MessageBox.Show(
-            owner ?? Application.Current.MainWindow,
-            message,
-            title ?? Strings.Get("app.title"),
-            MessageBoxButton.OKCancel,
-            MessageBoxImage.Warning);
-        return result == MessageBoxResult.OK;
-    }
+    public static bool Confirm(
+        Window? owner, string message, string? title = null, string? confirmLabel = null) =>
+        Views.MessageWindow.Confirm(owner, message, title, confirmLabel);
 
+    // MessageWindow rather than MessageBox.Show: Windows' own box ignores the
+    // app's theme, so in dark mode every dialog was a white rectangle over a
+    // dark window, and Windows labels its buttons in the *system* language,
+    // so an English app on a Chinese Windows had a 确定 button. See
+    // MessageWindow for the one place that deliberately still uses the
+    // native box.
     public static void Inform(Window? owner, string message, string? title = null) =>
-        MessageBox.Show(
-            owner ?? Application.Current.MainWindow,
-            message,
-            title ?? Strings.Get("app.title"),
-            MessageBoxButton.OK,
-            MessageBoxImage.Information);
+        Views.MessageWindow.Inform(owner, message, title);
 
     public static void Complain(Window? owner, string message) =>
-        MessageBox.Show(
-            owner ?? Application.Current.MainWindow,
-            message,
-            Strings.Get("common.error"),
-            MessageBoxButton.OK,
-            MessageBoxImage.Error);
+        Views.MessageWindow.Complain(owner, message);
 
     /// <summary>Copies to the clipboard, swallowing the transient failures.</summary>
     public static bool Copy(string text)

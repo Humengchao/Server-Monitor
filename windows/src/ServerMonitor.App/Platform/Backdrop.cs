@@ -32,16 +32,37 @@ public static class Backdrop
     /// opaque background: a transparent WPF window over a backdrop that was
     /// refused is not translucent, it is black.
     /// </returns>
+    /// <summary>
+    /// Paints one window's title bar to match the theme.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="Apply"/>, and applied to every window rather
+    /// than only the main one. It used to be part of Apply, which only
+    /// MainWindow calls — so in dark mode the terminal, the file browser, all
+    /// four editors and every dialog had a light title bar over dark content.
+    ///
+    /// The attribute has worked since Windows 10 1809; on anything older the
+    /// call fails and is ignored, which is why its result is discarded. It
+    /// needs a window handle, so the caller has to be past
+    /// SourceInitialized — App registers a class handler on Window.Loaded to
+    /// get that for free, for windows that do not exist yet included.
+    /// </remarks>
+    public static void ApplyTitleBar(Window window, bool dark)
+    {
+        var handle = new WindowInteropHelper(window).Handle;
+        if (handle == IntPtr.Zero) return;
+        var useDark = dark ? 1 : 0;
+        _ = DwmSetWindowAttribute(handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref useDark, sizeof(int));
+    }
+
     public static bool Apply(Window window, bool dark, bool wantsBackdrop)
     {
         var handle = new WindowInteropHelper(window).Handle;
         if (handle == IntPtr.Zero) return false;
 
         // The title bar first, and regardless of the backdrop: a light title
-        // bar over a dark window is worse than no Mica at all, and this
-        // attribute has worked since Windows 10 1809.
-        var useDark = dark ? 1 : 0;
-        _ = DwmSetWindowAttribute(handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref useDark, sizeof(int));
+        // bar over a dark window is worse than no Mica at all.
+        ApplyTitleBar(window, dark);
 
         if (!wantsBackdrop || !IsSupported)
         {

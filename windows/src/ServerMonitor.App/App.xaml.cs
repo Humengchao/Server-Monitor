@@ -139,6 +139,18 @@ public partial class App : Application
 
         Monitor.Alerts = new AlertService(Settings, DeliverAlert);
 
+        // Every window, not just this one's: a class handler fires for each
+        // Window the app ever loads, so the terminal, the file browser, the
+        // editors and the dialogs get a matching title bar without each one
+        // having to remember. Registered before the first window is built.
+        EventManager.RegisterClassHandler(
+            typeof(Window),
+            FrameworkElement.LoadedEvent,
+            new RoutedEventHandler((sender, _) =>
+            {
+                if (sender is Window window) Backdrop.ApplyTitleBar(window, Theme.Palette.IsDark);
+            }));
+
         ApplyTheme();
         SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
 
@@ -306,6 +318,13 @@ public partial class App : Application
         Theme.ThemeBrushes.Apply(Resources, dark);
 
         _window?.ThemeChanged(dark);
+        // The windows already open, which the class handler above has
+        // already fired for. Switching the theme with a terminal open would
+        // otherwise leave that window's title bar on the old one.
+        foreach (Window window in Windows)
+        {
+            if (!ReferenceEquals(window, _window)) Backdrop.ApplyTitleBar(window, dark);
+        }
         _tray?.SetDark(dark);
     }
 
