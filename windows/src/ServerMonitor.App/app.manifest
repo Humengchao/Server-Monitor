@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+
+  <!--
+    Three things Windows only learns from a manifest.
+
+    DPI awareness. Without this a .NET WPF app is SYSTEM_DPI_AWARE: it is
+    told the scale factor of the primary display at sign-in and nothing
+    afterwards, so a window dragged to a monitor at a different scale — or a
+    machine whose scaling is changed without signing out — is bitmap-stretched
+    by the compositor, and every glyph and every self-drawn gauge goes soft.
+    Measured on this machine before the manifest existed:
+    GetProcessDpiAwareness returned SYSTEM_DPI_AWARE. permonitorv2 makes WPF
+    re-lay out on WM_DPICHANGED instead, which is the whole point of drawing
+    the charts and rings in vectors.
+
+    Long paths. The SFTP window writes wherever the save dialog points, and
+    MAX_PATH is 260 characters — a download into a deep OneDrive or build
+    directory fails on a limit that has been liftable since Windows 10 1607.
+    It also needs the filesystem policy enabled machine-wide to take full
+    effect; declaring it costs nothing where that is off.
+
+    Supported OS. Declared so version APIs report the real build rather than
+    being shimmed back to 8.1, which is what Backdrop's build check reads.
+  -->
+
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <!-- The 2016 element is the one modern Windows reads; the 2005 one is
+           the fallback for 8.1 and early Windows 10, where "true/pm" is the
+           closest available answer. Both are needed: neither alone covers
+           the range D8 says this app supports. -->
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">permonitorv2,permonitor</dpiAwareness>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
+    </windowsSettings>
+  </application>
+
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <!-- Windows 10 and 11 share this GUID. -->
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
+    </application>
+  </compatibility>
+
+</assembly>

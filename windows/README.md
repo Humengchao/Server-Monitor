@@ -109,15 +109,14 @@ dotnet run --project windows/src/ServerMonitor.Cli -- probe  my-host --alias -v
 - **Mica 默认关闭**。它需要窗口自身透明，而在虚拟显示器、部分远程串流环境下
   系统并不真的绘制那层材质，客户端区会整片变黑 —— 系统 API 在这种情况下仍然
   返回成功，程序无法自己发现。设置里可以打开。
-- **后台 soak 有一段没解释清楚的漂移**：最小化跑 30 分钟（五台不可达的主机），
-  采集没有中断，但句柄数从 614 涨到 701（约每分钟 3 个），RSS 从 112 MB 涨到
-  120 MB。已经缩小到「轮询路径」：**一台主机也不加**时最小化跑 5 分钟句柄是
-  552→536（不涨），而传输层单独量一百次连接被拒、二十次超时也不涨
-  （`HandleTests`，且强制 GC 后不涨说明不是永久泄漏，更像是等一次 gen2 回收）。
-  托盘图标在摘要不变时根本不重绘，所以不是它。也不是套接字：句柄涨的同时
-  进程的 TCP 端点数一直是 0–2，说明涨的是事件/等待类句柄，最可能是 SSH.NET
-  的 session 对象在等回收。剩下的定位要靠 PerfView，按计划归 P7。
-  原始采样在 `windows/artifacts/soak*.csv`。
+- **句柄会随着「主机不可达」的轮询上涨，但会被一次 GC 全部收回**（已定位，非泄漏）。
+  最小化跑 30 分钟（5 台不可达主机）句柄从 614 涨到 701；换成 10 台，速率从
+  每分钟 3 个变成 8.6 个 —— 正好成比例。单独量下来：一次连接超时约 +3 个句柄，
+  强制一次 gen2 回收后全部归还（347 → 314）。原因是 SSH.NET 在超时的握手里
+  留下的 session 对象只能靠终结器释放，而这个程序几乎不分配内存、很久才回收
+  一次，所以在任务管理器里看着像泄漏。影响有限（回收即归还，CPU 与 RSS 都
+  达标），真正的修法在 SSH.NET 那边；这里能做的是退避 —— 死主机的重试间隔
+  已经会长到 90 秒以上。原始采样在 `windows/artifacts/soak*.csv`。
 - **告警 Toast 也没法在这里验**：告警按「状态跳变」发，而不是按「当前状态」，
   所以一开始就不可达的主机不会触发（这是对的：否则每次启动都会弹一串）。
   要看到 Toast 需要一台先在线后离线的主机。
@@ -125,8 +124,11 @@ dotnet run --project windows/src/ServerMonitor.Cli -- probe  my-host --alias -v
   （framework-dependent 直接 `dotnet run` 约 115 MB）。原因是
   `EnableCompressionInSingleFile`，压缩过的镜像启动时要解到内存里 —— 用下载
   体积换常驻内存。这个取舍要不要改，归 P7。
-- **P7 的加固与性能还没做**：高 DPI 与多显示器、中文 Windows 的 GBK 代码页、
-  PerfView 量主线程，都还没逐项核对。
+- **P7 还剩：中文 Windows 的 GBK 代码页现场验证、多显示器混合缩放实机验证。**
+  已经做完的部分：10 台主机可见态 CPU 0.23%（仪表板）/ 0.59%（机器详情）、
+  最小化 0.10%（20 逻辑核，出口要求分别是 <3% 与 <0.5%）；进程 DPI 感知从
+  SYSTEM 改成 PER_MONITOR_V2（之前拖到另一块不同缩放的屏幕上会被系统拉伸糊
+  掉）；采集脚本强制 UTF-8 输出。
 - **干净机器上的安装 / 卸载全程**（P6 出口）还没在一台干净的 Windows 11 上走过。
 - 密钥本体不显示、不导出；两端数据互导、便携模式、MSIX 是 P8 的可选项。
 
@@ -238,20 +240,18 @@ key: it really does write to `authorized_keys`), `SM_WIN_HOST` / `SM_WIN_USER` /
   and where DWM declines to composite the material — a virtual display adapter,
   some remote-streaming setups — the client area renders entirely black while
   the API still reports success. There is a switch for it in Settings.
-- **The background soak shows an unexplained drift.** Thirty minutes minimised
-  against five unreachable hosts collected without interruption, but the handle
-  count went from 614 to 701 (about three a minute) and RSS from 112 MB to
-  120 MB. It is narrowed to the polling path: **with no hosts at all**, five
-  minutes minimised went 552 → 536, and the transport measured on its own does
-  not move either — a hundred refused connections and twenty timeouts stay flat
-  (`HandleTests`), and staying flat *after a forced GC* says this is not a
-  permanent leak so much as something waiting for a gen2 collection. The tray
-  icon does not redraw at all while the summary is unchanged, so it is not
-  that, and it is not sockets either: the process's TCP endpoint count stays
-  at 0–2 while the handle count climbs, so what is growing is event/wait
-  handles — most likely SSH.NET session objects waiting to be collected.
-  Pinning it down wants PerfView, which is P7's job. Raw samples are in
-  `windows/artifacts/soak*.csv`.
+- **Handles climb while unreachable hosts are polled, and a single collection
+  gives every one of them back** — located, and not a leak. Thirty minutes
+  minimised against five unreachable hosts went 614 to 701; with ten hosts the
+  rate went from three a minute to 8.6, exactly in proportion. Measured on its
+  own, one connection timeout costs about three handles, and a forced gen2
+  collection returns all of them (347 back to 314). SSH.NET leaves the session
+  objects of a timed-out handshake to their finalizers, and an app that
+  allocates almost nothing collects rarely — so Task Manager shows a leak that
+  is really a queue. Bounded in practice (returned on collection, and both the
+  CPU and RSS criteria pass), properly fixable only in SSH.NET; what this side
+  controls is the rate, and a dead host already backs off past 90 seconds. Raw
+  samples are in `windows/artifacts/soak*.csv`.
 - **Toast alerts are unverifiable here too.** Alerts fire on a status
   *transition*, not a state, so a host that was already unreachable when the
   app started does not raise one — which is right, or every launch would fire a
@@ -262,9 +262,13 @@ key: it really does write to `authorized_keys`), `SM_WIN_HOST` / `SM_WIN_USER` /
   `EnableCompressionInSingleFile` — the compressed image is decompressed into
   memory at startup, trading resident memory for download size. Whether that
   trade is the right one belongs to P7.
-- **P7's hardening and performance pass is outstanding**: high DPI and multiple
-  monitors, the GBK code page on Chinese Windows, and a PerfView measurement of
-  the UI thread have not been worked through.
+- **P7 still owes**: the GBK code page verified against a real Chinese Windows
+  host, and mixed-scale multi-monitor tried on hardware with two displays.
+  Done: CPU with ten hosts is 0.23% on the dashboard, 0.59% on the machine
+  screen and 0.10% minimised (20 logical cores, against exit criteria of <3%
+  and <0.5%); process DPI awareness went from SYSTEM to PER_MONITOR_V2, which
+  is what stopped a window dragged to a differently scaled monitor being
+  bitmap-stretched; and the collection script now forces UTF-8 output.
 - **The clean-machine install/uninstall run** (P6's exit criterion) has not been
   done on a fresh Windows 11.
 - Key material is never displayed or exported. Cross-platform data exchange, a

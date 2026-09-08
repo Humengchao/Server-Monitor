@@ -88,18 +88,7 @@ public sealed class PingProbe : ILatencyProbe
     private async Task<Reading?> MeasureWithinBudgetAsync(
         string host, CancellationToken cancellationToken)
     {
-        IPAddress? destination;
-        try
-        {
-            var addresses = await Dns.GetHostAddressesAsync(host, cancellationToken).ConfigureAwait(false);
-            // IPv4 only: the source-binding trick needs a matching family, and
-            // every host this app reaches has an A record.
-            destination = addresses.FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork);
-        }
-        catch (Exception error) when (error is SocketException or ArgumentException)
-        {
-            return null;
-        }
+        var destination = await ResolveAsync(host, cancellationToken).ConfigureAwait(false);
         if (destination is null) return null;
 
         var source = PrimaryPhysicalAddress();
@@ -122,6 +111,72 @@ public sealed class PingProbe : ILatencyProbe
         }
         return new Reading(average, (double)lost / Attempts * 100);
     }
+
+    /// <summary>
+    /// The address to ping, resolved at most once every few minutes.
+    /// </summary>
+    /// <remarks>
+    /// Two reasons not to resolve per poll, and the second is why this is a
+    /// cache rather than a straight call.
+    ///
+    /// Most hosts in this app are configured as an address already, so the
+    /// resolver has nothing to do — <see cref="IPAddress.TryParse"/> answers
+    /// without touching the network stack at all.
+    ///
+    /// For the ones that are names, <c>Dns.GetHostAddressesAsync</c> leaks a
+    /// handle roughly every fourth call on Windows and does not give it back
+    /// on a collection. Measured: +23 handles over 100 calls, still +23 after
+    /// a forced gen2. Called once per host per poll, that is the drift P5's
+    /// soak found — about three handles a minute against five hosts. A
+    /// five-minute cache turns a per-poll cost into a per-five-minutes one,
+    /// and a name whose address changes more often than that is not something
+    /// a monitor on a five-second cadence can track anyway.
+    /// </remarks>
+    internal static async Task<IPAddress?> ResolveAsync(
+        string host, CancellationToken cancellationToken)
+    {
+        // IPv4 only, here and below: the source-binding trick needs a matching
+        // family, and every host this app reaches has an A record.
+        if (IPAddress.TryParse(host, out var literal))
+        {
+            return literal.AddressFamily == AddressFamily.InterNetwork ? literal : null;
+        }
+
+        var now = DateTime.UtcNow;
+        if (Resolutions.TryGetValue(host, out var cached) && now - cached.At < ResolutionTtl)
+        {
+            return cached.Address;
+        }
+
+        try
+        {
+            var addresses = await Dns.GetHostAddressesAsync(host, cancellationToken).ConfigureAwait(false);
+            var address = addresses.FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork);
+            // A failure is not cached: the next poll should try again rather
+            // than wait out the TTL on a name that was briefly unresolvable.
+            if (address is not null) Resolutions[host] = (address, now);
+            return address;
+        }
+        catch (Exception error) when (error is SocketException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<
+        string, (IPAddress Address, DateTime At)> Resolutions = new();
+
+    private static readonly TimeSpan ResolutionTtl = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// Drops every cached resolution.
+    /// </summary>
+    /// <remarks>
+    /// For the network-change signal: a laptop that moved to another network
+    /// may reach the same name at a different address, and waiting out the TTL
+    /// would measure latency to somewhere it can no longer reach.
+    /// </remarks>
+    public static void ForgetResolutions() => Resolutions.Clear();
 
     /// <summary>
     /// One ICMP echo over a raw socket, timed locally.

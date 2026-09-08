@@ -139,7 +139,15 @@ public partial class App : Application
         SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
 
         _watchers = new SystemWatchers(action => Dispatcher.Invoke(action));
-        _watchers.RetryEverything += reason => Monitor.RetryEverythingNow(reason);
+        _watchers.RetryEverything += reason =>
+        {
+            // The cached DNS answers go with the network they were resolved
+            // on: a laptop that moved may reach the same name somewhere else,
+            // and latency to an address it can no longer reach is worse than
+            // no reading.
+            Core.Collect.PingProbe.ForgetResolutions();
+            Monitor.RetryEverythingNow(reason);
+        };
 
         _window = new MainWindow();
         _tray = new TrayIcon(Monitor, ShowWindow, QuitApp, OpenServer);

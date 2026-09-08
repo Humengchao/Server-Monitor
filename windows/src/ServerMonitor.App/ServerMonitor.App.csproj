@@ -20,6 +20,18 @@
          oldest machine the README says is supported. -->
     <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- Per-monitor DPI and long paths; see the comments in the file. -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- WFO0003 says to configure high DPI through ApplicationHighDpiMode
+         rather than the manifest. That is right for a WinForms app and wrong
+         here: this app's windows are WPF's, and ApplicationHighDpiMode is only
+         read by WinForms' own Application.SetHighDpiMode during a bootstrap
+         that never runs in a WinExe with UseWPF. WPF takes its DPI awareness
+         from the process manifest and nowhere else, so following the analyser
+         would leave the app SYSTEM_DPI_AWARE — which is what it was, and what
+         made a window on a second monitor blurry. WinForms is here for the
+         tray icon only. -->
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
   </PropertyGroup>
 
   <!-- No WPF-UI, and no H.NotifyIcon — a deliberate departure from D1's
