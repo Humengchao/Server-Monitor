@@ -36,7 +36,7 @@ public sealed class SnippetsPage : UserControl, ISearchable
         var add = Ui.Accent(Strings.Get("snippet.new"), () => Edit(null));
         if (Monitor.Snippets.Count == 0)
         {
-            _root.Children.Add(Ui.Empty("nav.snippets", "snippet.empty", add));
+            _root.Children.Add(Ui.Empty(null, "snippet.empty", add));
             return;
         }
 

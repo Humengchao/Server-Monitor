@@ -36,7 +36,7 @@ public sealed class IdentitiesPage : UserControl
 
         if (Monitor.Identities.Count == 0)
         {
-            _root.Children.Add(Ui.Empty("nav.identities", "identity.empty", add));
+            _root.Children.Add(Ui.Empty(null, "identity.empty", add));
             return;
         }
 

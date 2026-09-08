@@ -56,7 +56,17 @@ public sealed class DockerPage : UserControl
         var hosts = Monitor.Servers.Where(s => s.HasDocker).ToList();
         if (hosts.Count == 0)
         {
-            _root.Children.Add(Ui.Empty("nav.docker", "docker.noHosts"));
+            // Two different empty states, because they need different answers.
+            // macOS shows "no host with Docker detected" in both cases, which
+            // on a first launch sends the user looking for a Docker problem
+            // they do not have: the reason is that there are no hosts at all.
+            // The divergence is deliberate.
+            _root.Children.Add(Monitor.Servers.Count == 0
+                ? Ui.Empty(
+                    "dashboard.emptyTitle",
+                    "dashboard.empty",
+                    FirstRun.Actions(Window.GetWindow(this), Rebuild))
+                : Ui.Empty(null, "docker.noHosts"));
             return;
         }
 

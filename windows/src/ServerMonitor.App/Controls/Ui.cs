@@ -438,14 +438,31 @@ internal static class Ui
     /// An empty page that explains what to do next, rather than a blank area
     /// that reads as a loading failure.
     /// </remarks>
-    public static UIElement Empty(string titleKey, string bodyKey, UIElement? action = null)
+    /// <param name="titleKey">
+    /// A heading, or null where it would only repeat the page title.
+    /// </param>
+    /// <remarks>
+    /// The macOS build passes the page's own key here for four of these
+    /// screens, and it works there: its ContentUnavailableView draws the title
+    /// beside an SF Symbol, and the page name lives in the window's toolbar.
+    /// On Windows the page name is a large heading at the top of the content
+    /// area, so the same call put the word "Containers" in 24pt and then again
+    /// in 15pt ninety pixels below it. Those screens pass null, and the
+    /// message becomes the heading.
+    /// </remarks>
+    public static Border Empty(string? titleKey, string bodyKey, UIElement? action = null)
     {
-        var children = new List<UIElement>
-        {
-            Title(Strings.Get(titleKey)),
-            Wrapped(Strings.Get(bodyKey), "Text.Secondary"),
-        };
+        // With no heading of its own the message has to carry the weight, or
+        // the screen is one line of grey text adrift in an empty pane.
+        var body = Wrapped(
+            Strings.Get(bodyKey), titleKey is null ? "Text.Title" : "Text.Secondary");
+        body.TextAlignment = TextAlignment.Center;
+
+        var children = new List<UIElement>();
+        if (titleKey is not null) children.Add(Title(Strings.Get(titleKey)));
+        children.Add(body);
         if (action is not null) children.Add(action);
+
         var stack = Rows(10, [.. children]);
         stack.HorizontalAlignment = HorizontalAlignment.Center;
         stack.MaxWidth = 420;
@@ -453,7 +470,6 @@ internal static class Ui
         {
             child.HorizontalAlignment = HorizontalAlignment.Center;
         }
-        if (stack.Children[1] is TextBlock body) body.TextAlignment = TextAlignment.Center;
         return new Border { Padding = new Thickness(24, 90, 24, 24), Child = stack };
     }
 

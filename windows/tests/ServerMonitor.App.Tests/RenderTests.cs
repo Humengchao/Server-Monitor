@@ -80,6 +80,41 @@ public class RenderTests
         Assert.DoesNotContain(text, c => c is >= (char)0xD83C and <= (char)0xD83D);
     }
 
+    /// <summary>
+    /// An empty screen with no heading of its own still reads as a heading.
+    /// </summary>
+    /// <remarks>
+    /// Four screens passed their own page key as the empty state's title,
+    /// which on Windows put the same word in 24pt at the top of the pane and
+    /// again in 15pt ninety pixels below. They pass null now, and the message
+    /// takes the title style — so what has to hold is that the null path
+    /// renders at all and does not leave a line of grey text adrift.
+    /// </remarks>
+    [Fact]
+    public void AnEmptyStateWithoutATitleStillDrawsItsMessage()
+    {
+        var titled = UiThread.Render(
+            UiThread.Run(() => Ui.Empty("dashboard.emptyTitle", "dashboard.empty")), 420, 220);
+        var untitled = UiThread.Render(
+            UiThread.Run(() => Ui.Empty(null, "docker.noHosts")), 420, 220);
+        titled.Save("empty-titled");
+        untitled.Save("empty-untitled");
+
+        Assert.True(untitled.Painted > 300, $"only {untitled.Painted} pixels painted");
+
+        // Drawn in the primary ink the title style uses, not the secondary
+        // grey a description would get.
+        Assert.True(
+            untitled.Contains(Palette.Text, tolerance: 30),
+            "the message is not drawn in the heading colour");
+
+        // And the titled form is still the taller of the two, which is the
+        // only structural difference between them.
+        Assert.True(
+            titled.Painted > untitled.Painted,
+            "the titled form drew no more than the untitled one");
+    }
+
     [Fact]
     public void ARingGaugeAtZeroStillDrawsItsTrack()
     {

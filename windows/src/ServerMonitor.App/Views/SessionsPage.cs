@@ -34,7 +34,7 @@ public sealed class SessionsPage : UserControl
 
         if (records.Count == 0)
         {
-            _root.Children.Add(Ui.Empty("nav.sessions", "history.empty"));
+            _root.Children.Add(Ui.Empty("nav.noSessions", "history.empty"));
             return;
         }
 
