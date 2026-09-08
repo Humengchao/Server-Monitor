@@ -62,6 +62,17 @@ internal sealed class TerminalHost : ContentControl
             new Action(() => _terminal.TriggerResize(new Size(ActualWidth, ActualHeight))));
     }
 
+    /// <summary>
+    /// Re-measures the terminal and tells the far side.
+    /// </summary>
+    /// <remarks>
+    /// The control does this itself when the window resizes; a font change
+    /// leaves the window the same size and the grid a different one, so it has
+    /// to be asked. Without it a zoomed session keeps the old row and column
+    /// count and everything full-screen wraps wrongly.
+    /// </remarks>
+    public void Resized() => _terminal.TriggerResize(new Size(ActualWidth, ActualHeight));
+
     public void Disconnect()
     {
         if (_connection is null) return;

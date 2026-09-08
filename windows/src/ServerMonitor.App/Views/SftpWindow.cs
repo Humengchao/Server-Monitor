@@ -27,6 +27,7 @@ public sealed class SftpWindow : Window
     private readonly TextBox _path = Ui.Input();
     private readonly ListView _list;
     private readonly TextBlock _message = Ui.Caption("");
+    private readonly TextBlock _hint = Ui.Tertiary("");
     private readonly ProgressBar _progress = new()
     {
         Height = 3,
@@ -107,7 +108,7 @@ public sealed class SftpWindow : Window
             Ui.Grid("*,auto", hidden, actions));
         top.Margin = new Thickness(14, 12, 14, 10);
 
-        var bottom = Ui.Rows(4, _progress, _message);
+        var bottom = Ui.Rows(4, _progress, Ui.Grid("*,auto", _message, _hint));
         bottom.Margin = new Thickness(14, 8, 14, 12);
 
         var root = new Grid();
@@ -122,6 +123,16 @@ public sealed class SftpWindow : Window
         root.Children.Add(bottom);
         _list.Margin = new Thickness(14, 0, 14, 0);
         Content = root;
+
+        // Dropping files on the listing uploads them into the directory being
+        // shown. The gesture people try first, and the reason the local side
+        // of this window is Explorer rather than a second pane.
+        AllowDrop = true;
+        DragOver += OnDragOver;
+        Drop += OnDrop;
+        _hint.Text = Strings.IsChinese
+            ? "把文件拖进来即可上传到当前目录（文件夹暂不支持）"
+            : "Drop files here to upload into this directory (folders are not taken)";
 
         Loaded += (_, _) => _ = StartAsync();
         Closed += (_, _) =>
@@ -293,6 +304,35 @@ public sealed class SftpWindow : Window
         });
     }
 
+    private void OnDragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = Droppable(e) is { Count: > 0 } ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void OnDrop(object sender, DragEventArgs e)
+    {
+        e.Handled = true;
+        if (Droppable(e) is not { Count: > 0 } files) return;
+        _ = UploadAsync(files);
+    }
+
+    /// <summary>
+    /// The files in a drop that this window can actually send.
+    /// </summary>
+    /// <remarks>
+    /// Directories are dropped as often as files and SFTP has no recursive
+    /// put, so they are filtered out rather than half-handled: uploading a
+    /// folder tree is a feature, and silently uploading nothing when someone
+    /// drags one would look like a bug. The message says how many were taken.
+    /// </remarks>
+    private static List<string>? Droppable(DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent(DataFormats.FileDrop)) return null;
+        if (e.Data.GetData(DataFormats.FileDrop) is not string[] paths) return null;
+        return [.. paths.Where(System.IO.File.Exists)];
+    }
+
     private void Upload()
     {
         var dialog = new Microsoft.Win32.OpenFileDialog
@@ -302,9 +342,11 @@ public sealed class SftpWindow : Window
             CheckFileExists = true,
         };
         if (dialog.ShowDialog(this) != true) return;
-        var files = dialog.FileNames;
+        _ = UploadAsync([.. dialog.FileNames]);
+    }
 
-        _ = RunAsync(async () =>
+    private Task UploadAsync(List<string> files) =>
+        RunAsync(async () =>
         {
             _transfer = new CancellationTokenSource();
             try
@@ -328,7 +370,6 @@ public sealed class SftpWindow : Window
                 _progress.Visibility = Visibility.Collapsed;
             }
         });
-    }
 
     /// <summary>
     /// Copies the selection to a local folder.

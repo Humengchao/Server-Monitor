@@ -87,6 +87,38 @@ public sealed class TerminalWindow : Window
         InputBindings.Add(new KeyBinding(
             new Ui.Command(_host.Paste), Key.V, ModifierKeys.Control | ModifierKeys.Shift));
 
+        // Zoom: Ctrl with plus, minus and zero, on both the main row and the
+        // numeric keypad — OemPlus is the unshifted key, so Ctrl+= works
+        // without reaching for Shift the way every browser allows.
+        foreach (var key in new[] { Key.OemPlus, Key.Add })
+        {
+            InputBindings.Add(new KeyBinding(new Ui.Command(() => Zoom(+1)), key, ModifierKeys.Control));
+        }
+        foreach (var key in new[] { Key.OemMinus, Key.Subtract })
+        {
+            InputBindings.Add(new KeyBinding(new Ui.Command(() => Zoom(-1)), key, ModifierKeys.Control));
+        }
+        InputBindings.Add(new KeyBinding(
+            new Ui.Command(() =>
+            {
+                _fontSize = App.Current.Settings.TerminalFontSize;
+                ApplyTheme();
+                _host.Resized();
+            }),
+            Key.D0,
+            ModifierKeys.Control));
+
+        // Ctrl+wheel, handled on the window because the terminal is an
+        // HwndHost and the wheel event does not bubble out of it — this fires
+        // for the toolbar strip and the window chrome, which is where the
+        // pointer is when someone reaches for the modifier anyway.
+        PreviewMouseWheel += (_, e) =>
+        {
+            if (Keyboard.Modifiers != ModifierKeys.Control) return;
+            e.Handled = true;
+            Zoom(e.Delta > 0 ? +1 : -1);
+        };
+
         Loaded += (_, _) =>
         {
             ApplyTheme();
@@ -102,7 +134,33 @@ public sealed class TerminalWindow : Window
     private void ApplyTheme() => _host.ApplyTheme(
         Theme.Palette.IsDark,
         App.Current.Settings.TerminalFontName,
-        (int)App.Current.Settings.TerminalFontSize);
+        (int)_fontSize);
+
+    /// <summary>
+    /// This window's font size, which starts at the setting and can be zoomed.
+    /// </summary>
+    /// <remarks>
+    /// Per window rather than per app: the point of zooming is usually one
+    /// session — a log you are squinting at — and changing every open terminal
+    /// and the saved default along with it is not what Ctrl+= means anywhere
+    /// else. The sizes are the same list the settings page offers, so a zoomed
+    /// terminal and a configured one cannot disagree about what is available.
+    /// </remarks>
+    private double _fontSize = App.Current.Settings.TerminalFontSize;
+
+    private void Zoom(int steps)
+    {
+        var sizes = Core.Store.AppSettings.TerminalFontSizes;
+        var index = Array.IndexOf(sizes, _fontSize);
+        if (index < 0) index = Array.IndexOf(sizes, 13d);
+        var next = Math.Clamp(index + steps, 0, sizes.Length - 1);
+        if (sizes[next] == _fontSize) return;
+        _fontSize = sizes[next];
+        ApplyTheme();
+        // The row and column count changed under the far side; the control
+        // recomputes them from the new cell size and tells the shell.
+        _host.Resized();
+    }
 
     private async Task ConnectAsync()
     {
