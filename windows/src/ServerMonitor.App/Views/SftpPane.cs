@@ -18,7 +18,7 @@ namespace ServerMonitor.App.Views;
 /// hand-built local pane would be a worse Explorer sitting next to the real
 /// one. The macOS build made the same call.
 /// </remarks>
-public sealed class SftpWindow : Window
+public sealed class SftpPane : UserControl, ISessionPane
 {
     private static Core.Collect.MonitorService Monitor => App.Current.Monitor;
 
@@ -67,7 +67,7 @@ public sealed class SftpWindow : Window
             Entry.IsDirectory ? Name : $"{Name} {Size}";
     }
 
-    public SftpWindow(Server server)
+    public SftpPane(Server server)
     {
         _server = server;
         _browser = new SftpBrowser((target, token) =>
@@ -78,12 +78,7 @@ public sealed class SftpWindow : Window
                         ? "内置 SSH 传输不可用。"
                         : "The built-in SSH transport is unavailable."));
 
-        Title = $"SFTP — {server.Name}";
-        Width = 900;
-        Height = 620;
-        MinWidth = 520;
-        MinHeight = 320;
-        WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        Label = ISessionPane.LabelFor(SessionKind.Sftp, server.Name);
         Background = (System.Windows.Media.Brush)FindResource("Brush.Background");
 
         _list = BuildList();
@@ -150,13 +145,45 @@ public sealed class SftpWindow : Window
             ? "把文件拖进来即可上传到当前目录（文件夹暂不支持）"
             : "Drop files here to upload into this directory (folders are not taken)";
 
-        Loaded += (_, _) => _ = StartAsync();
-        Closed += (_, _) =>
+        Loaded += (_, _) =>
         {
-            _transfer?.Cancel();
-            EndSession();
+            // Loaded fires again each time the dock brings this pane back from
+            // Collapsed; listing the directory a second time would be harmless
+            // but pointless, and re-leasing the SFTP client would not be.
+            if (_started) return;
+            _started = true;
+            _ = StartAsync();
         };
     }
+
+    private bool _started;
+
+    /// <summary>What the dock's tab says.</summary>
+    public string Label { get; }
+
+    /// <summary>The host this pane is browsing, for the reuse rule.</summary>
+    public Guid ServerId => _server.Id;
+
+    /// <summary>
+    /// Cancels any transfer and closes the session history row.
+    /// </summary>
+    /// <remarks>
+    /// A window did this in Closed. A pane is closed by the dock, so the dock
+    /// has to say so — an upload in flight is the reason this cannot simply be
+    /// dropped on the floor.
+    /// </remarks>
+    public void CloseSession()
+    {
+        _transfer?.Cancel();
+        EndSession();
+    }
+
+    /// <summary>The window this pane sits in, for the dialogs it opens.</summary>
+    /// <remarks>
+    /// Was <c>this</c> when this was a window. A modal needs a real window as
+    /// its owner, and a UserControl is not one.
+    /// </remarks>
+    private Window? Host => Window.GetWindow(this);
 
     private ListView BuildList()
     {
@@ -268,12 +295,12 @@ public sealed class SftpWindow : Window
 
     private void NewFolder()
     {
-        var window = new TextPromptWindow(Strings.Get("sftp.newFolder"), "") { Owner = this };
+        var window = new TextPromptWindow(Strings.Get("sftp.newFolder"), "") { Owner = Host };
         if (window.ShowDialog() != true) return;
         var name = window.Value;
         if (!SftpPath.IsValidName(name))
         {
-            Ui.Complain(this, Strings.Get("server.nameRequired"));
+            Ui.Complain(Host, Strings.Get("server.nameRequired"));
             return;
         }
         _ = RunAsync(async () =>
@@ -288,7 +315,7 @@ public sealed class SftpWindow : Window
     private void Rename()
     {
         if (Selected().FirstOrDefault() is not { } entry) return;
-        var window = new TextPromptWindow(Strings.Get("sftp.rename"), entry.Name) { Owner = this };
+        var window = new TextPromptWindow(Strings.Get("sftp.rename"), entry.Name) { Owner = Host };
         if (window.ShowDialog() != true) return;
         var name = window.Value;
         if (!SftpPath.IsValidName(name) || name == entry.Name) return;
@@ -312,7 +339,7 @@ public sealed class SftpWindow : Window
             : Strings.Get(
                 "sftp.deleteSelectedConfirm",
                 chosen.Count.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        if (!Ui.Confirm(this, message)) return;
+        if (!Ui.Confirm(Host, message)) return;
 
         _ = RunAsync(async () =>
         {
@@ -361,7 +388,7 @@ public sealed class SftpWindow : Window
             Multiselect = true,
             CheckFileExists = true,
         };
-        if (dialog.ShowDialog(this) != true) return;
+        if (dialog.ShowDialog(Host) != true) return;
         _ = UploadAsync([.. dialog.FileNames]);
     }
 
@@ -413,7 +440,7 @@ public sealed class SftpWindow : Window
                 Title = Strings.Get("sftp.download"),
                 FileName = SftpPath.LocalNameFor(chosen[0].Name),
             };
-            if (dialog.ShowDialog(this) != true) return;
+            if (dialog.ShowDialog(Host) != true) return;
             _ = TransferDownAsync([(chosen[0], dialog.FileName)]);
             return;
         }
@@ -422,7 +449,7 @@ public sealed class SftpWindow : Window
         {
             Title = Strings.Get("sftp.downloadSelected"),
         };
-        if (folder.ShowDialog(this) != true) return;
+        if (folder.ShowDialog(Host) != true) return;
         _ = TransferDownAsync([.. chosen.Select(entry => (
             entry,
             System.IO.Path.Combine(folder.FolderName, SftpPath.LocalNameFor(entry.Name))))]);

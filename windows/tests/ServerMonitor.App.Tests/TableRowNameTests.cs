@@ -81,7 +81,7 @@ public class TableRowNameTests
     {
         var file = new Core.Ssh.SftpEntry(
             "notes.txt", "/root/notes.txt", false, false, 2048, DateTime.UnixEpoch, "-rw-r--r--");
-        var spoken = Row("SftpWindow", "Row", file).ToString()!;
+        var spoken = Row("SftpPane", "Row", file).ToString()!;
 
         Assert.StartsWith("notes.txt", spoken, StringComparison.Ordinal);
         Assert.DoesNotContain("IsDirectory", spoken, StringComparison.Ordinal);
@@ -95,6 +95,6 @@ public class TableRowNameTests
         // row announcing a trailing nothing.
         var folder = new Core.Ssh.SftpEntry(
             "logs", "/root/logs", true, false, 0, DateTime.UnixEpoch, "drwxr-xr-x");
-        Assert.Equal("logs/", Row("SftpWindow", "Row", folder).ToString());
+        Assert.Equal("logs/", Row("SftpPane", "Row", folder).ToString());
     }
 }

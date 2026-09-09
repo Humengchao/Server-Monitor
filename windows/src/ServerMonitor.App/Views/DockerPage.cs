@@ -297,7 +297,9 @@ public sealed class DockerPage : UserControl
             Window.GetWindow(this),
             host,
             DockerClient.ExecShellCommand(container.Id),
-            $"{container.Name} — {host.Name}");
+            // The same separator the dock's other tabs use — this label sits
+            // in the strip beside them now, not in a window title bar.
+            $"{container.Name} · {host.Name}");
     }
 
     private async Task PerformAsync(ContainerAction action, DockerContainer container)

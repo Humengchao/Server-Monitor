@@ -49,6 +49,54 @@ public partial class MainWindow : Window
     private Page _page = Page.Dashboard;
     private Guid? _openServerId;
     private bool _navigating;
+
+    /// <summary>
+    /// Terminal and SFTP sessions, which used to be windows of their own.
+    /// </summary>
+    /// <remarks>
+    /// Built with the window and never rebuilt: a session has to outlive
+    /// navigation, which is the whole point of putting it here, and an
+    /// HwndHost that gets re-parented stops drawing.
+    /// </remarks>
+    internal SessionDock Dock { get; } = new();
+
+    /// <summary>
+    /// Gives the dock its row back when a session opens, and takes it away
+    /// when the last one closes.
+    /// </summary>
+    /// <remarks>
+    /// Both the height and the visibility, because either alone is not enough:
+    /// a zero-height row still lets an HwndHost paint outside it, and a
+    /// collapsed border in a 300px row leaves a 300px hole.
+    /// </remarks>
+    private void ShowDockIfUsed()
+    {
+        var used = Dock.HasSessions;
+        DockHost.Visibility = used ? Visibility.Visible : Visibility.Collapsed;
+        DockSplitter.Visibility = used ? Visibility.Visible : Visibility.Collapsed;
+        DockRow.MinHeight = used ? 120 : 0;
+        DockRow.Height = used ? new GridLength(DockHeight()) : new GridLength(0);
+    }
+
+    /// <summary>The stored dock height, kept inside what the window can show.</summary>
+    private double DockHeight()
+    {
+        var wanted = Settings.SessionDockHeight;
+        if (!double.IsFinite(wanted) || wanted <= 0) wanted = 300;
+        // Leave the page something: restoring a tall dock into a short window
+        // would otherwise open the app with no dashboard visible at all.
+        var ceiling = Math.Max(120, ActualHeight - 260);
+        return Math.Min(wanted, ceiling);
+    }
+
+    private void OnDockResized(object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e)
+    {
+        // On completion rather than during: the terminal tells the far side
+        // its new row and column count on every resize, and a drag is a few
+        // hundred of them.
+        if (!Dock.HasSessions) return;
+        Settings.SessionDockHeight = DockHost.ActualHeight;
+    }
     public MainWindow()
     {
         InitializeComponent();
@@ -63,6 +111,9 @@ public partial class MainWindow : Window
                 $"{Strings.Get("common.error")}: {failure}\n{Strings.Get("settings.storage")}: "
                 + Core.Store.Database.DefaultPath;
         }
+
+        DockHost.Child = Dock;
+        Dock.Changed += ShowDockIfUsed;
 
         Monitor.Published += OnPublished;
         Settings.PropertyChanged += OnSettingsChanged;
@@ -438,6 +489,11 @@ public partial class MainWindow : Window
     {
         Monitor.Published -= OnPublished;
         Settings.PropertyChanged -= OnSettingsChanged;
+        // The panes are not windows any more, so nothing else ends their
+        // sessions: the shell channel and the history row both close here.
+        // Deliberately not in OnClosing — the close-to-tray path cancels that
+        // close and only hides the window, and a session must survive it.
+        Dock.CloseAll();
         base.OnClosed(e);
     }
 }

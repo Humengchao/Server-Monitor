@@ -103,6 +103,9 @@ public static partial class Strings
         ["nav.sftp"] = ("SFTP", "SFTP"),
         ["nav.sessions"] = ("会话", "Sessions"),
         ["nav.noSessions"] = ("无会话", "No sessions"),
+        // Windows-only: the session dock's "+" opens a second session on the
+        // host the current tab belongs to. See LocalizationTests.
+        ["session.duplicate"] = ("在同一主机上再开一个", "Another session on this host"),
         ["snippet.new"] = ("新建片段", "New snippet"),
         ["snippet.name"] = ("名称", "Name"),
         ["snippet.category"] = ("分类", "Category"),

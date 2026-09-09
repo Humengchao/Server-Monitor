@@ -76,6 +76,39 @@ public class AppSettingsTests
         }
     }
 
+    /// <summary>
+    /// A dock height that is not a number does not take the file with it.
+    /// </summary>
+    /// <remarks>
+    /// The same guard the window's own geometry has, and for the same reason:
+    /// JSON cannot express NaN, JsonSerializer throws rather than writing one,
+    /// and the throw used to land in an empty catch that silently dropped
+    /// every other setting in the file with it. A splitter is one more way to
+    /// arrive at a NaN — an unmeasured element reports one — so it is guarded
+    /// where it is written rather than where it is set.
+    /// </remarks>
+    [Fact]
+    public void ANonsenseDockHeightFallsBackInsteadOfBreakingTheFile()
+    {
+        var path = Temp();
+        try
+        {
+            var settings = AppSettings.Load(path);
+            settings.SessionDockHeight = double.NaN;
+            settings.RetentionDays = 14;
+            settings.Flush();
+
+            var back = AppSettings.Load(path);
+            Assert.Equal(300, back.SessionDockHeight);
+            // The rest of the file survived, which is the part that matters.
+            Assert.Equal(14, back.RetentionDays);
+        }
+        finally
+        {
+            Delete(path);
+        }
+    }
+
     [Fact]
     public void EveryStoredPropertyRoundTrips()
     {
@@ -104,6 +137,7 @@ public class AppSettingsTests
             settings.Theme = AppTheme.Light;
             settings.UseMicaBackdrop = true;
             settings.SaveWindowState(120, 60, 1000, 700, maximized: true);
+            settings.SessionDockHeight = 260;
             settings.Flush();
 
             var back = AppSettings.Load(path);
@@ -128,6 +162,7 @@ public class AppSettingsTests
             Assert.Equal(1000, back.WindowWidth);
             Assert.Equal(700, back.WindowHeight);
             Assert.True(back.WindowMaximized);
+            Assert.Equal(260, back.SessionDockHeight);
         }
         finally
         {

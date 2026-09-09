@@ -133,6 +133,8 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition x:Name="DockRow" Height="0" MinHeight="0" />
             </Grid.RowDefinitions>
 
             <!-- A banner rather than a modal: the app is usable with a scratch
@@ -165,6 +167,29 @@
             </Grid>
 
             <ContentControl x:Name="PageHost" Grid.Row="2" Margin="0" />
+
+            <!-- MARK: - Session dock
+
+                 Terminal and SFTP live here rather than in windows of their
+                 own. Its own grid row, not a layer over the page: the terminal
+                 is an HwndHost and nothing WPF draws can sit on top of one, so
+                 the two have to be given separate rectangles.
+
+                 The splitter and the dock are collapsed and their rows zeroed
+                 while nothing is open, so a user who never opens a session
+                 never sees that any of this is here. -->
+            <GridSplitter x:Name="DockSplitter" Grid.Row="3"
+                          Height="5"
+                          HorizontalAlignment="Stretch"
+                          VerticalAlignment="Center"
+                          ResizeDirection="Rows"
+                          ResizeBehavior="PreviousAndNext"
+                          Background="{DynamicResource Brush.Border}"
+                          Visibility="Collapsed"
+                          DragCompleted="OnDockResized" />
+            <Border x:Name="DockHost" Grid.Row="4"
+                    BorderThickness="0"
+                    Visibility="Collapsed" />
         </Grid>
     </Grid>
 </Window>

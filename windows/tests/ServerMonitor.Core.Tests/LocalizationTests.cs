@@ -53,6 +53,11 @@ public class LocalizationTests
         // Same for the SFTP window's path box and its listing.
         "sftp.path",
         "sftp.files",
+
+        // The session dock is this build's answer to terminal and SFTP being
+        // separate windows; macOS never had them as windows, so it has no
+        // word for the dock's "open another one on this host".
+        "session.duplicate",
     ];
 
     [Fact]

@@ -10,17 +10,27 @@ using ServerMonitor.Core.Ssh;
 namespace ServerMonitor.App.Views;
 
 /// <summary>
-/// An interactive shell on one host.
+/// An interactive shell on one host, as a pane in the session dock.
 /// </summary>
 /// <remarks>
-/// Its own window rather than a page, because a terminal is something you
-/// leave open beside what you are doing — the same reason the macOS build
-/// opens one per host. The toolbar is above the terminal and not over it: the
-/// control is an HwndHost and WPF cannot draw on top of it (R3's airspace
-/// limit), so a snippet picker floating over the session is not available and
-/// a toolbar button is.
+/// This was a <see cref="Window"/>. A terminal is something you leave open
+/// beside what you are doing, and a separate window is one way to get that —
+/// but it is not the way the macOS build gets it (TerminalPane is a view
+/// inside the main window there, hosted by ServerDetailView and by RootView's
+/// session list), and a monitoring app that scatters windows across the
+/// desktop is the complaint that started this.
+///
+/// The dock gives the same property without the windows: a pane keeps running
+/// while the user is on another page, so a command can be left to finish
+/// while they watch the dashboard.
+///
+/// The toolbar is above the terminal and not over it: the control is an
+/// HwndHost and WPF cannot draw on top of it (R3's airspace limit), so a
+/// snippet picker floating over the session is not available and a toolbar
+/// button is. The same rule is why the dock shows one pane at a time and
+/// collapses the others rather than layering them.
 /// </remarks>
-public sealed class TerminalWindow : Window
+public sealed class TerminalPane : UserControl, ISessionPane
 {
     private static Core.Collect.MonitorService Monitor => App.Current.Monitor;
 
@@ -40,17 +50,12 @@ public sealed class TerminalWindow : Window
     /// Typed and entered as soon as the shell is ready — how "docker exec" and
     /// a container's shell get here without a second kind of window.
     /// </param>
-    public TerminalWindow(Server server, string? command = null, string? title = null)
+    public TerminalPane(Server server, string? command = null, string? title = null)
     {
         _server = server;
         _command = command;
 
-        Title = title ?? $"{Strings.Get("nav.terminal")} — {server.Name}";
-        Width = 980;
-        Height = 620;
-        MinWidth = 480;
-        MinHeight = 260;
-        WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        Label = ISessionPane.LabelFor(SessionKind.Terminal, server.Name, title);
         Background = (System.Windows.Media.Brush)FindResource("Brush.Background");
 
         _reconnect = Ui.Quiet(Strings.Get("terminal.reconnect"), () => _ = ConnectAsync());
@@ -121,14 +126,38 @@ public sealed class TerminalWindow : Window
 
         Loaded += (_, _) =>
         {
+            // Loaded fires again every time the dock brings this pane back
+            // from Collapsed, and reconnecting a live shell each time would
+            // throw the session away. The guard is the connection, not a flag.
             ApplyTheme();
-            _ = ConnectAsync();
+            if (!_started)
+            {
+                _started = true;
+                _ = ConnectAsync();
+            }
         };
-        Closed += (_, _) =>
-        {
-            _host.Disconnect();
-            EndSession();
-        };
+    }
+
+    private bool _started;
+
+    /// <summary>What the dock's tab says.</summary>
+    public string Label { get; }
+
+    /// <summary>The host this pane is talking to, for the reuse rule.</summary>
+    public Guid ServerId => _server.Id;
+
+    /// <summary>
+    /// Ends the session and lets the shell go.
+    /// </summary>
+    /// <remarks>
+    /// A window did this in Closed. A pane is closed by the dock, which has to
+    /// say so — the far side's channel and this side's history row are both
+    /// waiting on it.
+    /// </remarks>
+    public void CloseSession()
+    {
+        _host.Disconnect();
+        EndSession();
     }
 
     private void ApplyTheme() => _host.ApplyTheme(
@@ -183,7 +212,9 @@ public sealed class TerminalWindow : Window
         }
         catch (Exception error)
         {
-            SetStatus(error.Message, connected: false);
+            // FailureText, not the library's own words: this line sits under
+            // the host name in a Chinese UI as readily as an English one.
+            SetStatus(FailureText.For(error), connected: false);
         }
         finally
         {

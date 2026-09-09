@@ -253,6 +253,17 @@ public partial class App : Application
 
     // MARK: - Window
 
+    /// <summary>
+    /// The shell window, once there is one.
+    /// </summary>
+    /// <remarks>
+    /// Not <c>Application.MainWindow</c>: this app can be running with no
+    /// window at all — closing to the tray disposes it — and MainWindow keeps
+    /// pointing at whatever was shown first, which after a dialog is not
+    /// necessarily this. The session dock hangs off this one.
+    /// </remarks>
+    internal MainWindow? Shell => _window;
+
     public void ShowWindow()
     {
         if (_window is null)

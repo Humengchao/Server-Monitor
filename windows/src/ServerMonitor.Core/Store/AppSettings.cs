@@ -213,6 +213,16 @@ public sealed class AppSettings : INotifyPropertyChanged
     public double WindowTop { get; set; } = double.NaN;
     public bool WindowMaximized { get; set; }
 
+    /// <summary>
+    /// How tall the session dock is, in device-independent pixels.
+    /// </summary>
+    /// <remarks>
+    /// Kept with the window's own geometry, and guarded on save the same way
+    /// — the reason that guard exists is that a NaN width once made the whole
+    /// settings file unwritable, and a splitter is another way to produce one.
+    /// </remarks>
+    public double SessionDockHeight { get; set; } = 300;
+
     // MARK: - Persistence
 
     /// <summary>
@@ -358,6 +368,7 @@ public sealed class AppSettings : INotifyPropertyChanged
         public bool UseMicaBackdrop { get; set; }
         public double WindowWidth { get; set; } = 1280;
         public double WindowHeight { get; set; } = 820;
+        public double SessionDockHeight { get; set; } = 300;
 
         /// <summary>
         /// Where the window was, or null if it has never been positioned.
@@ -425,6 +436,7 @@ public sealed class AppSettings : INotifyPropertyChanged
         UseMicaBackdrop = stored.UseMicaBackdrop;
         WindowWidth = stored.WindowWidth;
         WindowHeight = stored.WindowHeight;
+        SessionDockHeight = stored.SessionDockHeight;
         WindowLeft = stored.WindowLeft ?? double.NaN;
         WindowTop = stored.WindowTop ?? double.NaN;
         WindowMaximized = stored.WindowMaximized;
@@ -454,6 +466,9 @@ public sealed class AppSettings : INotifyPropertyChanged
         // infinity, which JSON cannot express either.
         WindowWidth = double.IsFinite(WindowWidth) && WindowWidth > 0 ? WindowWidth : 1280,
         WindowHeight = double.IsFinite(WindowHeight) && WindowHeight > 0 ? WindowHeight : 820,
+        SessionDockHeight = double.IsFinite(SessionDockHeight) && SessionDockHeight > 0
+            ? SessionDockHeight
+            : 300,
         WindowLeft = double.IsFinite(WindowLeft) ? WindowLeft : null,
         WindowTop = double.IsFinite(WindowTop) ? WindowTop : null,
         WindowMaximized = WindowMaximized,
