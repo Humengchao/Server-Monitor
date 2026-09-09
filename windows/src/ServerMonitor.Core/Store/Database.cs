@@ -164,6 +164,12 @@ public sealed class Database : IDisposable
             Execute(connection, transaction, "INSERT INTO schemaVersion (version) VALUES (1)");
         }
 
+        if (current < 2)
+        {
+            foreach (var statement in V2) Execute(connection, transaction, statement);
+            Execute(connection, transaction, "INSERT INTO schemaVersion (version) VALUES (2)");
+        }
+
         transaction.Commit();
     }
 
@@ -180,6 +186,62 @@ public sealed class Database : IDisposable
     /// set is derived by scanning the servers anyway, and a second table would
     /// buy nothing but a join on every read.
     /// </remarks>
+    /// <summary>
+    /// The alert rule engine's two tables.
+    /// </summary>
+    /// <remarks>
+    /// Ported from the web client, which is the only one of the three that has
+    /// a rule engine — macOS has no alert surface at all, so there is no
+    /// shared-file constraint here the way there is on the v1 schema.
+    ///
+    /// A rule's <c>serverId</c> is nullable: null means every host, which is
+    /// what the web's null <c>server_id</c> means. The webhook URL is not a
+    /// column; see AlertRule for why.
+    ///
+    /// An event carries the rule's name, comparator, threshold and duration as
+    /// they were when it opened, not a join to the rule. A rule the user has
+    /// since edited or deleted must not silently rewrite what the history says
+    /// happened, and the ON DELETE SET NULL on ruleId keeps the row when the
+    /// rule goes.
+    /// </remarks>
+    private static readonly string[] V2 =
+    [
+        """
+        CREATE TABLE alertRule (
+            id BLOB PRIMARY KEY NOT NULL,
+            name TEXT NOT NULL,
+            metric TEXT NOT NULL,
+            comparator TEXT NOT NULL DEFAULT '>',
+            threshold REAL NOT NULL DEFAULT 0,
+            durationSeconds INTEGER NOT NULL DEFAULT 300,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            serverId BLOB REFERENCES server(id) ON DELETE CASCADE,
+            createdAt TEXT NOT NULL
+        )
+        """,
+        """
+        CREATE TABLE alertEvent (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ruleId BLOB REFERENCES alertRule(id) ON DELETE SET NULL,
+            ruleName TEXT NOT NULL,
+            metric TEXT NOT NULL,
+            serverId BLOB NOT NULL,
+            serverName TEXT NOT NULL,
+            value REAL NOT NULL,
+            comparator TEXT NOT NULL,
+            threshold REAL NOT NULL,
+            durationSeconds INTEGER NOT NULL,
+            message TEXT NOT NULL,
+            startedAt TEXT NOT NULL,
+            resolvedAt TEXT
+        )
+        """,
+        // The engine asks two questions on every launch and every poll: which
+        // events are still open, and what has this rule done lately.
+        "CREATE INDEX alertEventOpen ON alertEvent (resolvedAt) WHERE resolvedAt IS NULL",
+        "CREATE INDEX alertEventRecent ON alertEvent (startedAt DESC)",
+    ];
+
     private static readonly string[] V1 =
     [
         """
@@ -319,6 +381,129 @@ public sealed class Database : IDisposable
 
     public int NextGroupSortIndex() =>
         (int)(ScalarLong("SELECT MAX(sortIndex) FROM machineGroup") ?? 0) + 1;
+
+    // MARK: - Alert rules and events
+
+    public List<AlertRule> AllAlertRules() => Query(
+        "SELECT * FROM alertRule ORDER BY name ASC",
+        reader => new AlertRule
+        {
+            Id = ReadGuid(reader, "id"),
+            Name = reader.GetString(reader.GetOrdinal("name")),
+            Metric = Enum.Parse<AlertMetric>(reader.GetString(reader.GetOrdinal("metric")), true),
+            Comparator = reader.GetString(reader.GetOrdinal("comparator")),
+            Threshold = Double(reader, "threshold"),
+            DurationSeconds = reader.GetInt32(reader.GetOrdinal("durationSeconds")),
+            Enabled = reader.GetInt32(reader.GetOrdinal("enabled")) != 0,
+            ServerId = ReadGuidOrNull(reader, "serverId"),
+        });
+
+    public void Save(AlertRule rule) => Write(
+        """
+        INSERT INTO alertRule
+            (id, name, metric, comparator, threshold, durationSeconds, enabled, serverId, createdAt)
+        VALUES
+            ($id, $name, $metric, $comparator, $threshold, $duration, $enabled, $serverId, $createdAt)
+        ON CONFLICT(id) DO UPDATE SET
+            name = excluded.name,
+            metric = excluded.metric,
+            comparator = excluded.comparator,
+            threshold = excluded.threshold,
+            durationSeconds = excluded.durationSeconds,
+            enabled = excluded.enabled,
+            serverId = excluded.serverId
+        """,
+        command =>
+        {
+            command.Parameters.AddWithValue("$id", rule.Id.ToByteArray());
+            command.Parameters.AddWithValue("$name", rule.Name);
+            command.Parameters.AddWithValue("$metric", rule.Metric.ToString());
+            command.Parameters.AddWithValue("$comparator", rule.Comparator);
+            command.Parameters.AddWithValue("$threshold", rule.Threshold);
+            command.Parameters.AddWithValue("$duration", rule.DurationSeconds);
+            command.Parameters.AddWithValue("$enabled", rule.Enabled ? 1 : 0);
+            command.Parameters.AddWithValue(
+                "$serverId", rule.ServerId is { } id ? id.ToByteArray() : DBNull.Value);
+            command.Parameters.AddWithValue("$createdAt", DateTime.UtcNow.ToString("O"));
+        });
+
+    public void DeleteAlertRule(Guid id) => Write(
+        "DELETE FROM alertRule WHERE id = $id",
+        command => command.Parameters.AddWithValue("$id", id.ToByteArray()));
+
+    /// <summary>The newest events first, for the history list.</summary>
+    public List<AlertEvent> AlertEvents(int limit = 200) => Query(
+        "SELECT * FROM alertEvent ORDER BY startedAt DESC LIMIT $limit",
+        ReadAlertEvent,
+        command => command.Parameters.AddWithValue("$limit", limit));
+
+    /// <summary>Events with no resolution, which is what the engine restores from.</summary>
+    public List<AlertEvent> UnresolvedAlertEvents() => Query(
+        "SELECT * FROM alertEvent WHERE resolvedAt IS NULL",
+        ReadAlertEvent);
+
+    public void OpenAlertEvent(AlertEvent open) => Write(
+        """
+        INSERT INTO alertEvent
+            (ruleId, ruleName, metric, serverId, serverName, value, comparator,
+             threshold, durationSeconds, message, startedAt, resolvedAt)
+        VALUES
+            ($ruleId, $ruleName, $metric, $serverId, $serverName, $value, $comparator,
+             $threshold, $duration, $message, $startedAt, NULL)
+        """,
+        command =>
+        {
+            command.Parameters.AddWithValue("$ruleId", open.RuleId.ToByteArray());
+            command.Parameters.AddWithValue("$ruleName", open.RuleName);
+            command.Parameters.AddWithValue("$metric", open.Metric.ToString());
+            command.Parameters.AddWithValue("$serverId", open.ServerId.ToByteArray());
+            command.Parameters.AddWithValue("$serverName", open.ServerName);
+            command.Parameters.AddWithValue("$value", open.Value);
+            command.Parameters.AddWithValue("$comparator", open.Comparator);
+            command.Parameters.AddWithValue("$threshold", open.Threshold);
+            command.Parameters.AddWithValue("$duration", open.DurationSeconds);
+            command.Parameters.AddWithValue("$message", open.Message);
+            command.Parameters.AddWithValue("$startedAt", open.StartedAt.ToString("O"));
+        });
+
+    /// <summary>
+    /// Closes the open event for this rule and host.
+    /// </summary>
+    /// <remarks>
+    /// Matched on (rule, server) rather than on an id the engine would have to
+    /// carry: the engine's firing set is keyed that way, and there is at most
+    /// one unresolved event per pair by construction.
+    /// </remarks>
+    public void ResolveAlertEvent(AlertEvent close) => Write(
+        """
+        UPDATE alertEvent SET resolvedAt = $resolvedAt, value = $value
+        WHERE ruleId = $ruleId AND serverId = $serverId AND resolvedAt IS NULL
+        """,
+        command =>
+        {
+            command.Parameters.AddWithValue(
+                "$resolvedAt", (close.ResolvedAt ?? DateTime.UtcNow).ToString("O"));
+            command.Parameters.AddWithValue("$value", close.Value);
+            command.Parameters.AddWithValue("$ruleId", close.RuleId.ToByteArray());
+            command.Parameters.AddWithValue("$serverId", close.ServerId.ToByteArray());
+        });
+
+    private static AlertEvent ReadAlertEvent(SqliteDataReader reader) => new()
+    {
+        Id = reader.GetInt64(reader.GetOrdinal("id")),
+        RuleId = ReadGuid(reader, "ruleId"),
+        RuleName = reader.GetString(reader.GetOrdinal("ruleName")),
+        Metric = Enum.Parse<AlertMetric>(reader.GetString(reader.GetOrdinal("metric")), true),
+        ServerId = ReadGuid(reader, "serverId"),
+        ServerName = reader.GetString(reader.GetOrdinal("serverName")),
+        Value = Double(reader, "value"),
+        Comparator = reader.GetString(reader.GetOrdinal("comparator")),
+        Threshold = Double(reader, "threshold"),
+        DurationSeconds = reader.GetInt32(reader.GetOrdinal("durationSeconds")),
+        Message = reader.GetString(reader.GetOrdinal("message")),
+        StartedAt = ReadDate(reader, "startedAt") ?? DateTime.UtcNow,
+        ResolvedAt = ReadDate(reader, "resolvedAt"),
+    };
 
     // MARK: - Snippets
 

@@ -1,5 +1,6 @@
 using System.Globalization;
 using ServerMonitor.Core.Alerts;
+using ServerMonitor.Core.Model;
 using ServerMonitor.Core.Store;
 
 namespace ServerMonitor.Core.L10n;
@@ -83,6 +84,31 @@ public static partial class Strings
 
     public static string Offline => IsChinese ? "已离线" : "Offline";
     public static string Recovered => IsChinese ? "已恢复在线" : "Back online";
+
+    public static string AlertOpen => IsChinese ? "告警触发" : "Alert raised";
+    public static string AlertResolved => IsChinese ? "已恢复" : "Resolved";
+
+    /// <summary>
+    /// The unit a metric's value is reported in.
+    /// </summary>
+    /// <returns>Empty for the dimensionless metrics.</returns>
+    public static string AlertUnit(AlertMetric metric) => metric switch
+    {
+        AlertMetric.Cpu or AlertMetric.Memory or AlertMetric.Disk => "%",
+        AlertMetric.Latency => "ms",
+        _ => "",
+    };
+
+    /// <summary>What a metric is called in a message.</summary>
+    public static string AlertMetricName(AlertMetric metric) => metric switch
+    {
+        AlertMetric.Cpu => IsChinese ? "CPU" : "CPU",
+        AlertMetric.Memory => IsChinese ? "内存" : "memory",
+        AlertMetric.Disk => IsChinese ? "磁盘" : "disk",
+        AlertMetric.Load1 => IsChinese ? "负载" : "load",
+        AlertMetric.Latency => IsChinese ? "延迟" : "latency",
+        _ => IsChinese ? "离线" : "offline",
+    };
 
     public static string Threshold(AlertService.Metric metric, double value, int limit)
     {
