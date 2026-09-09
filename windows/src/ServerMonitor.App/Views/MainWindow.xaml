@@ -1,6 +1,7 @@
 <Window x:Class="ServerMonitor.App.Views.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:ServerMonitor.App.Controls"
         Title="Server Monitor"
         MinWidth="900" MinHeight="600"
         Width="1280" Height="820"
@@ -35,13 +36,28 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <!-- The title bar is the system's, so this is just a heading;
-                     the top margin keeps it clear of the caption buttons. -->
-                <TextBlock Grid.Row="0"
-                           x:Name="AppTitle"
-                           Style="{StaticResource Text.Title}"
-                           Margin="18,14,18,10"
-                           Text="Server Monitor" />
+                <!-- The brand lockup, as on the web client: the mark, the
+                     name, and CONTROL CENTER beneath it. The title bar is the
+                     system's, so this is a heading and not a caption; the top
+                     margin keeps it clear of the caption buttons.
+
+                     CONTROL CENTER stays English in both languages because it
+                     is part of the mark rather than a label — the same reason
+                     the web hard-codes it. -->
+                <StackPanel Grid.Row="0" Orientation="Horizontal"
+                            Margin="16,14,18,10">
+                    <controls:BrandMark Edge="30" VerticalAlignment="Center"
+                                        Margin="0,0,10,0" />
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock x:Name="AppTitle"
+                                   Style="{StaticResource Text.Title}"
+                                   Text="Server Monitor" />
+                        <TextBlock Style="{StaticResource Text.Tertiary}"
+                                   Margin="0,1,0,0"
+                                   FontSize="8.5"
+                                   Text="CONTROL CENTER" />
+                    </StackPanel>
+                </StackPanel>
 
                 <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
                               HorizontalScrollBarVisibility="Disabled">

@@ -22,6 +22,12 @@
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <!-- Per-monitor DPI and long paths; see the comments in the file. -->
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- The mark, generated from Controls/BrandMark by Controls/BrandIcon and
+         committed because MSBuild embeds it before any of this code runs.
+         BrandMarkTests fails if the two stop matching. This is also every
+         window's icon: WPF falls back to the executable's, so none of them
+         set one. -->
+    <ApplicationIcon>Assets\ServerMonitor.ico</ApplicationIcon>
     <!-- WFO0003 says to configure high DPI through ApplicationHighDpiMode
          rather than the manifest. That is right for a WinForms app and wrong
          here: this app's windows are WPF's, and ApplicationHighDpiMode is only

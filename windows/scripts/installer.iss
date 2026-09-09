@@ -66,6 +66,9 @@ ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 #endif
 UninstallDisplayIcon={app}\{#MyAppExeName}
+; The setup wizard's own icon. The installed app's comes from the exe,
+; which carries it via ApplicationIcon, and so does the line above.
+SetupIconFile={#SourcePath}\..\src\ServerMonitor.App\Assets\ServerMonitor.ico
 
 [Languages]
 Name: "en"; MessagesFile: "compiler:Default.isl"
