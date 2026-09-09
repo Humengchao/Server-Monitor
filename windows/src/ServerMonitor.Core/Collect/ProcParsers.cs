@@ -260,10 +260,30 @@ public static class ProcParsers
 
     // MARK: - Network
 
-    /// <summary>Cumulative rx/tx bytes across every interface except loopback.</summary>
+    /// <summary>
+    /// Cumulative rx/tx bytes across the host's real interfaces.
+    /// </summary>
+    /// <remarks>
+    /// This used to be every interface but loopback, which on a Docker host
+    /// counts the same bytes two or three times: a packet to a container is
+    /// seen on the physical NIC, again on <c>docker0</c>, and again on the
+    /// <c>veth</c> at the container's end. Measured on a real host — the NIC
+    /// carrying 1.3 MB/s while the headline read 3.9 MB/s, and 149.6 GB
+    /// cumulative reported as 372.7 GB.
+    ///
+    /// The app already knew which names are virtual: the machine screen's
+    /// interface list hides them by default and the vnStat picker skips them.
+    /// Only the figure at the top of the screen still added them up.
+    ///
+    /// This is a deliberate divergence from the macOS build, which sums them
+    /// all — the same kind of divergence as the Docker page's two empty
+    /// states, and taken with the same intent: the number the user reads
+    /// should be the host's traffic.
+    /// </remarks>
     public static (long Rx, long Tx) NetDev(string output)
     {
-        long rxTotal = 0, txTotal = 0;
+        long realRx = 0, realTx = 0, anyRx = 0, anyTx = 0;
+        var sawReal = false;
         foreach (var line in output.Lines())
         {
             if (!line.Contains(':')) continue;
@@ -271,10 +291,23 @@ public static class ProcParsers
             if (fields.Length < 10) continue;
             var name = fields[0].EndsWith(':') ? fields[0][..^1] : fields[0];
             if (name == "lo") continue;
-            rxTotal += fields[1].ToLong();
-            txTotal += fields[9].ToLong();
+
+            var rx = fields[1].ToLong();
+            var tx = fields[9].ToLong();
+            anyRx += rx;
+            anyTx += tx;
+            if (NetInterface.IsVirtualName(name)) continue;
+
+            sawReal = true;
+            realRx += rx;
+            realTx += tx;
         }
-        return (rxTotal, txTotal);
+
+        // Every interface but loopback is the fallback, not the answer: a host
+        // reached only over a tunnel has its real traffic on one of the names
+        // this treats as virtual, and reporting zero for it would be a worse
+        // wrong than double counting.
+        return sawReal ? (realRx, realTx) : (anyRx, anyTx);
     }
 
     /// <summary>

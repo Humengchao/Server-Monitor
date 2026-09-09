@@ -72,12 +72,36 @@ public class ProcParsersTests
     }
 
     [Fact]
-    public void NetDevSumsInterfacesButSkipsLoopback()
+    public void NetDevCountsTheHostsOwnTrafficOnce()
     {
         var (rx, tx) = ProcParsers.NetDev(Fixture.Read("linux/proc-net-dev.txt"));
-        // eth0 + docker0 + veth, not lo.
-        Assert.Equal(918_273_645L + 1_204_930 + 40_219, rx);
-        Assert.Equal(421_098_234L + 2_048_193 + 50_219, tx);
+        // eth0 alone. docker0 and the veth carry the same packets a second and
+        // third time — a container's traffic crosses the NIC, the bridge, and
+        // the veth at its end — so adding them made the headline read two to
+        // three times the host's real throughput. Measured on a live host: a
+        // NIC doing 1.3 MB/s reported as 3.9 MB/s, 149.6 GB cumulative shown
+        // as 372.7 GB.
+        Assert.Equal(918_273_645L, rx);
+        Assert.Equal(421_098_234L, tx);
+    }
+
+    [Fact]
+    public void AHostReachedOnlyThroughATunnelStillReportsTraffic()
+    {
+        // wg0 and tun0 are in the virtual list because on an ordinary host
+        // they carry a copy of traffic counted elsewhere. On a host whose only
+        // interface is the tunnel there is nothing else, and reporting zero
+        // would be a worse wrong than counting twice — so the exclusion
+        // applies only while something real remains.
+        var output = string.Join("\n",
+            "Inter-|   Receive                    |  Transmit",
+            " face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed",
+            "    lo:    5000      50    0    0    0     0          0         0     5000      50    0    0    0     0       0          0",
+            "  tun0: 8000000    7000    0    0    0     0          0         0  4000000    3000    0    0    0     0       0          0");
+
+        var (rx, tx) = ProcParsers.NetDev(output);
+        Assert.Equal(8_000_000L, rx);
+        Assert.Equal(4_000_000L, tx);
     }
 
     [Fact]
