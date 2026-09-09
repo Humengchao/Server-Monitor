@@ -590,10 +590,8 @@ public sealed class ServerDetailPage : UserControl
         {
             Maybe("metric.uptime", Format.Uptime(snapshot.UptimeSeconds, Strings.IsChinese));
         }
-        if (identity.Addresses.Count > 0)
-        {
-            Maybe("card.addresses", string.Join(", ", identity.Addresses));
-        }
+        var addresses = MachineAddresses(server, identity);
+        if (addresses.Count > 0) Maybe("card.addresses", string.Join(", ", addresses));
         if (server.DockerVersion.Length > 0) Maybe("docker.engine", server.DockerVersion);
 
         return Card("card.machineInfo", rows);
@@ -736,6 +734,48 @@ public sealed class ServerDetailPage : UserControl
         }
 
         return Card("card.ipLocation", [.. children]);
+    }
+
+    /// <summary>
+    /// The addresses to show on the machine card, public one first.
+    /// </summary>
+    /// <remarks>
+    /// The host's own answer to this comes from <c>hostname -I</c>, which
+    /// lists what its interfaces are configured with — and on a NAT'd cloud VM
+    /// that does not include the address anyone reaches it at. Two of three
+    /// real hosts sampled reported only 10.0.18.16 and a couple of Docker
+    /// bridges while the app was talking to them on a public address it knew
+    /// perfectly well and did not show here. A third, with a public address on
+    /// its NIC, was fine — which is why this had gone unnoticed.
+    ///
+    /// So the endpoint goes at the front when it is a public IP the host did
+    /// not already mention. Only when it parses as an address: an alias whose
+    /// host has not been resolved yet is a name, and a name is not something
+    /// to print under "IP addresses".
+    ///
+    /// The host's own addresses stay, and stay unfiltered. The Docker bridges
+    /// among them are noise, but the only way to know a 172.x is a bridge
+    /// rather than a real LAN address is the interface it belongs to, and
+    /// <c>hostname -I</c> does not say. Showing one address too many is a
+    /// smaller fault than hiding a real one.
+    /// </remarks>
+    internal static List<string> MachineAddresses(Server server, HostIdentity identity)
+    {
+        var shown = new List<string>(identity.Addresses);
+        var endpoint = server.Host.Trim();
+
+        if (endpoint.Length > 0
+            && !GeoLookup.IsPrivate(endpoint)
+            && System.Net.IPAddress.TryParse(endpoint, out var parsed)
+            // Round-trip, because TryParse is lenient about shorthand and
+            // would read a hostname of digits as an address.
+            && parsed.ToString() == endpoint
+            && !shown.Contains(endpoint, StringComparer.OrdinalIgnoreCase))
+        {
+            shown.Insert(0, endpoint);
+        }
+
+        return shown;
     }
 
     /// <summary>
