@@ -113,6 +113,11 @@ public static partial class Strings
         ["snippet.required"] = ("名称和命令都不能为空", "Name and command are both required"),
         ["snippet.runCount"] = ("用过 {} 次", "run {}×"),
         ["snippet.noOutput"] = ("（无输出）", "(no output)"),
+        // Windows-only, all three. See LocalizationTests.WindowsOnlyKeys.
+        // The run window showed a bare "…" while the command ran and named
+        // neither the box it ran in nor the host it ran on.
+        ["snippet.running"] = ("正在 {} 上运行…", "Running on {}…"),
+        ["snippet.output"] = ("输出", "Output"),
         ["identity.new"] = ("新建身份", "New identity"),
         ["identity.name"] = ("名称", "Name"),
         ["identity.empty"] = ("把常用的登录方式存成身份，多台机器可以共用。", "Save a login once and share it across machines."),
@@ -140,6 +145,9 @@ public static partial class Strings
         ["sftp.uploading"] = ("上传中…", "Uploading…"),
         ["sftp.downloading"] = ("下载中…", "Downloading…"),
         ["sftp.emptyDir"] = ("空目录", "Empty directory"),
+        // Windows-only: the path box and the listing had no accessible name.
+        ["sftp.path"] = ("路径", "Path"),
+        ["sftp.files"] = ("文件列表", "Files"),
         ["sftp.deleteConfirm"] = ("确定删除「{}」吗？此操作不可撤销。", "Delete “{}”? This cannot be undone."),
         ["history.empty"] = ("还没有会话记录。", "No sessions recorded yet."),
         ["history.server"] = ("服务器", "Server"),

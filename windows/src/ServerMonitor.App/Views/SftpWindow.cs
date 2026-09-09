@@ -87,6 +87,8 @@ public sealed class SftpWindow : Window
         Background = (System.Windows.Media.Brush)FindResource("Brush.Background");
 
         _list = BuildList();
+        System.Windows.Automation.AutomationProperties.SetName(
+            _path, Strings.Get("sftp.path"));
         _path.KeyDown += (_, e) =>
         {
             if (e.Key != Key.Enter) return;
@@ -171,6 +173,11 @@ public sealed class SftpWindow : Window
         // and no tooltip to read the rest from.
         void Column(string headerKey, string path, double width, bool tooltip = false) =>
             view.Columns.Add(Ui.TextColumn(Strings.Get(headerKey), path, width, tooltip));
+
+        // Neither the listing nor the path box above it carries a visible
+        // label, so neither had a name in the automation tree.
+        System.Windows.Automation.AutomationProperties.SetName(
+            list, Strings.Get("sftp.files"));
 
         Column("sftp.name", nameof(Row.Name), 340, tooltip: true);
         Column("sftp.size", nameof(Row.Size), 100);

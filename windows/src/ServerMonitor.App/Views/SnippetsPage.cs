@@ -213,6 +213,8 @@ public sealed class SnippetRunWindow : Window
     private readonly Snippet _snippet;
     private readonly TextBox _output;
     private Server _target;
+    private readonly Button _run;
+    private readonly ComboBox _picker;
 
     public SnippetRunWindow(Snippet snippet)
     {
@@ -240,7 +242,15 @@ public sealed class SnippetRunWindow : Window
             server => server.Name,
             server => _target = server);
 
-        var run = Ui.Default(Ui.Accent(Strings.Get("snippet.run"), () => _ = RunAsync()));
+        // Neither control carries a visible label, so neither had a name.
+        System.Windows.Automation.AutomationProperties.SetName(
+            picker, Strings.Get("nav.machines"));
+        System.Windows.Automation.AutomationProperties.SetName(
+            _output, Strings.Get("snippet.output"));
+
+        _picker = picker;
+        _run = Ui.Default(Ui.Accent(Strings.Get("snippet.run"), () => _ = RunAsync()));
+        var run = _run;
 
         var command = Ui.Mono(snippet.Command);
         command.TextWrapping = TextWrapping.Wrap;
@@ -269,8 +279,18 @@ public sealed class SnippetRunWindow : Window
 
     private async Task RunAsync()
     {
-        _output.Text = "…";
-        IsEnabled = false;
+        // A bare "…" was all this said while the command ran. Against a real
+        // host that is not a flicker: `du -xh /` over a 90 GB disk took half a
+        // minute, and for all of it the window showed one character and gave
+        // no sign which host it was talking to.
+        _output.Text = Strings.Get("snippet.running", _target.Name);
+
+        // Only the two controls that must not be used twice, rather than the
+        // whole window: disabling the window greys the output out and takes
+        // the scrollbar with it, so the previous run became unreadable for as
+        // long as this one lasted.
+        _run.IsEnabled = false;
+        _picker.IsEnabled = false;
         try
         {
             var output = await App.Current.Monitor.RunAsync(_snippet, _target);
@@ -282,7 +302,8 @@ public sealed class SnippetRunWindow : Window
         }
         finally
         {
-            IsEnabled = true;
+            _run.IsEnabled = true;
+            _picker.IsEnabled = true;
         }
     }
 }

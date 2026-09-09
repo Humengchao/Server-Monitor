@@ -42,6 +42,17 @@ public class LocalizationTests
         // waiting for the first detailed poll. This build separates the wait
         // from the answer, so it needs a word for the wait.
         "card.readingProcesses",
+
+        // The snippet run window showed a bare "…" while the command ran —
+        // on a host where the command took half a minute that is
+        // indistinguishable from nothing happening — and neither its host
+        // picker nor its output box had a name for a screen reader to say.
+        "snippet.running",
+        "snippet.output",
+
+        // Same for the SFTP window's path box and its listing.
+        "sftp.path",
+        "sftp.files",
     ];
 
     [Fact]
