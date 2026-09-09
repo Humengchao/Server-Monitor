@@ -577,7 +577,27 @@ public sealed class ServerDetailPage : UserControl
             var text = Ui.Caption(value);
             text.HorizontalAlignment = HorizontalAlignment.Right;
             text.TextTrimming = TextTrimming.CharacterEllipsis;
-            ToolTipService.SetToolTip(text, value);
+            // Every value on this card is a fact you end up pasting somewhere
+            // — an address into an ssh command or a firewall rule, a kernel
+            // version into a bug report — and none of them could be selected,
+            // because the card is TextBlocks. The row is trimmed as well, so
+            // for a long value there was not even a way to read it all.
+            //
+            // Copy on the whole row rather than only on the address that
+            // prompted it: special-casing one line would leave the CPU model
+            // beside it just as stuck, for no less code.
+            ToolTipService.SetToolTip(text, $"{value}\n{Strings.Get("common.copy")}");
+            text.Cursor = System.Windows.Input.Cursors.Hand;
+            text.MouseLeftButtonUp += (_, e) =>
+            {
+                e.Handled = true;
+                CopyRow(text, value);
+            };
+            var menu = new ContextMenu();
+            var copy = new MenuItem { Header = Strings.Get("common.copy") };
+            copy.Click += (_, _) => CopyRow(text, value);
+            menu.Items.Add(copy);
+            text.ContextMenu = menu;
             rows.Children.Add(Ui.Grid("110,*", label, text));
         }
 
@@ -734,6 +754,36 @@ public sealed class ServerDetailPage : UserControl
         }
 
         return Card("card.ipLocation", [.. children]);
+    }
+
+    /// <summary>
+    /// Copies a machine-card value, and says so where the value was.
+    /// </summary>
+    /// <remarks>
+    /// The feedback is the point. A click that silently succeeds and a click
+    /// that silently failed look identical, and the clipboard genuinely does
+    /// fail — another process can hold it open, which is why Ui.Copy retries
+    /// and returns a bool. So the row says "copied" for a moment, and says
+    /// nothing if it could not.
+    /// </remarks>
+    private static void CopyRow(System.Windows.Controls.TextBlock text, string value)
+    {
+        if (!Ui.Copy(value)) return;
+
+        var original = text.Text;
+        text.Text = Strings.Get("common.copied");
+        var timer = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(1.2),
+        };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            // The card may have been rebuilt by a poll in the meantime; this
+            // then writes to a TextBlock nobody can see, which is harmless.
+            text.Text = original;
+        };
+        timer.Start();
     }
 
     /// <summary>

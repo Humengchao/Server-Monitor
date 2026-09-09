@@ -122,6 +122,19 @@ public sealed class SnippetsPage : UserControl, ISearchable
     /// <remarks>
     /// The output window is the point: a snippet whose result vanishes is a
     /// snippet you cannot tell succeeded.
+    ///
+    /// Shown, not shown modally. A snippet is a command on a remote host and
+    /// takes as long as it takes — a backup script, an apt upgrade, anything
+    /// the user thought worth saving — and ShowDialog meant the whole app sat
+    /// inert until it finished and the output had been read. Nothing about
+    /// reading a command's output needs the rest of the window frozen, and
+    /// the point of a monitor is that you can watch it while something runs.
+    ///
+    /// Several can be open at once now, which is the same answer the session
+    /// dock gives: running one thing should not be a reason to stop watching
+    /// another. The owner is kept so the window still floats above the main
+    /// one and goes away with it, and the use count is refreshed when the
+    /// window closes rather than where ShowDialog used to return.
     /// </remarks>
     private void Run(Snippet snippet)
     {
@@ -130,9 +143,16 @@ public sealed class SnippetsPage : UserControl, ISearchable
             Ui.Inform(Window.GetWindow(this), Strings.Get("dashboard.empty"));
             return;
         }
-        var window = new SnippetRunWindow(snippet) { Owner = Window.GetWindow(this) };
-        window.ShowDialog();
-        Rebuild();
+        var window = new SnippetRunWindow(snippet)
+        {
+            Owner = Window.GetWindow(this),
+            // In the taskbar, because it is no longer modal: a non-modal
+            // window the user has clicked away from needs a way back that is
+            // not "hunt for it behind the main window".
+            ShowInTaskbar = true,
+        };
+        window.Closed += (_, _) => Rebuild();
+        window.Show();
     }
 }
 

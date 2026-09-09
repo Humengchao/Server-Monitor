@@ -58,6 +58,10 @@ public class LocalizationTests
         // separate windows; macOS never had them as windows, so it has no
         // word for the dock's "open another one on this host".
         "session.duplicate",
+
+        // The machine card confirms a copy in place. macOS's cards are
+        // selectable text, so it never needed a word for it.
+        "common.copied",
     ];
 
     [Fact]

@@ -132,15 +132,27 @@ internal sealed class TerminalHost : ContentControl
     /// </remarks>
     public void ApplyTheme(bool dark, string fontFamily, int fontSize)
     {
+        // The terminal's own paper. Also handed over as the external
+        // background below, which is why it is a local.
+        var paper = dark ? Color.FromRgb(0x1B, 0x1B, 0x1B) : Color.FromRgb(0xFB, 0xFB, 0xFB);
         var theme = new TerminalTheme
         {
-            DefaultBackground = Bgr(dark ? Color.FromRgb(0x1B, 0x1B, 0x1B) : Color.FromRgb(0xFB, 0xFB, 0xFB)),
+            DefaultBackground = Bgr(paper),
             DefaultForeground = Bgr(dark ? Color.FromRgb(0xE6, 0xE6, 0xE6) : Color.FromRgb(0x1A, 0x1A, 0x1A)),
             DefaultSelectionBackground = Bgr(Palette.Accent),
             CursorStyle = CursorStyle.BlinkingBar,
             ColorTable = dark ? DarkTable : LightTable,
         };
-        _terminal.SetTheme(theme, fontFamily, (short)fontSize, Palette.Accent);
+        // The last argument is `externalBackground`: what the control paints
+        // in the strip it cannot fill with character cells, because a control
+        // is rarely an exact multiple of a cell wide. It was being given
+        // Palette.Accent — presumably meant as the selection colour, which the
+        // theme already sets on the line above — and the result was a solid
+        // twenty-pixel accent-blue bar down the right-hand side of every
+        // terminal. Sampled at #0F6CBD, which is exactly the light theme's
+        // accent. It is the paper's colour, so the leftover has nothing to
+        // show.
+        _terminal.SetTheme(theme, fontFamily, (short)fontSize, paper);
     }
 
     /// <summary>

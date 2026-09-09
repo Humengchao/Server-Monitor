@@ -155,18 +155,28 @@ public sealed class IdentityEditorWindow : Window
             buttons);
         root.Margin = new Thickness(20);
         Content = root;
-        RefreshAuthFields();
-    }
 
-    private void RefreshAuthFields()
-    {
-        _authFields.Children.Clear();
-        if (_authKind != AuthKind.IdentityFile) return;
+        // Built once and then shown or hidden, never rebuilt.
+        //
+        // It used to be rebuilt on every change of the picker, and that threw.
+        // Ui.Field wraps its control in a fresh Grid, but the control is the
+        // same _identityFile instance every time — and clearing the outer
+        // panel does not disconnect the inner Grid from it, so the TextBox
+        // still had a parent when the next Field tried to adopt it. WPF
+        // refuses that ("already the logical child of another element"), and
+        // the unhandled-exception dialog was what the user saw on switching
+        // back from SSH agent to a key.
         _authFields.Children.Add(Ui.Field(
             "server.identityPath",
             Ui.Grid("*,auto", _identityFile, Ui.Button(Strings.Get("common.browse"), Browse)),
             "auth.identityHelp"));
+        RefreshAuthFields();
     }
+
+    private void RefreshAuthFields() =>
+        _authFields.Children[0].Visibility = _authKind == AuthKind.IdentityFile
+            ? Visibility.Visible
+            : Visibility.Collapsed;
 
     private void Browse()
     {

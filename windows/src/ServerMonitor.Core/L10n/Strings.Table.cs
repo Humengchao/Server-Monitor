@@ -239,6 +239,9 @@ public static partial class Strings
         ["common.install"] = ("安装", "Install"),
         ["dashboard.lastSeen"] = ("上次在线时运行 {}", "Was up {} when last seen"),
         ["common.copy"] = ("复制", "Copy"),
+        // Windows-only: the machine card says so where the value was, because
+        // a copy that worked and one that failed look the same otherwise.
+        ["common.copied"] = ("已复制", "Copied"),
         ["keys.export"] = ("导出到服务器", "Export to server"),
         ["keys.exportHelp"] = ("把这个公钥追加到目标主机的 authorized_keys", "Append this public key to the host's authorized_keys"),
         ["keys.exported"] = ("已导出", "Exported"),
