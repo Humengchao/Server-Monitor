@@ -683,8 +683,7 @@ public sealed class ServerDetailPage : UserControl
     /// </remarks>
     private UIElement IpLocationCard(Server server, MetricSnapshot snapshot)
     {
-        var address = snapshot.Identity.Addresses.FirstOrDefault()
-            ?? (server.Host.Length > 0 ? server.Host : string.Empty);
+        var address = LocatableAddress(server);
 
         var children = new List<UIElement> { Row(Strings.Get("card.endpoint"), server.DisplayTarget) };
 
@@ -726,6 +725,24 @@ public sealed class ServerDetailPage : UserControl
 
         return Card("card.ipLocation", [.. children]);
     }
+
+    /// <summary>
+    /// The address whose location is worth asking about.
+    /// </summary>
+    /// <remarks>
+    /// What the app connects to — not the host's own addresses. On any cloud
+    /// VM behind NAT those are 10.x plus whatever bridges Docker has made, so
+    /// reading them first put "a private address, no public service can locate
+    /// it" on the card of every real host, directly below the public endpoint
+    /// the same card was already printing. Nine of eleven hosts showed that.
+    ///
+    /// macOS chooses the endpoint for this exact reason and says so in a
+    /// comment ("not the host's own LAN addresses"); the port had it the other
+    /// way round. The alias is the fallback for a server whose host has not
+    /// been resolved yet, which is what macOS falls back to as well.
+    /// </remarks>
+    internal static string LocatableAddress(Server server) =>
+        server.Host.Length > 0 ? server.Host : server.SshAlias;
 
     private async Task LookUpAsync(string address)
     {
