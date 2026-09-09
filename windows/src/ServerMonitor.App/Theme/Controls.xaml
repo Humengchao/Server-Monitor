@@ -59,8 +59,22 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ComboBox">
+                    <!-- Two columns, because one was not enough: the content
+                         and the chevron used to share a single cell, with the
+                         content's only clearance the 8px of Padding on its
+                         right. A selection wider than the box ran straight
+                         under the arrow and the two drew on top of each
+                         other — the container page's host picker, whose
+                         values are host names, did it as soon as a name was
+                         longer than the box. -->
                     <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
                         <Border x:Name="Surface"
+                                Grid.ColumnSpan="2"
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="1"
@@ -69,7 +83,8 @@
 
                         <!-- The whole surface toggles the popup, so the click
                              target is the control and not just the arrow. -->
-                        <ToggleButton Style="{StaticResource Picker.Toggle}"
+                        <ToggleButton Grid.ColumnSpan="2"
+                                      Style="{StaticResource Picker.Toggle}"
                                       Focusable="False"
                                       ClickMode="Press"
                                       IsChecked="{Binding IsDropDownOpen,
@@ -77,15 +92,28 @@
                                                   Mode=TwoWay}" />
 
                         <ContentPresenter x:Name="PART_ContentSite"
+                                          Grid.Column="0"
                                           Margin="{TemplateBinding Padding}"
                                           Content="{TemplateBinding SelectionBoxItem}"
                                           ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
                                           ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
                                           HorizontalAlignment="Left"
                                           VerticalAlignment="Center"
-                                          IsHitTestVisible="False" />
+                                          IsHitTestVisible="False">
+                            <!-- Every picker in this app selects a string, so
+                                 the presenter builds a TextBlock and this is
+                                 where it learns to end in an ellipsis rather
+                                 than at the column edge. -->
+                            <ContentPresenter.Resources>
+                                <Style TargetType="TextBlock"
+                                       BasedOn="{StaticResource Text.Control}">
+                                    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                                </Style>
+                            </ContentPresenter.Resources>
+                        </ContentPresenter>
 
-                        <Path Data="{StaticResource Geometry.Chevron}"
+                        <Path Grid.Column="1"
+                              Data="{StaticResource Geometry.Chevron}"
                               Stroke="{DynamicResource Brush.Secondary}"
                               StrokeThickness="1.4"
                               StrokeStartLineCap="Round"
@@ -93,7 +121,7 @@
                               StrokeLineJoin="Round"
                               HorizontalAlignment="Right"
                               VerticalAlignment="Center"
-                              Margin="0,0,10,0"
+                              Margin="6,0,10,0"
                               IsHitTestVisible="False" />
 
                         <!-- The editable half of a ComboBox template. The

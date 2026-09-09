@@ -221,6 +221,65 @@ internal static class Ui
         Margin = new Thickness(0, 8, 0, 8),
     };
 
+    /// <summary>
+    /// Lets the wheel through to an outer scroller when this control cannot
+    /// use it.
+    /// </summary>
+    /// <remarks>
+    /// A <see cref="ListBox"/> inside a <see cref="StackPanel"/> inside a
+    /// <see cref="ScrollViewer"/> is measured with infinite height, so its own
+    /// scroller has nothing to scroll — and yet it still answers the wheel and
+    /// marks the event handled, so the scroller that *could* move never hears
+    /// about it. That is the sidebar: it grows a scrollbar once there are
+    /// enough hosts, the bar drags, and the wheel does nothing at all.
+    ///
+    /// Forwarded rather than suppressed, and only when the inner scroller is
+    /// genuinely stuck. The machine screen relies on the opposite behaviour —
+    /// a wheel over the process table scrolls the table, not the page — so a
+    /// blanket "always give it to the parent" would break the card that
+    /// prompted <see cref="Scroll"/>'s own CanContentScroll note.
+    /// </remarks>
+    public static T PassWheelUp<T>(this T control) where T : FrameworkElement
+    {
+        control.PreviewMouseWheel += (_, e) =>
+        {
+            if (e.Handled) return;
+            // Its own scroller first: if there is anywhere to go, it goes.
+            if (InnerScroller(control) is { } inner
+                && inner.ScrollableHeight > 0.5) return;
+            if (Ancestor<ScrollViewer>(control) is not { } outer) return;
+
+            e.Handled = true;
+            outer.ScrollToVerticalOffset(outer.VerticalOffset - e.Delta);
+        };
+        return control;
+    }
+
+    private static ScrollViewer? InnerScroller(DependencyObject root)
+    {
+        if (root is ScrollViewer found) return found;
+        var count = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < count; i++)
+        {
+            if (InnerScroller(System.Windows.Media.VisualTreeHelper.GetChild(root, i)) is { } child)
+            {
+                return child;
+            }
+        }
+        return null;
+    }
+
+    private static T? Ancestor<T>(DependencyObject from) where T : DependencyObject
+    {
+        for (var at = System.Windows.Media.VisualTreeHelper.GetParent(from);
+             at is not null;
+             at = System.Windows.Media.VisualTreeHelper.GetParent(at))
+        {
+            if (at is T found) return found;
+        }
+        return null;
+    }
+
     public static ScrollViewer Scroll(UIElement content) => new()
     {
         Content = content,

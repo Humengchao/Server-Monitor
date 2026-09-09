@@ -112,6 +112,13 @@ public partial class MainWindow : Window
                 + Core.Store.Database.DefaultPath;
         }
 
+        // The sidebar's lists sit in a StackPanel inside a ScrollViewer, so
+        // they are measured unbounded and never scroll themselves — but they
+        // still swallow the wheel, which left the sidebar draggable by its
+        // scrollbar and dead to the wheel.
+        Nav.PassWheelUp();
+        ServerList.PassWheelUp();
+
         DockHost.Child = Dock;
         Dock.Changed += ShowDockIfUsed;
 
