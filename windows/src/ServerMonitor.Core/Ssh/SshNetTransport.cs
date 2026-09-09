@@ -185,35 +185,129 @@ public sealed class SshNetTransport : ISshTransport
     /// <summary>
     /// A pooled connection for this target, opening one if needed.
     /// </summary>
+    /// <remarks>
+    /// The handshake happens outside <see cref="_poolLock"/>, and that is the
+    /// whole point of the shape below.
+    ///
+    /// It used to be awaited inside it. <see cref="_poolLock"/> is one
+    /// semaphore for the entire transport, so a host that could not be
+    /// reached held it for the full connect timeout — ten seconds — and every
+    /// other host's every command waited behind it: each poll, each Docker
+    /// call, each terminal being opened. With two unreachable machines in a
+    /// list of eleven, a `docker ps` that costs the host 121 ms took
+    /// <em>twenty-two seconds</em> to come back. Measured, after the container
+    /// page was reported as slow and the commands themselves turned out not to
+    /// be.
+    ///
+    /// So the global lock now only guards the dictionary, for as long as a
+    /// lookup takes, and connecting is serialised per host instead. A dead
+    /// host delays itself and nothing else. The double check after taking the
+    /// per-host gate is what stops two callers racing into two handshakes for
+    /// one server.
+    /// </remarks>
     private async Task<Pooled> LeaseAsync(SshTarget target, CancellationToken cancellationToken)
     {
         var resolved = _config.Resolve(target);
         var fingerprint = resolved.Fingerprint;
 
-        await _poolLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        if (await UsableAsync(target, fingerprint, cancellationToken).ConfigureAwait(false) is { } ready)
+        {
+            return ready;
+        }
+
+        var gate = await ConnectGateAsync(target.ServerId, cancellationToken).ConfigureAwait(false);
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_pool.TryGetValue(target.ServerId, out var existing))
+            // Somebody else may have opened it while this call waited its turn.
+            if (await UsableAsync(target, fingerprint, cancellationToken).ConfigureAwait(false) is { } fresh)
             {
-                if (existing.Fingerprint == fingerprint && existing.Client.IsConnected)
-                {
-                    existing.LastUsed = DateTime.UtcNow;
-                    return existing;
-                }
-                Close(existing);
-                _pool.Remove(target.ServerId);
+                return fresh;
             }
 
             var client = await ConnectAsync(resolved, target, cancellationToken).ConfigureAwait(false);
             var pooled = new Pooled { Client = client, Fingerprint = fingerprint };
-            _pool[target.ServerId] = pooled;
+
+            await _poolLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                // A reconfigure or a Forget may have landed mid-handshake; the
+                // entry that wins is this one, and any stale one it replaces
+                // is closed rather than leaked.
+                if (_pool.TryGetValue(target.ServerId, out var replaced))
+                {
+                    Close(replaced);
+                }
+                _pool[target.ServerId] = pooled;
+            }
+            finally
+            {
+                _poolLock.Release();
+            }
             return pooled;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// The pooled connection for this server if it is still good, else null —
+    /// dropping one that has gone stale on the way out.
+    /// </summary>
+    private async Task<Pooled?> UsableAsync(
+        SshTarget target, string fingerprint, CancellationToken cancellationToken)
+    {
+        await _poolLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!_pool.TryGetValue(target.ServerId, out var existing)) return null;
+            if (existing.Fingerprint == fingerprint && existing.Client.IsConnected)
+            {
+                existing.LastUsed = DateTime.UtcNow;
+                return existing;
+            }
+            Close(existing);
+            _pool.Remove(target.ServerId);
+            return null;
         }
         finally
         {
             _poolLock.Release();
         }
     }
+
+    /// <summary>
+    /// This server's connect gate, so two callers cannot handshake at once.
+    /// </summary>
+    /// <remarks>
+    /// Not <see cref="Pooled.Gate"/>: that one belongs to a connection that
+    /// exists, and this is the lock taken to decide whether one should. Kept
+    /// for the process's life rather than removed with the connection — a
+    /// server is reconnected many times, the object is one semaphore, and
+    /// disposing it under a waiter is how this would become a rare crash
+    /// instead of a slow page.
+    /// </remarks>
+    private async Task<SemaphoreSlim> ConnectGateAsync(Guid serverId, CancellationToken cancellationToken)
+    {
+        await _poolLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!_connectGates.TryGetValue(serverId, out var gate))
+            {
+                gate = new SemaphoreSlim(1, 1);
+                _connectGates[serverId] = gate;
+            }
+            return gate;
+        }
+        finally
+        {
+            _poolLock.Release();
+        }
+    }
+
+    private readonly Dictionary<Guid, SemaphoreSlim> _connectGates = [];
 
     private Task<SshClient> ConnectAsync(
         ResolvedHost resolved, SshTarget target, CancellationToken cancellationToken) =>

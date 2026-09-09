@@ -185,7 +185,6 @@ public sealed class DockerPage : UserControl
         if (rows.Count == 0) return Ui.Card(Ui.Tertiary(Strings.Get(emptyKey)));
 
         var grid = Ui.Rows(0);
-        var header = new Grid();
         var widths = string.Join(",", columns.Select(c => c.Width.ToString(
             System.Globalization.CultureInfo.InvariantCulture)));
 
@@ -210,15 +209,66 @@ public sealed class DockerPage : UserControl
 
         for (var index = 0; index < rows.Count; index++)
         {
-            var line = Line(rows[index], isHeader: false);
-            if (menuFor is not null && line is FrameworkElement element)
-            {
-                element.ContextMenu = menuFor(index);
-            }
-            grid.Children.Add(line);
+            grid.Children.Add(Row(Line(rows[index], isHeader: false), index, menuFor));
         }
-        _ = header;
         return Ui.Card(grid);
+    }
+
+    /// <summary>
+    /// One table row, and the ways it can be acted on.
+    /// </summary>
+    /// <remarks>
+    /// A row used to carry a context menu and nothing else: no click handler,
+    /// no hover, no cursor. So clicking a container did nothing at all, and
+    /// the only way to reach stop, restart, a shell or the logs was a
+    /// right-click nothing on screen suggested. Reported as "the containers
+    /// cannot be clicked into", which is exactly what it was.
+    ///
+    /// A left click opens the same menu rather than picking one of its items
+    /// as a primary action, because a container has no obvious single thing to
+    /// do with it — the dashboard card can send a left click to "open this
+    /// host" and this cannot. The hover and the cursor are what say so before
+    /// the click.
+    /// </remarks>
+    private static UIElement Row(UIElement line, int index, Func<int, ContextMenu>? menuFor)
+    {
+        if (menuFor is null) return line;
+
+        var row = new Border
+        {
+            Child = line,
+            Background = System.Windows.Media.Brushes.Transparent,
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(4, 0, 4, 0),
+            Margin = new Thickness(-4, 0, -4, 0),
+            Cursor = System.Windows.Input.Cursors.Hand,
+        };
+
+        var hover = (System.Windows.Media.Brush)row.FindResource("Brush.CardHover");
+        row.MouseEnter += (_, _) => row.Background = hover;
+        row.MouseLeave += (_, _) => row.Background = System.Windows.Media.Brushes.Transparent;
+
+        // Built per click, not cached: the menu's items depend on the
+        // container's current state, and a stopped one offers Start where a
+        // running one offers Stop.
+        row.ContextMenu = null;
+        void Show()
+        {
+            var menu = menuFor(index);
+            menu.PlacementTarget = row;
+            menu.IsOpen = true;
+        }
+        row.MouseLeftButtonUp += (_, e) =>
+        {
+            e.Handled = true;
+            Show();
+        };
+        row.MouseRightButtonUp += (_, e) =>
+        {
+            e.Handled = true;
+            Show();
+        };
+        return row;
     }
 
     private UIElement Containers()
@@ -385,16 +435,51 @@ public sealed class DockerPage : UserControl
         {
             var target = Monitor.Target(host);
             var docker = Monitor.Docker;
+
             // Sequentially, not in parallel: they share one connection, and
             // six concurrent channel opens against a host is a burst it has no
             // reason to absorb for a page the user is reading anyway.
+            //
+            // But drawn as they arrive rather than all at the end, which is
+            // what made this page feel broken. Measured against a real host:
+            // `ps` 121 ms, `stats` 2186 ms, `images` 276 ms, volumes 43 ms,
+            // networks 38 ms, `compose ls` 196 ms, `info` 129 ms — plus a
+            // round trip each, and each one twice on a host that needs sudo.
+            // Every tab waited on all seven, so the container list the page
+            // opens on took four seconds to show something it had after the
+            // first hundred milliseconds. `stats` alone is two of those
+            // seconds, for two columns of a table whose other four were
+            // already in hand.
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+
             _containers = await docker.ListContainersAsync(target);
-            _stats = await docker.StatsAsync(target);
+            var listed = clock.ElapsedMilliseconds;
+            _loading = false;
+            Rebuild();
+
+            // The cheap four next, so every tab has its count while the
+            // expensive one is still outstanding.
             _images = await docker.ListImagesAsync(target);
             _volumes = await docker.ListVolumesAsync(target);
             _networks = await docker.ListNetworksAsync(target);
             _compose = await docker.ListComposeProjectsAsync(target);
+            var counted = clock.ElapsedMilliseconds;
+            Rebuild();
+
             await Monitor.RefreshDockerSummaryAsync(host);
+
+            // Last, because it is the most expensive thing on the page by an
+            // order of magnitude and the least of what anyone came for: two
+            // columns of a table whose other four arrived first.
+            _stats = await docker.StatsAsync(target);
+            Rebuild();
+
+            // One line, because "the container page is slow" is otherwise
+            // unanswerable from a log: the commands themselves are fast and
+            // what they mostly wait on is the metrics poll, which holds the
+            // host's single connection while this page queues behind it.
+            App.Log($"docker {host.Name}: listed {listed} ms, "
+                + $"counted {counted} ms, stats {clock.ElapsedMilliseconds} ms");
         }
         catch (Exception error)
         {
