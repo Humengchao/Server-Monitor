@@ -598,15 +598,41 @@ public static class ProcParsers
     /// A real server version is a short single token like "24.0.7". Anything
     /// else (error text, sudo noise) means docker is not usable on the host.
     /// </summary>
+    /// <remarks>
+    /// The probe is <c>docker info || sudo -n docker info || true</c>, and the
+    /// first attempt is not silent when it fails: a daemon socket the user
+    /// cannot open still makes the CLI print a fully-formed
+    /// <c>|0|0|0|0</c> row on <em>stdout</em> before exiting non-zero. So a
+    /// host where the login user is outside the <c>docker</c> group but has
+    /// passwordless sudo sends two rows, the dud one first, and reading the
+    /// section up to its first pipe took the dud every time.
+    ///
+    /// That is not a cosmetic misread. An empty version means
+    /// <c>Server.HasDocker</c> is false, which drops the host out of the
+    /// Docker page's picker entirely and puts "no Docker detected on this
+    /// host" on its detail card — about a machine running Docker that the
+    /// app's own Docker page could have driven, because
+    /// <see cref="Ssh.DockerClient"/> falls back to sudo for every call and
+    /// already read the answer row correctly. Two of eleven real hosts were
+    /// in exactly that state, and nothing in the app hinted at it.
+    ///
+    /// So the row is chosen the way <see cref="Ssh.DockerClient.ParseSummary"/>
+    /// chooses it — the last line that looks like data — and the two can no
+    /// longer disagree about the same output.
+    /// </remarks>
     public static string DockerVersion(string output)
     {
         // The section carries "version|images|running|stopped|paused" now;
-        // older hosts and the Windows script may still send the bare version.
+        // older hosts and the Windows script may still send the bare version,
+        // which has no pipe to find and is the whole answer.
+        var lines = output.Lines();
+        var answer = lines.LastOrDefault(l => l.Contains('|')) ?? output;
+
         // The split must keep an empty first field: a daemon that answered with
         // an empty version ("|14|5|3") would otherwise make the image count
         // the version.
-        var pipe = output.IndexOf('|');
-        var firstField = pipe < 0 ? output : output[..pipe];
+        var pipe = answer.IndexOf('|');
+        var firstField = pipe < 0 ? answer : answer[..pipe];
         var version = firstField.Trim();
         if (version.Length == 0 || version.Length > 31 || version.Any(char.IsWhiteSpace))
         {

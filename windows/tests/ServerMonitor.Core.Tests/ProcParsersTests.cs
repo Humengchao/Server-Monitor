@@ -1,5 +1,6 @@
 using ServerMonitor.Core;
 using ServerMonitor.Core.Collect;
+using ServerMonitor.Core.Ssh;
 using Xunit;
 
 namespace ServerMonitor.Core.Tests;
@@ -145,6 +146,58 @@ public class ProcParsersTests
         // A daemon that answered with an empty version ("|14|5|3") must not
         // make the image count the version.
         Assert.Equal("", ProcParsers.DockerVersion("|14|5|3|0"));
+    }
+
+    /// <summary>
+    /// The probe's sudo fallback, as a real host answers it.
+    /// </summary>
+    /// <remarks>
+    /// On a host where the login user is outside the docker group, the plain
+    /// `docker info` does not fail quietly: the CLI prints a complete row of
+    /// zeroes to stdout and *then* exits non-zero, so `|| sudo -n docker info`
+    /// runs and the section holds two rows — the dud first, the answer second.
+    /// Reading up to the section's first pipe therefore reported "no Docker"
+    /// about a host running Docker, and the app hid its Docker page for it.
+    /// Two of eleven real hosts were in this state.
+    /// </remarks>
+    [Fact]
+    public void DockerVersionTakesTheAnswerAndNotTheFailedFirstAttempt()
+    {
+        Assert.Equal("29.3.1", ProcParsers.DockerVersion("|0|0|0|0\n29.3.1|5|1|0|0\n"));
+    }
+
+    [Fact]
+    public void DockerVersionStaysEmptyWhenSudoDoesNotHelpEither()
+    {
+        // No docker group *and* no passwordless sudo: the fallback's stderr is
+        // dropped by the probe, so all that reaches the section is the dud row.
+        Assert.Equal("", ProcParsers.DockerVersion("|0|0|0|0\n"));
+    }
+
+    /// <summary>
+    /// The version parser and the summary parser must read the same row.
+    /// </summary>
+    /// <remarks>
+    /// These two read the same bytes and were choosing different lines of it —
+    /// DockerVersion the first, ParseSummary the last. The collector asks the
+    /// first whether to trust the second, so disagreement is not a difference
+    /// of opinion but a switch that turns the whole feature off.
+    /// </remarks>
+    [Fact]
+    public void TheVersionAgreesWithTheSummaryOnTheSameOutput()
+    {
+        foreach (var output in new[]
+        {
+            "29.3.1|5|1|0|0\n",
+            "|0|0|0|0\n29.3.1|5|1|0|0\n",
+            "|0|0|0|0\n",
+            "",
+        })
+        {
+            Assert.Equal(
+                DockerClient.ParseSummary(output).EngineVersion,
+                ProcParsers.DockerVersion(output));
+        }
     }
 
     [Fact]
