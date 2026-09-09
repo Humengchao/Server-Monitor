@@ -155,22 +155,48 @@ jobs:
           pattern: Server-Monitor-*
           merge-multiple: true
           path: out
+      # An unsigned download's only integrity check. The notes tell people to
+      # click past SmartScreen, so they deserve something to verify against.
+      - name: Checksums
+        working-directory: out
+        run: |
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="${GITHUB_REF#refs/tags/windows/v}"
+
+          # A version with a pre-release suffix (1.0.0-rc1) is marked as one.
+          # 0.1.0 is not: GitHub's /releases/latest returns nothing when every
+          # release is a prerelease, which breaks the obvious download link.
+          PRERELEASE=""
+          case "${VERSION}" in *-*) PRERELEASE="--prerelease" ;; esac
+
           cat > notes.md <<EOF
           Native Windows app, ${VERSION}. Requires Windows 10 1809 or later; designed for Windows 11.
 
-          Two downloads: the installer (\`Server-Monitor-${VERSION}-x64-setup.exe\`) and a
-          portable zip that needs no install. Both are self-contained — no .NET runtime required.
+          All three downloads are self-contained — no .NET runtime to install.
+
+          | Download | For |
+          | --- | --- |
+          | \`Server-Monitor-${VERSION}-x64-setup.exe\` | Most people. Installs per-user, no admin needed. |
+          | \`Server-Monitor-${VERSION}-x64-portable.zip\` | No install: unzip and run. |
+          | \`Server-Monitor-${VERSION}-arm64-portable.zip\` | ARM64 machines wanting a native build. The installer is x64 and runs fine under emulation, so this is only worth taking to skip that. |
+
+          Settings and history live in \`%LOCALAPPDATA%\\ServerMonitor\` whichever you pick,
+          so you can move between them without losing your hosts.
 
           The build is not code-signed, so SmartScreen will warn on first run: choose
           **More info** then **Run anyway**. Some antivirus products also flag unsigned
-          self-contained executables; the source for this build is the \`windows/v${VERSION}\` tag.
+          self-contained executables. \`SHA256SUMS.txt\` is here to check a download against,
+          and the source for this build is the \`windows/v${VERSION}\` tag.
           EOF
+
           gh release create "windows/v${VERSION}" out/* \
             --repo "${GITHUB_REPOSITORY}" \
             --title "Server Monitor for Windows ${VERSION}" \
-            --notes-file notes.md
+            --notes-file notes.md \
+            ${PRERELEASE}
