@@ -284,6 +284,7 @@ public sealed class MetricsCollector(
         snapshot.Memory = ProcParsers.MemoryBreakdownOf(Section(ProcParsers.Section.MemInfo));
         snapshot.Filesystems = ProcParsers.Filesystems(Section(ProcParsers.Section.DiskUsage));
         snapshot.Processes = ProcParsers.Processes(Section(ProcParsers.Section.Processes));
+        snapshot.SampledProcesses = processes;
         snapshot.Identity = ProcParsers.HostIdentityOf(Section(ProcParsers.Section.HostInfo));
         snapshot.Identity.CpuModel = await CpuModelAsync(
             snapshot.Identity.CpuModel, target, cancellationToken).ConfigureAwait(false);

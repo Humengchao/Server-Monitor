@@ -40,6 +40,21 @@ public sealed class MetricSnapshot
     public List<NetInterface> Interfaces { get; set; } = [];
     public List<FilesystemUsage> Filesystems { get; set; } = [];
     public List<HostProcess> Processes { get; set; } = [];
+
+    /// <summary>
+    /// Whether this poll asked the host for its process list.
+    /// </summary>
+    /// <remarks>
+    /// An empty <see cref="Processes"/> means two different things and the
+    /// screen has to tell them apart. A live host always has processes, so an
+    /// empty list from a poll that asked is a failure worth naming; an empty
+    /// list from a poll that did not ask is simply a card that has not been
+    /// filled in yet. Only the machine screen's host is asked — `ps` over
+    /// every process costs it ~30 ms a poll — so most snapshots are the
+    /// second kind, and stating "no process data" about them was telling the
+    /// user their host reports nothing when the app had not enquired.
+    /// </remarks>
+    public bool SampledProcesses { get; set; }
     public HostIdentity Identity { get; set; } = new();
 
     // Host facts that ride along with the same round trip.

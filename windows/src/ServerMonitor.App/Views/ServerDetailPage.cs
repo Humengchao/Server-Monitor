@@ -485,7 +485,18 @@ public sealed class ServerDetailPage : UserControl
     {
         if (snapshot.Processes.Count == 0)
         {
-            return Card("card.processes", Ui.Tertiary(Strings.Get("card.noProcesses")));
+            // Only the host whose machine screen is open is asked for its
+            // process list, so a snapshot taken before this screen existed
+            // carries none — and saying "no process data" about it told the
+            // user the host reports nothing when the app had not asked. Every
+            // other card on the screen had already filled in, which made it
+            // read as a fact rather than as a wait.
+            return snapshot.SampledProcesses
+                ? Card("card.processes", Ui.Tertiary(Strings.Get("card.noProcesses")))
+                : Card(
+                    "card.processes",
+                    Ui.Tertiary(Strings.Get("card.readingProcesses")),
+                    Ui.Spinner());
         }
 
         var filter = Ui.Input(_processFilter);

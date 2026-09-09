@@ -224,6 +224,9 @@ public static class WindowsMetrics
             Filesystems = filesystems.OrderByDescending(f => f.Total).ToList(),
             Interfaces = interfaces.OrderByDescending(i => i.RxTotal + i.TxTotal).ToList(),
             Processes = processes,
+            // The Windows script always sends its top 25; there is no cheap
+            // variant to skip, so this snapshot always carries an answer.
+            SampledProcesses = true,
             Identity = identity,
         };
         snapshot.Memory = new MemoryBreakdown

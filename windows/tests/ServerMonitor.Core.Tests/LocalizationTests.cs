@@ -23,14 +23,53 @@ public class LocalizationTests
         Assert.True(missing.Count == 0, $"missing {missing.Count}: {string.Join(", ", missing)}");
     }
 
+    /// <summary>
+    /// Keys this build has and macOS does not, each one on purpose.
+    /// </summary>
+    /// <remarks>
+    /// Listing them here is the "deliberate" part. Without somewhere to
+    /// declare one, a Windows-only string had to be written inline in the view
+    /// that used it — which is how the message box came to hold its own "OK"
+    /// as a C# conditional on the language, outside the table every other
+    /// string lives in and outside every check that runs over it.
+    ///
+    /// Add a key here only when the divergence is intended and the reason is
+    /// written down at the string itself.
+    /// </remarks>
+    private static readonly string[] WindowsOnlyKeys =
+    [
+        // The macOS process card says "no process data" while it is still
+        // waiting for the first detailed poll. This build separates the wait
+        // from the answer, so it needs a word for the wait.
+        "card.readingProcesses",
+    ];
+
     [Fact]
     public void NoKeyHereIsUnknownToTheMacTable()
     {
         // The other direction. A Windows-only key is legitimate, but it should
         // be a deliberate addition rather than a typo that silently renders as
         // the key itself.
-        var extra = Strings.Keys.Except(MacKeys()).OrderBy(k => k, StringComparer.Ordinal).ToList();
+        var extra = Strings.Keys
+            .Except(MacKeys())
+            .Except(WindowsOnlyKeys)
+            .OrderBy(k => k, StringComparer.Ordinal)
+            .ToList();
         Assert.True(extra.Count == 0, $"unknown to the mac table: {string.Join(", ", extra)}");
+    }
+
+    [Fact]
+    public void EveryDeclaredWindowsOnlyKeyIsRealAndStillWindowsOnly()
+    {
+        // The allow-list is only safe if it cannot rot. A name that no longer
+        // exists means the divergence was undone and the entry is stale; one
+        // macOS has since gained means the two tables agree again and the
+        // exemption is hiding a real comparison.
+        var gone = WindowsOnlyKeys.Except(Strings.Keys).ToList();
+        Assert.True(gone.Count == 0, $"declared but absent: {string.Join(", ", gone)}");
+
+        var shared = WindowsOnlyKeys.Intersect(MacKeys()).ToList();
+        Assert.True(shared.Count == 0, $"no longer Windows-only: {string.Join(", ", shared)}");
     }
 
     [Fact]

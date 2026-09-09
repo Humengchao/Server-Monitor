@@ -238,6 +238,7 @@ public sealed class MonitorService : INotifyPropertyChanged, IAsyncDisposable
         _latest.Remove(server.Id);
         _status.Remove(server.Id);
         _detailedServers.Remove(server.Id);
+        _detailWanted.Remove(server.Id);
         _failureStreak.Remove(server.Id);
         _retryAfter.Remove(server.Id);
         _pending.RemoveAll(p => p.ServerId == server.Id);
@@ -530,12 +531,46 @@ public sealed class MonitorService : INotifyPropertyChanged, IAsyncDisposable
     {
         if (visible)
         {
-            _detailedServers.Add(serverId);
-            return PollNow(serverId);
+            // Already detailed means the poll in flight, if any, is already
+            // asking for processes; nothing to wait for.
+            var wasDetailed = !_detailedServers.Add(serverId);
+            var immediate = PollNow(serverId);
+            if (immediate is null && !wasDetailed && HasServer(serverId))
+            {
+                _detailWanted.Add(serverId);
+            }
+            return immediate;
         }
         _detailedServers.Remove(serverId);
+        _detailWanted.Remove(serverId);
         return null;
     }
+
+    /// <summary>
+    /// Screens that opened while their host was mid-poll, and so did not get
+    /// the immediate poll they asked for.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="PollNow"/> declines when a poll is already in flight, on the
+    /// grounds that it is seconds from done. For every other caller that is
+    /// true and enough. For this one it is neither: the poll in flight was
+    /// started by the sweep, before the screen existed, so it did not ask for
+    /// the process list and cannot fill the card no matter how soon it lands.
+    ///
+    /// The screen then waited for the next tick, and a tick is not five
+    /// seconds when a host has gone away — it runs to the cap while the dead
+    /// host burns its connect timeout. Measured on eleven real hosts with two
+    /// unreachable: about fourteen seconds of "no process data" on a machine
+    /// whose every other card had already filled in, which reads as a host
+    /// that does not report processes rather than as a wait.
+    ///
+    /// So the request is remembered and re-issued the moment the poll that
+    /// was in the way finishes. One extra poll of one host, only when a
+    /// machine screen opens at the wrong moment.
+    /// </remarks>
+    private readonly HashSet<Guid> _detailWanted = [];
+
+    internal IReadOnlySet<Guid> DetailWanted => _detailWanted;
 
     /// <summary>
     /// One host, now, outside the tick — for a screen that has just opened.
@@ -545,6 +580,7 @@ public sealed class MonitorService : INotifyPropertyChanged, IAsyncDisposable
     {
         if (Server(serverId) is not { } server || _inFlight.Contains(serverId)) return null;
         _inFlight.Add(serverId);
+        _publishAtOnce.Add(serverId);
         return Task.Run(async () =>
         {
             await PollAsync(server).ConfigureAwait(false);
@@ -618,8 +654,16 @@ public sealed class MonitorService : INotifyPropertyChanged, IAsyncDisposable
     internal void PollFinished(Guid serverId)
     {
         _inFlight.Remove(serverId);
+        _publishAtOnce.Remove(serverId);
         _tickMembers.Remove(serverId);
         if (TickOpen && _tickMembers.Count == 0) CloseTick("complete");
+
+        // The poll a machine screen was waiting behind has landed; the one it
+        // actually asked for can go now.
+        if (_detailWanted.Remove(serverId) && _detailedServers.Contains(serverId))
+        {
+            PollNow(serverId);
+        }
     }
 
     private void CloseTick(string reason)
@@ -906,6 +950,27 @@ public sealed class MonitorService : INotifyPropertyChanged, IAsyncDisposable
     /// until the window was next shown.
     /// </remarks>
     private readonly List<(Guid ServerId, Action Apply)> _pending = [];
+
+    /// <summary>
+    /// Hosts whose poll was asked for by a screen that is open, and whose
+    /// result therefore goes on screen when it lands rather than when the
+    /// tick closes.
+    /// </summary>
+    /// <remarks>
+    /// Holding results for the tick keeps the dashboard from being redrawn
+    /// once per host. That is the right trade for the sweep and the wrong one
+    /// for a poll the user's own navigation started: the machine screen shows
+    /// a single host, and the tick it would wait behind is waiting on hosts
+    /// that have nothing to do with it. With two unreachable machines in the
+    /// list the tick runs to its cap every round, so the screen's own poll
+    /// landed in about a second and then sat held for another ten.
+    ///
+    /// The exemption is the one <see cref="Commit"/> already makes for a card
+    /// with nothing on it yet — a spinner turning into numbers is worth its
+    /// own pass — and it costs the same: a couple of extra passes, for one
+    /// host, when a screen opens.
+    /// </remarks>
+    private readonly HashSet<Guid> _publishAtOnce = [];
     internal int PendingCount => _pending.Count;
 
     /// <summary>
@@ -948,7 +1013,7 @@ public sealed class MonitorService : INotifyPropertyChanged, IAsyncDisposable
             Hold(serverId, apply);
             return;
         }
-        if (!TickOpen || !HasContent(serverId))
+        if (!TickOpen || !HasContent(serverId) || _publishAtOnce.Contains(serverId))
         {
             apply();
             Published?.Invoke();

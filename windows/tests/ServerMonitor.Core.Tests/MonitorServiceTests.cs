@@ -469,6 +469,69 @@ public class PollResultTests
             call => call.Command.Contains("ps -eo", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// A machine screen opened while its host was mid-poll still gets its
+    /// process list promptly.
+    /// </summary>
+    /// <remarks>
+    /// PollNow declines when a poll is already in flight, on the grounds that
+    /// it is seconds from done. For this caller that reasoning does not hold:
+    /// the poll in flight was started by the sweep, before the screen existed,
+    /// so it never asked for processes and cannot fill the card however soon
+    /// it lands. The screen then waited out a whole tick — and a tick is not
+    /// five seconds when a host has gone away, it runs to the cap while the
+    /// dead host burns its connect timeout. Measured against eleven real hosts
+    /// with two unreachable: fourteen seconds of "no process data" on a
+    /// machine whose every other card had already filled in.
+    /// </remarks>
+    [Fact]
+    public async Task AScreenOpenedMidPollDoesNotWaitForTheNextTick()
+    {
+        using var harness = new Harness();
+        var server = harness.AddServer("web-1");
+        harness.Transport.Handlers[server.Id] = FakeTransport.LinuxHost();
+
+        // A sweep is under way, so the host is in flight and PollNow declines.
+        var sweep = harness.Service.PollAllAsync();
+        var immediate = harness.Service.SetDetailVisible(server.Id, true);
+        Assert.Null(immediate);
+        Assert.Contains(server.Id, harness.Service.DetailWanted);
+
+        await harness.Pump.PumpUntilAsync(() => sweep.IsCompleted);
+        await sweep;
+
+        // The poll that was in the way has landed, so the one the screen asked
+        // for goes now rather than at the next tick.
+        await harness.Pump.PumpUntilAsync(
+            () => harness.Transport.Calls.Any(
+                c => c.Command.Contains("ps -eo", StringComparison.Ordinal)));
+        Assert.Contains(
+            harness.Transport.Calls,
+            call => call.Command.Contains("ps -eo", StringComparison.Ordinal));
+        Assert.DoesNotContain(server.Id, harness.Service.DetailWanted);
+    }
+
+    [Fact]
+    public async Task ClosingTheScreenBeforeItsTurnCancelsTheFollowUp()
+    {
+        // Opened and closed inside one poll: the host must not be charged for
+        // a process list nobody is looking at.
+        using var harness = new Harness();
+        var server = harness.AddServer("web-1");
+        harness.Transport.Handlers[server.Id] = FakeTransport.LinuxHost();
+
+        var sweep = harness.Service.PollAllAsync();
+        _ = harness.Service.SetDetailVisible(server.Id, true);
+        _ = harness.Service.SetDetailVisible(server.Id, false);
+        Assert.DoesNotContain(server.Id, harness.Service.DetailWanted);
+
+        await harness.Pump.PumpUntilAsync(() => sweep.IsCompleted);
+        await sweep;
+        Assert.DoesNotContain(
+            harness.Transport.Calls,
+            call => call.Command.Contains("ps -eo", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task EditingAHostDropsItsConnectionAndClearsItsBackoff()
     {

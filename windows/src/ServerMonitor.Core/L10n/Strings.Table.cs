@@ -265,6 +265,10 @@ public static partial class Strings
         ["card.mount"] = ("挂载点", "Mount"),
         ["card.interface"] = ("接口", "Interface"),
         ["card.noProcesses"] = ("无进程数据", "No process data"),
+        // Windows-only. The macOS card states "no process data" while it
+        // waits too; this build tells the wait apart from the answer. See
+        // LocalizationTests.WindowsOnlyKeys.
+        ["card.readingProcesses"] = ("读取进程列表…", "Reading processes…"),
         ["card.noInterfaces"] = ("无网络接口", "No network interfaces"),
         ["card.noFilesystems"] = ("无挂载点数据", "No filesystems"),
         ["card.processFilter"] = ("Pid、进程名或用户", "Pid, Process Name or User"),
