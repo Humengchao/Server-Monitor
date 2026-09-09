@@ -1,3 +1,4 @@
+using ServerMonitor.Core.Ssh;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -923,7 +924,7 @@ public sealed class ServerDetailPage : UserControl
         }
         catch (Exception error)
         {
-            Ui.Complain(owner, error.Message);
+            Ui.Complain(owner, FailureText.For(error));
             return;
         }
 
@@ -963,7 +964,7 @@ public sealed class ServerDetailPage : UserControl
         }
         catch (Exception error)
         {
-            Ui.Complain(owner, error.Message);
+            Ui.Complain(owner, FailureText.For(error));
         }
         finally
         {

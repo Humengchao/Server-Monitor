@@ -438,7 +438,7 @@ public sealed class ServerEditorWindow : Window
         }
         catch (Exception error)
         {
-            _error.Text = error.Message;
+            _error.Text = FailureText.For(error);
             _error.Visibility = Visibility.Visible;
         }
         finally

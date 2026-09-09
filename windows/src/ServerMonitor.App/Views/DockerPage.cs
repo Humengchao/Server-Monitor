@@ -312,7 +312,7 @@ public sealed class DockerPage : UserControl
         }
         catch (Exception error)
         {
-            _error = error.Message;
+            _error = FailureText.For(error);
             _loading = false;
             RebuildBody();
         }
@@ -329,7 +329,7 @@ public sealed class DockerPage : UserControl
         }
         catch (Exception error)
         {
-            Ui.Complain(Window.GetWindow(this), error.Message);
+            Ui.Complain(Window.GetWindow(this), FailureText.For(error));
         }
     }
 
@@ -396,7 +396,7 @@ public sealed class DockerPage : UserControl
         }
         catch (Exception error)
         {
-            _error = error.Message;
+            _error = FailureText.For(error);
         }
         finally
         {

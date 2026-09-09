@@ -25,7 +25,15 @@ public sealed class SessionsPage : UserControl
         Rebuild();
     }
 
-    private sealed record Row(string Server, string Kind, string Started, string Duration);
+    private sealed record Row(string Server, string Kind, string Started, string Duration)
+    {
+        /// <summary>What a screen reader says about this row.</summary>
+        /// <remarks>
+        /// Without it the generated record ToString is the automation name, so
+        /// the row announced itself as "Row { Server = web-01, Kind = ... }".
+        /// </remarks>
+        public override string ToString() => $"{Server} {Kind} {Started} {Duration}";
+    }
 
     private void Rebuild()
     {
@@ -47,15 +55,10 @@ public sealed class SessionsPage : UserControl
         ScrollViewer.SetVerticalScrollBarVisibility(list, ScrollBarVisibility.Disabled);
         var view = new GridView { AllowsColumnReorder = false };
 
-        void Column(string headerKey, string path, double width) =>
-            view.Columns.Add(new GridViewColumn
-            {
-                Header = Strings.Get(headerKey),
-                DisplayMemberBinding = new System.Windows.Data.Binding(path),
-                Width = width,
-            });
+        void Column(string headerKey, string path, double width, bool tooltip = false) =>
+            view.Columns.Add(Ui.TextColumn(Strings.Get(headerKey), path, width, tooltip));
 
-        Column("history.server", nameof(Row.Server), 200);
+        Column("history.server", nameof(Row.Server), 200, tooltip: true);
         Column("history.kind", nameof(Row.Kind), 100);
         Column("history.started", nameof(Row.Started), 190);
         Column("history.duration", nameof(Row.Duration), 120);

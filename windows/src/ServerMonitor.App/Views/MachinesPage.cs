@@ -182,7 +182,27 @@ public sealed class MachinesPage : UserControl, ISearchable
         string Status,
         System.Windows.Media.Brush StatusBrush,
         string Tags,
-        Server Server);
+        Server Server)
+    {
+        /// <summary>
+        /// What a screen reader says about this row.
+        /// </summary>
+        /// <remarks>
+        /// The generated record ToString is the automation name of the item,
+        /// and this record carries an id, a brush and the whole Server — so
+        /// each row announced itself as a GUID, a colour, and every field of
+        /// the model including its address and login, before any of the four
+        /// words a person would have said. The name, where it is, and whether
+        /// it is up is the row.
+        /// </remarks>
+        public override string ToString() =>
+            // An alias host's Target already opens with its name, and the two
+            // are the same word after an ssh-config import — so saying both
+            // reads as "web-01 web-01 · root@…".
+            Target.StartsWith(Name, StringComparison.Ordinal)
+                ? $"{Target} {Status}"
+                : $"{Name} {Target} {Status}";
+    }
 
     private UIElement Table()
     {
@@ -370,7 +390,7 @@ public sealed class MachinesPage : UserControl, ISearchable
         }
         catch (Exception error)
         {
-            Ui.Complain(Window.GetWindow(this), error.Message);
+            Ui.Complain(Window.GetWindow(this), FailureText.For(error));
         }
     }
 

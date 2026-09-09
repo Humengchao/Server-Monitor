@@ -1,3 +1,4 @@
+using ServerMonitor.Core.Ssh;
 using System.Windows;
 using System.Windows.Controls;
 using ServerMonitor.App.Controls;
@@ -277,7 +278,7 @@ public sealed class SnippetRunWindow : Window
         }
         catch (Exception error)
         {
-            _output.Text = error.Message;
+            _output.Text = FailureText.For(error);
         }
         finally
         {

@@ -313,7 +313,7 @@ public sealed class SshKeysPage : UserControl
         }
         catch (Exception error)
         {
-            Ui.Complain(Window.GetWindow(this), error.Message);
+            Ui.Complain(Window.GetWindow(this), FailureText.For(error));
         }
     }
 

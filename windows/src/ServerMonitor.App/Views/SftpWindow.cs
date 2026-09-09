@@ -51,6 +51,20 @@ public sealed class SftpWindow : Window
         public string Modified => Entry.Modified.ToString(
             "yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
         public string Mode => Entry.Permissions;
+
+        /// <summary>
+        /// What a screen reader says about this row.
+        /// </summary>
+        /// <remarks>
+        /// A ListViewItem holding a plain object takes its automation name
+        /// from that object's ToString, and a record's generated one prints
+        /// every property — so this row announced itself as
+        /// "Row { Entry = SftpEntry { Name = ..., Path = ..., IsDirectory =
+        /// True, IsSymlink = False, Size = 0, ... }, Name = ..., ... }", read
+        /// out in full, twice over. Seen in the live automation tree.
+        /// </remarks>
+        public override string ToString() =>
+            Entry.IsDirectory ? Name : $"{Name} {Size}";
     }
 
     public SftpWindow(Server server)
@@ -151,15 +165,14 @@ public sealed class SftpWindow : Window
         };
 
         var view = new GridView { AllowsColumnReorder = false };
-        void Column(string headerKey, string path, double width) =>
-            view.Columns.Add(new GridViewColumn
-            {
-                Header = Strings.Get(headerKey),
-                DisplayMemberBinding = new System.Windows.Data.Binding(path),
-                Width = width,
-            });
+        // Ui.TextColumn rather than DisplayMemberBinding: a file name is
+        // exactly the sort of value that outgrows its column, and the bare
+        // TextBlock the binding builds clips mid-character with no ellipsis
+        // and no tooltip to read the rest from.
+        void Column(string headerKey, string path, double width, bool tooltip = false) =>
+            view.Columns.Add(Ui.TextColumn(Strings.Get(headerKey), path, width, tooltip));
 
-        Column("sftp.name", nameof(Row.Name), 340);
+        Column("sftp.name", nameof(Row.Name), 340, tooltip: true);
         Column("sftp.size", nameof(Row.Size), 100);
         Column("sftp.modified", nameof(Row.Modified), 150);
         Column("sftp.mode", nameof(Row.Mode), 110);
@@ -484,7 +497,7 @@ public sealed class SftpWindow : Window
 
     private void Fail(Exception error)
     {
-        _message.Text = error.Message;
+        _message.Text = FailureText.For(error);
         _message.Foreground = Theme.Ink.Brush(Theme.Palette.Offline);
     }
 

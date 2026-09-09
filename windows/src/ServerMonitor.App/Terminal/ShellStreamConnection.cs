@@ -1,3 +1,4 @@
+using ServerMonitor.Core.Ssh;
 using System.Text;
 using Microsoft.Terminal.Wpf;
 using Renci.SshNet;
@@ -90,7 +91,7 @@ internal sealed class ShellStreamConnection : ITerminalConnection, IDisposable
             // Shown in the terminal itself rather than a dialog: the session is
             // where the user is looking, and a modal over a disconnected shell
             // just hides what it last printed.
-            Emit($"\r\n{Red}{error.Message}{Reset}\r\n");
+            Emit($"\r\n{Red}{FailureText.For(error)}{Reset}\r\n");
         }
         finally
         {
