@@ -83,6 +83,12 @@ lzma2 同理；而压缩镜像启动时要整个解到内存里，常驻 private
 约 209 MB。0.5 MB 的下载换 85 MB 内存，不值。测量存档在
 `artifacts/singlefile-compression.csv`。
 
+便携 zip 自带一个 `ServerMonitor.portable` 标记：它在 exe 旁边时，数据库、
+设置和日志都保存在 exe 旁的 `Data` 目录而不是 `%LOCALAPPDATA%`，整个文件夹
+拷到 U 盘上就能带走。删掉标记即回到默认位置。安装包不带这个标记，也不该带 ——
+装在 Program Files 下的程序本来就没有在自己旁边写的权限（标记若出现在
+写不了的地方，会回退到默认位置而不是启动失败）。
+
 `windows/v*` 标签会触发 [CI](../.github/workflows/windows-app.yml) 出 Release。
 
 ### 命令行采集
@@ -145,7 +151,7 @@ dotnet run --project windows/src/ServerMonitor.Cli -- probe  my-host --alias -v
   SYSTEM 改成 PER_MONITOR_V2（之前拖到另一块不同缩放的屏幕上会被系统拉伸糊
   掉）；采集脚本强制 UTF-8 输出。
 - **干净机器上的安装 / 卸载全程**（P6 出口）还没在一台干净的 Windows 11 上走过。
-- 密钥本体不显示、不导出；两端数据互导、便携模式、MSIX 是 P8 的可选项。
+- 密钥本体不显示、不导出；两端数据互导与 MSIX 是 P8 的可选项。
 
 ## 目录
 
@@ -247,6 +253,14 @@ startup and stays there, taking resident private bytes from about 124 MB to
 about 209 MB. Half a megabyte of download is not worth 85 MB of memory; the
 measurements are archived in `artifacts/singlefile-compression.csv`.
 
+The portable zip ships a `ServerMonitor.portable` marker next to the exe:
+while it is there, the database, settings and logs live in a `Data` directory
+beside the exe rather than in `%LOCALAPPDATA%`, so the whole folder can ride
+on a USB stick. Delete the marker to go back. The installer does not carry
+the marker, nor should it — a copy under Program Files has no business
+writing beside itself (a marker found somewhere unwritable falls back to the
+profile instead of failing to start).
+
 A `windows/v*` tag publishes a Release through
 [CI](../.github/workflows/windows-app.yml).
 
@@ -326,5 +340,5 @@ key: it really does write to `authorized_keys`), `SM_WIN_HOST` / `SM_WIN_USER` /
   bitmap-stretched; and the collection script now forces UTF-8 output.
 - **The clean-machine install/uninstall run** (P6's exit criterion) has not been
   done on a fresh Windows 11.
-- Key material is never displayed or exported. Cross-platform data exchange, a
-  portable mode and MSIX are optional P8 items.
+- Key material is never displayed or exported. Cross-platform data exchange and
+  MSIX are optional P8 items.

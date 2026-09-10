@@ -69,7 +69,7 @@ EasyWindowsTerminalControl，用 `ITerminalConnection` 适配器把 SSH.NET 的 
 ### D6 · 数据、设置与图表
 
 - SQLite（Microsoft.Data.Sqlite），schema 与 macOS 端一致：六张表（server、metricSample、snippet、identity、sessionRecord、machineGroup）与索引照搬，macOS 端 v1–v9 迁移合成 Windows 的 v1；UUID 同样存 16 字节 BLOB，将来两端数据库可直接互导。历史归约同一条 SQL：按时间桶 GROUP BY，≤ 240 点。
-- 数据目录 `%LOCALAPPDATA%\ServerMonitor\`，设置存 JSON，日志写 `logs/` 下的滚动文本文件。
+- 数据目录 `%LOCALAPPDATA%\ServerMonitor\`，设置存 JSON，日志写 `logs/` 下的滚动文本文件。便携模式：exe 旁有 `ServerMonitor.portable` 标记时改用 exe 旁的 `Data/`（解析集中在 `DataDirectory`，写不了就回退默认位置）。
 - 环形仪表与四张历史面积图**自绘**（DrawingVisual），零依赖，不做每 tick 动画（macOS 端踩过「周期刷新视图上的动画是主线程大户」）；ScottPlot 作后备。
 
 ### D7 · 仓库、CI 与发布
@@ -153,7 +153,7 @@ windows/
 - **P3 · 详情页**：CPU（每核 + user / system / nice / iowait / steal）、负载、内存、每挂载点、每网卡、进程表、主机信息、GPU（无显卡整张不画）、IP 位置、Docker 瓦片、vnStat（一键安装两步确认）；StaticGrid 按预估高度分列、列宽量化到 16 px；历史图自绘 240 点。
 - **P4 · 工具箱**：终端（字体、片段键入、docker exec、容器 shell）；SFTP（浏览、上传下载、进度、多选、重命名 / 删除 / 建目录，本地路径与盘符 Windows 化；SSH.NET 的 SftpClient 替代 macOS 端的 ls 解析 + scp）；Docker 五表、stats、日志、启停重启（compose 的 WARN 行绕过照搬）；代码片段；SSH 密钥（扫描、生成、导入、复制公钥、导出公钥到主机：chmod 700/600、按密钥本体查重、拒绝私钥）；会话侧栏与历史。
 - **P5 · 系统集成**：托盘、Toast、自启、单实例、睡眠与网络事件、省电、隐藏不更新、后台 soak。
-- **P8 · 可选**：两端数据互导 JSON（密码不导）、便携模式、MSIX。
+- **P8 · 可选**：两端数据互导 JSON（密码不导）、MSIX。便携模式已完成：便携 zip 带 `ServerMonitor.portable` 标记，数据落在 exe 旁的 `Data/`。
 
 ## 7. 分阶段
 
@@ -219,7 +219,7 @@ windows/
 
 ### P8 · 可选
 
-两端数据互导、便携模式、MSIX。不影响主线，按需要挑。
+两端数据互导、MSIX。不影响主线，按需要挑。便携模式已完成（标记文件 + exe 旁 `Data/`）。
 
 ## 8. 验证方式
 

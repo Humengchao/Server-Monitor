@@ -50,17 +50,13 @@ public sealed class Database : IDisposable
     }
 
     /// <summary>
-    /// <c>%LOCALAPPDATA%\ServerMonitor\monitor.sqlite</c> (D6).
+    /// <c>%LOCALAPPDATA%\ServerMonitor\monitor.sqlite</c> (D6), or the
+    /// exe-adjacent <c>Data</c> directory in portable mode.
     /// </summary>
     /// <remarks>
-    /// LocalApplicationData rather than Roaming: this is a machine's own
-    /// monitoring history, and syncing a SQLite file between machines over a
-    /// roaming profile is a good way to corrupt it.
+    /// The choice between the two is <see cref="DataDirectory"/>'s.
     /// </remarks>
-    public static string DefaultDirectory =>
-        System.IO.Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "ServerMonitor");
+    public static string DefaultDirectory => DataDirectory.Current;
 
     public static string DefaultPath => System.IO.Path.Combine(DefaultDirectory, "monitor.sqlite");
 

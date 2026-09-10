@@ -82,9 +82,21 @@ foreach ($runtime in $toPublish) {
     # The single-file host still drops a couple of loose files next to itself
     # (the runtime config, and the WebView2 loader if it ever comes in). Ship
     # the directory rather than only the exe.
+    #
+    # The marker opts the portable zip into portable mode: with it next to the
+    # exe, everything the app writes lives in a Data directory beside the exe
+    # rather than in %LOCALAPPDATA% (see Core's DataDirectory). Written for the
+    # archive and removed right after, because the installer builds from this
+    # same directory and an installed copy belongs to the profile.
+    $marker = Join-Path $out 'ServerMonitor.portable'
+    Set-Content -Path $marker -Encoding utf8 -Value @'
+Portable mode marker. While this file sits next to the exe, all data lives in
+the Data directory beside it instead of %LOCALAPPDATA%. Delete it to go back.
+'@
     $arch = $runtime -replace '^win-', ''
     $zip = Join-Path $dist "Server-Monitor-$Version-$arch-portable.zip"
     Compress-Archive -Path (Join-Path $out '*') -DestinationPath $zip -Force
+    Remove-Item $marker
     Write-Host "   -> $zip"
 }
 
