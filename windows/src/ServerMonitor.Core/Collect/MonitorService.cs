@@ -40,7 +40,7 @@ public sealed class MonitorService : INotifyPropertyChanged, IAsyncDisposable
     public ICredentialStore Credentials { get; }
 
     /// <summary>Set by the app so poll results can raise notifications.</summary>
-    public AlertService? Alerts { get; set; }
+    public RuleEngine? Alerts { get; set; }
 
     // MARK: - Published state
 

@@ -45,9 +45,6 @@ public sealed class ServerEditorWindow : Window
     private OSKind _osKind;
     private Guid? _identityId;
     private Guid? _groupId;
-    private int? _cpuThreshold;
-    private int? _memoryThreshold;
-    private int? _diskThreshold;
     private bool _forceOpenSshExe;
 
     public ServerEditorWindow(Server? existing)
@@ -63,9 +60,6 @@ public sealed class ServerEditorWindow : Window
         _osKind = _server.OsKind;
         _identityId = _server.IdentityId;
         _groupId = _server.GroupId;
-        _cpuThreshold = _server.CpuThreshold;
-        _memoryThreshold = _server.MemoryThreshold;
-        _diskThreshold = _server.DiskThreshold;
         _forceOpenSshExe = App.Current.Settings.ForceOpenSshExe.Contains(_server.Id);
 
         Title = Strings.Get(_isNew ? "server.add" : "server.edit");
@@ -157,10 +151,13 @@ public sealed class ServerEditorWindow : Window
 
             Ui.Separator(),
             Ui.Title(Strings.Get("server.thresholds")),
-            Ui.Wrapped(Strings.Get("server.thresholdHelp"), "Text.Tertiary"),
-            ThresholdField("settings.cpuThreshold", _cpuThreshold, value => _cpuThreshold = value),
-            ThresholdField("settings.memoryThreshold", _memoryThreshold, value => _memoryThreshold = value),
-            ThresholdField("settings.diskThreshold", _diskThreshold, value => _diskThreshold = value),
+            // The pickers left with the threshold service: a per-host limit
+            // here was read by it and by nothing else, so the controls would
+            // promise a setting the rule engine never looks at. A per-host
+            // limit is now a rule scoped to this host, set on the Alerts
+            // page; what a host already had was seeded into rules at the
+            // migration, so nothing it was configured with is lost.
+            Ui.Wrapped(Strings.Get("settings.rulesMoved"), "Text.Tertiary"),
 
             Ui.Separator(),
             // R13's per-host escape hatch, in the one place a host's
@@ -207,31 +204,6 @@ public sealed class ServerEditorWindow : Window
         AuthKind.Agent => Strings.Get("auth.agent"),
         _ => Strings.Get("server.password"),
     };
-
-    /// <summary>
-    /// A threshold picker where "follow global" and "off" are different
-    /// answers.
-    /// </summary>
-    /// <remarks>
-    /// null inherits the global setting; 0 means no alert for this metric at
-    /// all. Collapsing the two — which a plain number box would — loses the
-    /// ability to silence one noisy host without changing the fleet.
-    /// </remarks>
-    private static UIElement ThresholdField(string key, int? current, Action<int?> onChange)
-    {
-        var options = new List<int?> { null };
-        options.AddRange(AppSettings.ThresholdChoices.Cast<int?>());
-        return Ui.Field(key, Ui.Picker(
-            options,
-            options.FirstOrDefault(o => o == current),
-            value => value switch
-            {
-                null => Strings.Get("server.thresholdInherit"),
-                0 => Strings.Get("settings.thresholdOff"),
-                _ => $"{value}%",
-            },
-            onChange));
-    }
 
     /// <summary>Shows only the fields the chosen method actually uses.</summary>
     private void RefreshAuthFields()
@@ -357,9 +329,6 @@ public sealed class ServerEditorWindow : Window
         // stored form is normalised.
         _server.Tags = Server.ParseTags(_tags.Text);
         _server.Notes = _notes.Text.Trim();
-        _server.CpuThreshold = _cpuThreshold;
-        _server.MemoryThreshold = _memoryThreshold;
-        _server.DiskThreshold = _diskThreshold;
         return true;
     }
 

@@ -373,5 +373,46 @@ public static partial class Strings
         ["settings.seconds"] = ("秒", "seconds"),
         ["settings.days"] = ("天", "days"),
         ["settings.storage"] = ("数据位置", "Data location"),
+
+        // MARK: - Alerts
+        //
+        // Windows-only, all of it: macOS has no alert surface, so there is no
+        // key on that side to match. The engine these name is the web
+        // client's, and where the web has a word for something this uses the
+        // same one translated rather than inventing a second vocabulary.
+        ["nav.alerts"] = ("告警", "Alerts"),
+        ["alert.rules"] = ("规则", "Rules"),
+        ["alert.new"] = ("新建规则", "New rule"),
+        ["alert.empty"] = ("还没有告警规则。新建一条，在指标越界时收到通知。", "No alert rules yet. Add one to be told when a reading crosses a line."),
+        ["alert.history"] = ("最近告警", "Recent alerts"),
+        ["alert.historyEmpty"] = ("还没有触发过告警。", "Nothing has fired yet."),
+        ["alert.clear"] = ("清空记录", "Clear history"),
+        ["alert.clearConfirm"] = ("清空全部告警记录？规则不会被删除。", "Clear the whole alert history? The rules are kept."),
+        ["alert.name"] = ("规则名称", "Rule name"),
+        ["alert.metric"] = ("监控指标", "Metric"),
+        ["alert.condition"] = ("触发条件", "Fires when"),
+        ["alert.threshold"] = ("阈值", "Threshold"),
+        ["alert.duration"] = ("持续时间", "Sustained for"),
+        ["alert.durationHelp"] = ("越界必须持续这么久才会触发，短暂的尖峰不算。最短 30 秒，最长 24 小时。", "The reading must stay across the line this long before it fires, so a brief spike does not. Between 30 seconds and 24 hours."),
+        ["alert.scope"] = ("适用主机", "Applies to"),
+        ["alert.allHosts"] = ("所有主机", "All hosts"),
+        ["alert.enabled"] = ("启用这条规则", "Rule is enabled"),
+        ["alert.webhook"] = ("Webhook 地址", "Webhook URL"),
+        ["alert.webhookHelp"] = ("可留空。触发与恢复时会向这个地址 POST 一段 JSON，格式与 Web 端一致。地址存在 Windows 凭据管理器里，不写进数据库。", "Optional. A JSON body is POSTed here on firing and on recovery, in the same shape the web client sends. The address is kept in Windows Credential Manager, not in the database."),
+        ["settings.notificationsHelp"] = ("关闭后仍会按规则判定并记录历史，只是不再弹出桌面通知。", "Rules are still judged and recorded when this is off; only the desktop notification stops."),
+        ["settings.rulesMoved"] = ("CPU、内存、磁盘的阈值现在是「告警」页里的规则，每条都能单独设置指标、阈值、持续时间和适用主机。原来的设置已经转成了规则。", "The CPU, memory and disk limits are now rules on the Alerts page, each with its own metric, threshold, duration and scope. The old settings were carried over as rules."),
+        ["alert.thresholdInvalid"] = ("阈值必须是数字。", "The threshold must be a number."),
+        ["alert.thresholdPercent"] = ("百分比阈值必须在 0 到 100 之间。", "A percentage threshold must be between 0 and 100."),
+        ["alert.webhookInvalid"] = ("Webhook 地址必须是 http:// 或 https:// 开头的完整地址。", "A webhook address must be a full http:// or https:// URL."),
+        ["alert.firing"] = ("触发中", "Firing"),
+        ["alert.firingCount"] = ("{} 台主机触发中", "firing on {} hosts"),
+        ["alert.disabled"] = ("已停用", "Disabled"),
+        ["alert.required"] = ("请填写规则名称。", "A rule needs a name."),
+        ["alert.deleteConfirm"] = ("删除告警规则“{}”？已有的记录会保留。", "Delete the alert rule “{}”? Its history is kept."),
+        ["alert.offlineNoThreshold"] = ("离线规则没有阈值，只看持续多久。", "An offline rule has no threshold — only how long it stays down."),
+        ["alert.raisedAt"] = ("触发时间", "Raised"),
+        ["alert.ongoing"] = ("仍在触发", "Still firing"),
+        ["alert.for"] = ("持续 {}", "for {}"),
+        ["alert.ruleDeleted"] = ("规则已删除", "Rule deleted"),
     };
 }

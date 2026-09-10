@@ -25,10 +25,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Assembly names, not project names. The app and the CLI are renamed
+         (ServerMonitor.exe and smctl.exe), so entries spelled after their
+         projects granted nothing and the first internal the app reached for
+         did not compile. -->
     <InternalsVisibleTo Include="ServerMonitor.Core.Tests" />
-    <InternalsVisibleTo Include="ServerMonitor.App" />
     <InternalsVisibleTo Include="ServerMonitor.App.Tests" />
-    <InternalsVisibleTo Include="ServerMonitor.Cli" />
+    <InternalsVisibleTo Include="ServerMonitor" />
+    <InternalsVisibleTo Include="smctl" />
   </ItemGroup>
 
 </Project>

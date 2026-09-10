@@ -39,7 +39,6 @@ public sealed class AppSettings : INotifyPropertyChanged
     /// <summary>The intervals the picker offers, in seconds.</summary>
     public static readonly double[] AllowedIntervals = [3, 5, 10, 15, 30, 60];
     public static readonly int[] AllowedRetention = [1, 3, 7, 14, 30];
-    public static readonly int[] ThresholdChoices = [0, 70, 80, 85, 90, 95];
 
     /// <summary>
     /// Monospaced faces present on a default Windows install, so the list

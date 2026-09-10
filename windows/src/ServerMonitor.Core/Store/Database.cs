@@ -150,6 +150,19 @@ public sealed class Database : IDisposable
 
     // MARK: - Migrations
 
+    /// <summary>
+    /// True when this open advanced the schema.
+    /// </summary>
+    /// <remarks>
+    /// The caller uses it to seed the old threshold settings as rules exactly
+    /// once — on the database that was already at v1 and has just become v2,
+    /// and on a fresh one that is new enough. Not on every launch, which is
+    /// what a "if the rules table is empty" check alone would wrongly do: an
+    /// empty table is also the state a user who deleted all their rules
+    /// expects to stay in.
+    /// </remarks>
+    internal bool SchemaAdvanced { get; private set; }
+
     private void Migrate()
     {
         using var connection = Connect();
@@ -168,6 +181,7 @@ public sealed class Database : IDisposable
         {
             foreach (var statement in V2) Execute(connection, transaction, statement);
             Execute(connection, transaction, "INSERT INTO schemaVersion (version) VALUES (2)");
+            SchemaAdvanced = true;
         }
 
         transaction.Commit();
@@ -430,6 +444,17 @@ public sealed class Database : IDisposable
     public void DeleteAlertRule(Guid id) => Write(
         "DELETE FROM alertRule WHERE id = $id",
         command => command.Parameters.AddWithValue("$id", id.ToByteArray()));
+
+    /// <summary>
+    /// Empties the history, keeping the rules.
+    /// </summary>
+    /// <remarks>
+    /// Open events go too. The engine's firing set is in memory and is not
+    /// touched, so a condition that is still up stays firing and simply has no
+    /// row to resolve later — which is better than leaving rows the user asked
+    /// to be rid of, and self-heals on the next open.
+    /// </remarks>
+    public void ClearAlertHistory() => Write("DELETE FROM alertEvent", _ => { });
 
     /// <summary>The newest events first, for the history list.</summary>
     public List<AlertEvent> AlertEvents(int limit = 200) => Query(

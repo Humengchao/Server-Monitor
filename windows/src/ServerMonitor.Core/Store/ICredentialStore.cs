@@ -35,6 +35,19 @@ public interface ICredentialStore
     string? GetKeyPassphrase(Guid serverId, string keyPath);
 
     void SetKeyPassphrase(Guid serverId, string keyPath, string passphrase);
+
+    /// <summary>The webhook a rule posts its transitions to, or null.</summary>
+    /// <remarks>
+    /// Keyed by the rule id because a rule is the thing that decides whether
+    /// there is a webhook at all. Kept here rather than in the rule row for
+    /// the same reason a password is: it is a credential-shaped value, and the
+    /// user would not expect it to be readable from the database file.
+    /// </remarks>
+    string? GetWebhook(Guid ruleId);
+
+    void SetWebhook(Guid ruleId, string url);
+
+    void DeleteWebhook(Guid ruleId);
 }
 
 /// <summary>
@@ -49,6 +62,7 @@ public sealed class InMemoryCredentialStore : ICredentialStore
 {
     private readonly Dictionary<Guid, string> _passwords = [];
     private readonly Dictionary<string, string> _passphrases = [];
+    private readonly Dictionary<Guid, string> _webhooks = [];
 
     public string? GetPassword(Guid serverId) => _passwords.GetValueOrDefault(serverId);
 
@@ -62,4 +76,11 @@ public sealed class InMemoryCredentialStore : ICredentialStore
 
     public void SetKeyPassphrase(Guid serverId, string keyPath, string passphrase) =>
         _passphrases[$"{serverId}|{keyPath}"] = passphrase;
+
+    public string? GetWebhook(Guid ruleId) =>
+        _webhooks.TryGetValue(ruleId, out var url) ? url : null;
+
+    public void SetWebhook(Guid ruleId, string url) => _webhooks[ruleId] = url;
+
+    public void DeleteWebhook(Guid ruleId) => _webhooks.Remove(ruleId);
 }

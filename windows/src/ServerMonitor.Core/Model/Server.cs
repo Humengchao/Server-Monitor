@@ -30,8 +30,11 @@ public sealed class Server
     public Guid? GroupId { get; set; }
     public OSKind OsKind { get; set; } = OSKind.Auto;
 
-    // Per-server alert limits. null means "use the global setting", which is
-    // a different thing from 0, meaning "no alert for this metric".
+    // Per-server alert limits from the threshold service the rule engine
+    // replaced. Nothing reads them at poll time any more; RuleSeed reads them
+    // once, at the migration that creates the rules table, to seed the rules
+    // that reproduce what the host was configured with. Kept on the row so
+    // that migration still has them.
     public int? CpuThreshold { get; set; }
     public int? MemoryThreshold { get; set; }
     public int? DiskThreshold { get; set; }

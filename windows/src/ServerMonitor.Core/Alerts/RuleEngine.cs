@@ -52,6 +52,10 @@ public sealed class RuleEngine(
     /// has nothing — a threshold cannot be judged against a reading that was
     /// never taken.
     /// </remarks>
+    public void Evaluate(Server server, ServerStatus status, MetricSnapshot? snapshot)
+        => Evaluate(server, status, snapshot, DateTime.UtcNow);
+
+    /// <summary>For tests that need a known clock.</summary>
     public void Evaluate(Server server, ServerStatus status, MetricSnapshot? snapshot, DateTime now)
     {
         foreach (var rule in rules())

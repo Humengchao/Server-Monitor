@@ -34,6 +34,16 @@ public partial class App : Application
     public string? StoreFailure { get; private set; }
 
     /// <summary>
+    /// The rule list the engine judges on, cached because it is re-read in
+    /// full on every poll of every host. Invalidated by the rules page after
+    /// a save or delete.
+    /// </summary>
+    private List<Core.Model.AlertRule>? _alertRules;
+
+    /// <summary>Drops the cache so the next poll sees the edited rules.</summary>
+    public void InvalidateAlertRules() => _alertRules = null;
+
+    /// <summary>
     /// The pooled SSH.NET transport, for the two things that need the session
     /// and not a command: the terminal's shell stream and SFTP.
     /// </summary>
@@ -137,7 +147,32 @@ public partial class App : Application
             IsEnergySaverOn = SystemWatchers.IsEnergySaverOn,
         };
 
-        Monitor.Alerts = new AlertService(Settings, DeliverAlert, Log);
+        Monitor.Alerts = new RuleEngine(
+            rules: () =>
+            {
+                // Rules only change on the UI thread (the rules page edits
+                // them), so a plain cache is safe. Without it the engine would
+                // hit SQLite on every poll of every host.
+                return _alertRules ??= Store.AllAlertRules();
+            },
+            webhookUrl: rule => Credentials.GetWebhook(rule.Id),
+            recordOpen: Store.OpenAlertEvent,
+            recordResolve: Store.ResolveAlertEvent,
+            deliver: DeliverAlert,
+            log: Log);
+
+        if (Store.SchemaAdvanced && Store.AllAlertRules().Count == 0)
+        {
+            foreach (var seeded in RuleSeed.From(Settings, Store.AllServers()))
+                Store.Save(seeded);
+        }
+
+        // A deleted host takes its scoped rules with it (ON DELETE CASCADE),
+        // and an added one can be picked as a scope straight away. Either way
+        // the cached list is out of date the moment the collection changes.
+        Monitor.Servers.CollectionChanged += (_, _) => InvalidateAlertRules();
+
+        Monitor.Alerts.Restore(Store.UnresolvedAlertEvents());
 
         // Every window, not just this one's: a class handler fires for each
         // Window the app ever loads, so the terminal, the file browser, the
@@ -242,6 +277,15 @@ public partial class App : Application
     private void DeliverAlert(Guid serverId, string title, string body)
     {
         Log($"alert: {title} — {body}");
+        // The one thing the settings page still says about alerts. It gates
+        // the toast and nothing else: the rule was still judged, the event was
+        // still recorded, and a webhook the user configured per-rule still
+        // fires — "do not interrupt me" is not "stop watching".
+        if (!Settings.NotificationsEnabled)
+        {
+            Log("alert: notifications are off, so no toast");
+            return;
+        }
         // A real toast, per the plan. The tray balloon is the fallback and not
         // the other way round: on Windows 11 ShowBalloonTip displays nothing
         // whatsoever for an unpackaged app, so for a year of this app's life

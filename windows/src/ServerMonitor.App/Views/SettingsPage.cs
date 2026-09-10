@@ -149,46 +149,41 @@ public sealed class SettingsPage : UserControl
 
     // MARK: - Alerts
 
-    private UIElement Alerts()
-    {
-        var thresholds = Ui.Rows(0,
-            ThresholdField("settings.cpuThreshold", Settings.CpuThreshold, v => Settings.CpuThreshold = v),
-            ThresholdField("settings.memoryThreshold", Settings.MemoryThreshold, v => Settings.MemoryThreshold = v),
-            ThresholdField("settings.diskThreshold", Settings.DiskThreshold, v => Settings.DiskThreshold = v));
-        thresholds.IsEnabled = Settings.NotificationsEnabled;
-
-        var offline = Ui.Toggle(
-            Strings.Get("settings.notifyOffline"),
-            Settings.NotifyOnOffline,
-            value => Settings.NotifyOnOffline = value);
-        offline.IsEnabled = Settings.NotificationsEnabled;
-
-        var enabled = Ui.Toggle(
+    /// <summary>
+    /// What is left of this section now that the rules own the thresholds.
+    /// </summary>
+    /// <remarks>
+    /// The CPU / memory / disk pickers and the offline toggle used to live
+    /// here, each with a single global limit. They are gone: the rule engine
+    /// judges the same metrics with a per-rule comparator, threshold, duration
+    /// and scope, and a settings page that could still say "CPU 90%" beside a
+    /// rule saying 80% would leave the user with no way to know which one
+    /// spoke. The existing values were seeded as rules on the migration that
+    /// created the table, so nobody's configuration was lost — see RuleSeed.
+    ///
+    /// What stays is the one switch that is genuinely about notifications
+    /// rather than about rules: whether this machine shows them at all.
+    /// </remarks>
+    private UIElement Alerts() => Ui.Rows(0,
+        Ui.Toggle(
             Strings.Get("settings.notificationsEnabled"),
             Settings.NotificationsEnabled,
-            value =>
-            {
-                Settings.NotificationsEnabled = value;
-                // The dependent controls are greyed rather than hidden, so the
-                // panel does not change height as it is toggled.
-                thresholds.IsEnabled = value;
-                offline.IsEnabled = value;
-            });
+            value => Settings.NotificationsEnabled = value),
+        Ui.Wrapped(Strings.Get("settings.notificationsHelp"), "Text.Tertiary"),
+        Ui.Separator(),
+        Ui.Wrapped(Strings.Get("settings.rulesMoved"), "Text.Tertiary"),
+        RulesLink());
 
-        return Ui.Rows(0,
-            enabled,
-            offline,
-            Ui.Separator(),
-            thresholds,
-            Ui.Wrapped(Strings.Get("settings.thresholdHelp"), "Text.Tertiary"));
+    private UIElement RulesLink()
+    {
+        var button = Ui.Button(Strings.Get("nav.alerts"), () =>
+        {
+            if (Window.GetWindow(this) is MainWindow shell) shell.GoTo(Page.Alerts);
+        });
+        button.HorizontalAlignment = HorizontalAlignment.Left;
+        button.Margin = new Thickness(0, 8, 0, 0);
+        return button;
     }
-
-    private static UIElement ThresholdField(string key, int current, Action<int> onChange) =>
-        Ui.Field(key, Ui.Picker(
-            AppSettings.ThresholdChoices,
-            current,
-            value => value == 0 ? Strings.Get("settings.thresholdOff") : $"{value}%",
-            onChange));
 
     // MARK: - Terminal
 

@@ -109,18 +109,4 @@ public static partial class Strings
         AlertMetric.Latency => IsChinese ? "延迟" : "latency",
         _ => IsChinese ? "离线" : "offline",
     };
-
-    public static string Threshold(AlertService.Metric metric, double value, int limit)
-    {
-        var name = metric switch
-        {
-            AlertService.Metric.Cpu => "CPU",
-            AlertService.Metric.Memory => IsChinese ? "内存" : "Memory",
-            _ => IsChinese ? "磁盘" : "Disk",
-        };
-        var rounded = (int)Math.Round(value);
-        return IsChinese
-            ? $"{name} 持续超过 {limit}%（当前 {rounded}%）"
-            : $"{name} above {limit}% (now {rounded}%)";
-    }
 }

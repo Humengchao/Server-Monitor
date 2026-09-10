@@ -1,5 +1,6 @@
 using ServerMonitor.Core.Alerts;
 using ServerMonitor.Core.L10n;
+using ServerMonitor.Core.Model;
 using ServerMonitor.Core.Store;
 using Xunit;
 
@@ -62,7 +63,27 @@ public class LocalizationTests
         // The machine card confirms a copy in place. macOS's cards are
         // selectable text, so it never needed a word for it.
         "common.copied",
+
+        // The whole alerts surface. macOS has no alert rules at all — its
+        // notifications are the three fixed thresholds — so every word this
+        // page needs is new on this side. The vocabulary follows the web
+        // client's, which is where the engine came from. The two settings
+        // keys are the same divergence seen from the other end: this build's
+        // settings page no longer holds the thresholds, so it needs a
+        // sentence saying where they went that macOS has no use for.
+        "nav.alerts",
+        "settings.notificationsHelp",
+        "settings.rulesMoved",
     ];
+
+    /// <summary>The alert page's keys, which are all Windows-only.</summary>
+    /// <remarks>
+    /// A prefix rather than forty entries above: they arrived together, for
+    /// one reason, and listing each would say the same thing forty times. The
+    /// prefix is still a deliberate declaration — a typo'd <c>alert.</c> key
+    /// renders as itself, which the round-trip test below catches.
+    /// </remarks>
+    private const string AlertPrefix = "alert.";
 
     [Fact]
     public void NoKeyHereIsUnknownToTheMacTable()
@@ -73,6 +94,7 @@ public class LocalizationTests
         var extra = Strings.Keys
             .Except(MacKeys())
             .Except(WindowsOnlyKeys)
+            .Where(k => !k.StartsWith(AlertPrefix, StringComparison.Ordinal))
             .OrderBy(k => k, StringComparer.Ordinal)
             .ToList();
         Assert.True(extra.Count == 0, $"unknown to the mac table: {string.Join(", ", extra)}");
@@ -90,6 +112,14 @@ public class LocalizationTests
 
         var shared = WindowsOnlyKeys.Intersect(MacKeys()).ToList();
         Assert.True(shared.Count == 0, $"no longer Windows-only: {string.Join(", ", shared)}");
+
+        // The prefix earns its exemption the same way: it has to still cover
+        // keys, and macOS still has to have none of them.
+        Assert.Contains(Strings.Keys, k => k.StartsWith(AlertPrefix, StringComparison.Ordinal));
+        var alertsOnMac = MacKeys().Where(k => k.StartsWith(AlertPrefix, StringComparison.Ordinal)).ToList();
+        Assert.True(
+            alertsOnMac.Count == 0,
+            $"macOS has alert keys now, so the prefix hides a real comparison: {string.Join(", ", alertsOnMac)}");
     }
 
     [Fact]
@@ -152,6 +182,7 @@ public class LocalizationTests
             "import.done", "import.skipped", "server.deleteConfirm", "sftp.deleteConfirm",
             "sftp.deleteSelectedConfirm", "snippet.runCount", "history.clearConfirm",
             "dashboard.lastSeen", "traffic.installConfirmTitle",
+            "alert.deleteConfirm", "alert.firingCount", "alert.for",
         ];
         foreach (var key in withArgument)
         {
@@ -277,14 +308,21 @@ public class LocalizationTests
         using (var zh = new LanguageScope(AppLanguage.Zh))
         {
             Assert.Equal("已离线", Strings.Offline);
-            Assert.Contains("内存", Strings.Threshold(AlertService.Metric.Memory, 91.4, 90), StringComparison.Ordinal);
-            Assert.Contains("91", Strings.Threshold(AlertService.Metric.Memory, 91.4, 90), StringComparison.Ordinal);
+            Assert.Equal("告警触发", Strings.AlertOpen);
+            Assert.Equal("内存", Strings.AlertMetricName(AlertMetric.Memory));
         }
         using (var en = new LanguageScope(AppLanguage.En))
         {
             Assert.Equal("Offline", Strings.Offline);
             Assert.Equal("Back online", Strings.Recovered);
-            Assert.Equal("CPU above 90% (now 95%)", Strings.Threshold(AlertService.Metric.Cpu, 94.6, 90));
+            Assert.Equal("Resolved", Strings.AlertResolved);
+            Assert.Equal("memory", Strings.AlertMetricName(AlertMetric.Memory));
         }
+
+        // Not language-dependent, and asserted here because a wrong unit on a
+        // notification reads as a wrong reading.
+        Assert.Equal("%", Strings.AlertUnit(AlertMetric.Disk));
+        Assert.Equal("ms", Strings.AlertUnit(AlertMetric.Latency));
+        Assert.Equal("", Strings.AlertUnit(AlertMetric.Load1));
     }
 }

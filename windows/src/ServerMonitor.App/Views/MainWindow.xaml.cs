@@ -22,6 +22,7 @@ public enum Page
     SshKeys,
     Snippets,
     Docker,
+    Alerts,
     Sessions,
     Settings,
     ServerDetail,
@@ -43,6 +44,7 @@ public partial class MainWindow : Window
         (Page.Snippets, "nav.toolbox", true),
         (Page.Snippets, "nav.snippets", false),
         (Page.Docker, "nav.docker", false),
+        (Page.Alerts, "nav.alerts", false),
         (Page.Sessions, "nav.sessions", false),
     ];
 
@@ -246,6 +248,12 @@ public partial class MainWindow : Window
 
     public void OpenServer(Guid serverId) => Show(Page.ServerDetail, serverId);
 
+    /// <summary>
+    /// Navigates from outside the shell, as the settings page's pointer at
+    /// the rules does.
+    /// </summary>
+    public void GoTo(Page page) => Show(page);
+
     /// <summary>Swaps the content area.</summary>
     /// <remarks>
     /// A fresh page instance each time rather than a cache. The pages hold no
@@ -272,6 +280,7 @@ public partial class MainWindow : Window
             Page.SshKeys => new SshKeysPage(),
             Page.Snippets => new SnippetsPage(),
             Page.Docker => new DockerPage(OpenServer),
+            Page.Alerts => new AlertsPage(),
             Page.Sessions => new SessionsPage(),
             Page.Settings => new SettingsPage(),
             Page.ServerDetail when serverId is { } id => new ServerDetailPage(id, () => Show(Page.Dashboard)),
@@ -318,6 +327,7 @@ public partial class MainWindow : Window
         Page.SshKeys => Strings.Get("nav.sshKeys"),
         Page.Snippets => Strings.Get("nav.snippets"),
         Page.Docker => Strings.Get("nav.docker"),
+        Page.Alerts => Strings.Get("nav.alerts"),
         Page.Sessions => Strings.Get("nav.sessions"),
         Page.Settings => Strings.Get("nav.settings"),
         Page.ServerDetail => Monitor.Server(_openServerId ?? Guid.Empty)?.Name

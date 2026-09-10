@@ -47,6 +47,9 @@ public sealed class WindowsCredentialStore : ICredentialStore
     private static string PassphraseTarget(Guid serverId, string keyPath) =>
         $"{Prefix}.passphrase:{serverId}:{keyPath.ToLowerInvariant()}";
 
+    /// <summary>Where a rule's webhook URL lives, out of the database.</summary>
+    private static string WebhookTarget(Guid ruleId) => $"{Prefix}.webhook:{ruleId}";
+
     public string? GetPassword(Guid serverId) => Read(PasswordTarget(serverId));
 
     public void SetPassword(Guid serverId, string password) =>
@@ -60,6 +63,13 @@ public sealed class WindowsCredentialStore : ICredentialStore
     public void SetKeyPassphrase(Guid serverId, string keyPath, string passphrase) =>
         // Written against the path, so it covers every server using this key.
         Write(PassphraseTarget(keyPath), keyPath, passphrase);
+
+    public string? GetWebhook(Guid ruleId) => Read(WebhookTarget(ruleId));
+
+    public void SetWebhook(Guid ruleId, string url) =>
+        Write(WebhookTarget(ruleId), ruleId.ToString(), url);
+
+    public void DeleteWebhook(Guid ruleId) => Delete(WebhookTarget(ruleId));
 
     // MARK: - CredRead / CredWrite / CredDelete
 

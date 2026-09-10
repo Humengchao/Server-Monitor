@@ -42,13 +42,18 @@
   导入、复制公钥、把公钥装到主机的 `authorized_keys`（按密钥本体查重）、
   用 `icacls` 收紧 ACL —— Windows 的 OpenSSH 检查的是 ACL 而不是权限位，
   一把「别人能读」的私钥会被拒绝，而报错并不会告诉你这一点（R11）。
+- **告警规则**：每条规则独立设置指标（CPU / 内存 / 磁盘 / 负载 / 延迟 / 离线）、
+  比较方向、阈值、持续时间和适用主机；触发与恢复各记一条事件、各发一次通知，
+  可按规则挂 Webhook（地址存凭据管理器，不进数据库）。升级时旧版的三条全局
+  阈值自动转成等价的规则。
 - **常驻**：托盘图标带离线计数、关窗驻留、Toast 告警点击跳转到对应主机、
   开机自启、单实例；睡眠唤醒与网络恢复立刻重试；省电模式放慢轮询；
   窗口隐藏时不刷新界面，但采集、入库与告警照常。
 - **键盘与读屏**：仪表板的主机卡片是真正的按钮 —— 可 Tab、Enter/空格激活、
   有焦点框，读屏报出「web-01 — 离线」。进程为 per-monitor DPI 感知，拖到不同
   缩放的屏幕上不会被拉伸糊掉。
-- **双语与深浅色**：跟随系统，也可以固定。331 条文案与 macOS 端同源。
+- **双语与深浅色**：跟随系统，也可以固定。与 macOS 端同源的 331 条文案之外
+  另有 41 条仅本端使用，大半在告警规则页。
 
 ## 要求
 
@@ -61,7 +66,7 @@
 
 ```powershell
 dotnet build windows/ServerMonitor.slnx
-dotnet test  windows/ServerMonitor.slnx      # 409 通过，14 条 live 用例跳过
+dotnet test  windows/ServerMonitor.slnx      # 500 通过，14 条 live 用例跳过
 dotnet run --project windows/src/ServerMonitor.App
 ```
 
@@ -147,7 +152,7 @@ dotnet run --project windows/src/ServerMonitor.Cli -- probe  my-host --alias -v
 | `src/ServerMonitor.Core/` | 采集、解析、SSH、SQLite、文案。`net10.0`，不依赖 Windows |
 | `src/ServerMonitor.App/` | WPF 外壳：`Views/`、`Controls/`（自绘）、`Theme/`、`Platform/`、`Terminal/` |
 | `src/ServerMonitor.Cli/` | `smctl`，不带界面的采集 |
-| `tests/` | 409 条：解析器、数据库、轮询循环、SFTP 路径、离屏渲染、live |
+| `tests/` | 500 条：解析器、数据库、轮询循环、SFTP 路径、离屏渲染、live |
 | `scripts/package.ps1` · `scripts/installer.iss` | 发布与安装包 |
 | [`PLAN.md`](PLAN.md) | 技术决策（D1–D9）、既有事实（F1–F11）、分阶段计划、风险（R1–R13） |
 | [`../shared/probes/`](../shared/probes/) | 三端共用的采集脚本，改这里而不是各自复制 |
@@ -194,6 +199,12 @@ collection scripts — this app is standalone, and is the counterpart of the
   `authorized_keys` (deduplicated on the key body), and tighten the ACL with
   `icacls` — Windows' OpenSSH checks the ACL rather than a permission bitmask
   and refuses a key others can read, with an error that does not say so (R11).
+- **Alert rules**: each rule carries its own metric (CPU, memory, disk, load,
+  latency, offline), comparator, threshold, sustained duration and host scope.
+  Firing and recovery each record an event and deliver one notification, with
+  an optional per-rule webhook whose address lives in Credential Manager, not
+  the database. The old three global thresholds migrate into equivalent rules
+  on upgrade.
 - **Residency**: a tray icon carrying the offline count, close-to-tray, toast
   alerts that open the host they are about, start with Windows, single instance.
   Wake from sleep and a network change retry immediately; energy-saver slows the
@@ -204,8 +215,9 @@ collection scripts — this app is standalone, and is the counterpart of the
   announces as "web-01 — offline". The process is per-monitor DPI aware, so a
   window dragged to a differently scaled display is re-laid out rather than
   stretched.
-- **Bilingual and light/dark**, following the system or pinned. The 331 strings
-  come from the same table as the macOS build.
+- **Bilingual and light/dark**, following the system or pinned. Beyond the 331
+  strings shared with the macOS build there are 41 Windows-only ones, most of
+  them on the alert rules page.
 
 ### Requirements
 
@@ -219,7 +231,7 @@ collection scripts — this app is standalone, and is the counterpart of the
 
 ```powershell
 dotnet build windows/ServerMonitor.slnx
-dotnet test  windows/ServerMonitor.slnx      # 409 pass, 14 live cases skipped
+dotnet test  windows/ServerMonitor.slnx      # 500 pass, 14 live cases skipped
 dotnet run --project windows/src/ServerMonitor.App
 
 cd windows; ./scripts/package.ps1 -Version 0.1.0   # zip + installer, x64 + arm64

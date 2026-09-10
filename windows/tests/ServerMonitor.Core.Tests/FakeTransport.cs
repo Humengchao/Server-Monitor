@@ -192,9 +192,12 @@ internal sealed class Harness : IDisposable
             latency: new NoLatencyProbe());
         if (withAlerts)
         {
-            Service.Alerts = new Alerts.AlertService(
-                Settings,
-                (id, title, body) => Alerts.Add((id, title, body)));
+            Service.Alerts = new Alerts.RuleEngine(
+                rules: () => Database.AllAlertRules(),
+                webhookUrl: _ => null,
+                recordOpen: Database.OpenAlertEvent,
+                recordResolve: Database.ResolveAlertEvent,
+                deliver: (id, title, body) => Alerts.Add((id, title, body)));
         }
     }
 
