@@ -1,13 +1,13 @@
 import React, { useRef, useEffect, useState, useContext, useCallback } from 'react';
-import { Terminal } from 'xterm';
-import type { ITheme } from 'xterm';
+import { Terminal } from '@xterm/xterm';
+import type { ITheme } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Button, Space, App } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { DarkModeContext } from '../contexts/DarkModeContext';
-import 'xterm/css/xterm.css';
+import '@xterm/xterm/css/xterm.css';
 
 interface Props {
   serverId: string;

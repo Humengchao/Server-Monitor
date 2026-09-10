@@ -892,8 +892,6 @@ button, input, textarea, select { font: inherit; }
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
 
-@keyframes probePulse { 0%, 100% { opacity: .65; transform: scale(.92); } 50% { opacity: 1; transform: scale(1.12); } }
-
 /* Komari-inspired anime glass public monitor */
 .probe-glass-page {
   position: relative;
@@ -949,12 +947,6 @@ button, input, textarea, select { font: inherit; }
 .glass-header.minimal-header { grid-template-columns: 1fr auto; }
 .minimal-header .glass-header-status { justify-self: start; }
 
-.glass-brand { display: flex; align-items: center; gap: 11px; color: #fff; text-decoration: none; }
-.glass-brand:hover { color: #fff; }
-.glass-brand-mark { width: 43px; height: 43px; display: grid; place-items: center; border: 1px solid rgba(255,255,255,.18); border-radius: 14px; color: #ebe7ff; background: linear-gradient(145deg, rgba(138,115,238,.42), rgba(75,187,207,.24)); font-size: 19px; box-shadow: inset 0 1px rgba(255,255,255,.14), 0 10px 30px rgba(59,47,135,.25); }
-.glass-brand > span:last-child { display: flex; flex-direction: column; }
-.glass-brand strong { font-size: 17px; letter-spacing: .4px; }
-.glass-brand small { margin-top: 2px; color: rgba(226,231,255,.52); font-size: 9px; letter-spacing: 2px; }
 .glass-header-status { padding: 9px 15px; display: flex; align-items: center; gap: 9px; border: 1px solid rgba(255,255,255,.1); border-radius: 999px; color: rgba(237,241,255,.86); background: rgba(255,255,255,.055); font-size: 12px; }
 .glass-header-status small { padding-left: 8px; border-left: 1px solid rgba(255,255,255,.12); color: rgba(224,231,255,.5); font-size: 10px; }
 .glass-header-status .status-stale-label { color: #ffd27f; }
@@ -970,16 +962,6 @@ button, input, textarea, select { font: inherit; }
 
 .glass-shell { width: min(1440px, calc(100% - 42px)); margin: 0 auto; padding: 48px 0 64px; }
 .glass-shell.compact-shell { padding-top: 24px; }
-.glass-intro { margin-bottom: 24px; display: flex; align-items: flex-end; justify-content: space-between; gap: 30px; }
-.glass-kicker { display: flex; align-items: center; gap: 8px; color: rgba(232,235,255,.62); font-size: 9px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; }
-.glass-kicker i { width: 6px; height: 6px; border-radius: 50%; background: #55e7ba; box-shadow: 0 0 13px #55e7ba; animation: probePulse 2s ease-in-out infinite; }
-.glass-intro h1 { margin: 8px 0 7px; color: #fff; font-size: clamp(30px, 4vw, 49px); line-height: 1; letter-spacing: -2px; text-shadow: 0 12px 45px rgba(0,0,0,.35); }
-.glass-intro p { max-width: 680px; margin: 0; color: rgba(227,232,255,.6); font-size: 12px; line-height: 1.7; }
-.privacy-seal { min-width: 260px; padding: 13px 16px; display: flex; align-items: center; gap: 11px; border: 1px solid rgba(151,227,211,.16); border-radius: 15px; color: #8fe7d0; background: rgba(42,117,106,.13); backdrop-filter: blur(18px); }
-.privacy-seal > .anticon { font-size: 23px; }
-.privacy-seal span { display: flex; flex-direction: column; }
-.privacy-seal strong { color: #dffdf5; font-size: 10px; }
-.privacy-seal small { margin-top: 2px; color: rgba(202,246,236,.48); font-size: 8px; }
 
 .glass-summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .glass-summary-card { min-width: 0; min-height: 92px; padding: 17px 19px; display: flex; align-items: center; gap: 14px; border: 1px solid rgba(255,255,255,.13); border-radius: 15px; background: rgba(16,22,42,.66); box-shadow: inset 0 1px rgba(255,255,255,.055), 0 13px 35px rgba(0,0,0,.13); backdrop-filter: blur(22px) saturate(1.25); }
@@ -1068,13 +1050,6 @@ button, input, textarea, select { font: inherit; }
 .glass-empty > .anticon { margin-bottom: 11px; color: #c0aff9; font-size: 27px; }
 .glass-empty h3 { margin: 0 0 4px; color: rgba(250,250,255,.86); font-size: 15px; }
 .glass-empty p { color: rgba(225,230,248,.46); font-size: 9px; }
-.glass-privacy-note { margin-top: 16px; padding: 15px 17px; display: flex; align-items: center; gap: 12px; border: 1px solid rgba(133,222,202,.12); border-radius: 14px; color: #86dfc9; background: rgba(28,87,79,.15); backdrop-filter: blur(20px); }
-.glass-privacy-note > .anticon { font-size: 20px; }
-.glass-privacy-note > div:nth-child(2) { display: flex; flex: 1; flex-direction: column; }
-.glass-privacy-note strong { color: #d9f8f1; font-size: 9px; }
-.glass-privacy-note div > span { margin-top: 2px; color: rgba(202,240,232,.46); font-size: 7px; }
-.glass-privacy-tags { display: flex; gap: 5px; }
-.glass-privacy-tags span { padding: 5px 7px; border: 1px solid rgba(147,222,206,.11); border-radius: 999px; color: rgba(204,240,232,.55) !important; background: rgba(255,255,255,.035); font-size: 6px !important; }
 .glass-footer { min-height: 64px; padding: 12px max(24px, calc((100vw - 1440px) / 2)); display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; color: rgba(224,230,247,.38); background: rgba(7,11,23,.7); border-top: 1px solid rgba(255,255,255,.075); font-size: 8px; backdrop-filter: blur(22px); }
 .glass-footer span:first-child { color: rgba(240,242,255,.68); }
 .glass-footer span:last-child { justify-self: end; }
@@ -1093,8 +1068,6 @@ button, input, textarea, select { font: inherit; }
 @media (max-width: 820px) {
   .glass-header { grid-template-columns: 1fr auto; }
   .glass-header-status { display: none; }
-  .glass-intro { align-items: flex-start; flex-direction: column; }
-  .privacy-seal { min-width: 0; }
   .glass-node-grid { grid-template-columns: 1fr; }
   .traffic-detail-grid, .node-bottom-grid { grid-template-columns: repeat(2, 1fr); }
 }
@@ -1103,9 +1076,8 @@ button, input, textarea, select { font: inherit; }
   .probe-bg { background-position: 66% center; }
   .glass-header, .glass-shell { width: calc(100% - 22px); }
   .glass-header { margin-top: 10px; padding: 10px; border-radius: 15px; }
-  .glass-brand small, .glass-header-actions .ant-btn span:not(.anticon), .glass-admin-link { display: none; }
+  .glass-header-actions .ant-btn span:not(.anticon), .glass-admin-link { display: none; }
   .glass-shell { padding-top: 34px; }
-  .glass-intro h1 { font-size: 34px; }
   .glass-summary-grid { grid-template-columns: repeat(2, 1fr); }
   .glass-summary-card { min-height: 72px; padding: 11px; }
   .summary-icon { width: 32px; height: 32px; flex-basis: 32px; }
@@ -1114,8 +1086,6 @@ button, input, textarea, select { font: inherit; }
   .glass-node-card { padding: 14px; }
   .node-plan-row { align-items: flex-start; flex-direction: column; gap: 6px; }
   .load-averages { display: none; }
-  .glass-privacy-note { align-items: flex-start; }
-  .glass-privacy-tags { display: none; }
   .glass-footer { grid-template-columns: 1fr auto; }
   .glass-footer > span:nth-child(2) { display: none; }
 }

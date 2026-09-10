@@ -9,10 +9,10 @@ import type { ColumnsType } from 'antd/es/table';
 import { useTranslation } from 'react-i18next';
 import { serversApi, Server, DockerContainer } from '../api/servers';
 import { formatBytes, severityColor } from '../utils/format';
-import { Terminal } from 'xterm';
+import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { usePolling } from '../hooks/usePolling';
-import 'xterm/css/xterm.css';
+import '@xterm/xterm/css/xterm.css';
 
 const { Title, Text } = Typography;
 
