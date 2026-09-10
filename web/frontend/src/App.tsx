@@ -30,7 +30,13 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   const [lang, setLang] = useState(i18n.language);
-  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('theme') === 'dark');
+  // No stored choice falls back to the OS preference; keep this in sync with
+  // the inline boot script in index.html.
+  const [darkMode, setDarkMode] = useState(() => {
+    const stored = localStorage.getItem('theme');
+    if (stored === 'dark' || stored === 'light') return stored === 'dark';
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  });
 
   useEffect(() => {
     i18n.on('languageChanged', setLang);

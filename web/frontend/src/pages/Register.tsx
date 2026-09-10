@@ -32,12 +32,10 @@ export default function Register() {
 
   return (
     <div className="auth-page auth-register-page">
-      <div className="auth-backdrop auth-backdrop-one" />
-      <div className="auth-backdrop auth-backdrop-two" />
       <section className="auth-showcase">
         <div className="auth-brand"><span><CloudServerOutlined /></span>{t('app.title')}</div>
         <div className="auth-showcase-copy">
-          <Text className="eyebrow">GET STARTED</Text>
+          <Text className="eyebrow">{t('auth.registerEyebrow')}</Text>
           <Title>{t('auth.registerHeroTitle')}</Title>
           <Text>{t('auth.registerHeroSubtitle')}</Text>
           <div className="auth-checklist">

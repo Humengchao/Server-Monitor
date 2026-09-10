@@ -3,6 +3,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { useTranslation } from 'react-i18next';
 import { MetricPoint } from '../api/servers';
 import { DarkModeContext } from '../contexts/DarkModeContext';
+import { formatDate, formatTime } from '../utils/format';
 
 interface Props {
   history: MetricPoint[];
@@ -32,11 +33,10 @@ function pickRateUnit(peak: number): { divisor: number; suffix: string } {
   return { divisor: 1, suffix: 'B/s' };
 }
 
-function formatAxisTime(iso: string, spansMultipleDays: boolean): string {
-  const date = new Date(iso);
-  const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+function formatAxisTime(iso: string, spansMultipleDays: boolean, lang: string): string {
+  const time = formatTime(iso, lang, { hour: '2-digit', minute: '2-digit' });
   if (!spansMultipleDays) return time;
-  return `${date.toLocaleDateString([], { month: '2-digit', day: '2-digit' })} ${time}`;
+  return `${formatDate(iso, lang, { month: '2-digit', day: '2-digit' })} ${time}`;
 }
 
 interface TooltipEntry {
@@ -51,13 +51,12 @@ interface ChartTooltipProps {
   payload?: TooltipEntry[];
   label?: string;
   unit: string;
-  dark: boolean;
 }
 
-function ChartTooltip({ active, payload, label, unit, dark }: ChartTooltipProps) {
+function ChartTooltip({ active, payload, label, unit }: ChartTooltipProps) {
   if (!active || !payload?.length) return null;
   return (
-    <div className={`chart-tooltip${dark ? ' dark' : ''}`}>
+    <div className="chart-tooltip">
       <span className="chart-tooltip-time">{label}</span>
       {payload.map((entry) => (
         <span key={entry.dataKey} className="chart-tooltip-row">
@@ -130,7 +129,7 @@ function MetricPanel({
             <Tooltip
               cursor={{ stroke: dark ? 'rgba(255,255,255,.22)' : 'rgba(24,32,51,.16)', strokeWidth: 1 }}
               wrapperStyle={{ position: 'absolute', pointerEvents: 'none', outline: 'none' }}
-              content={<ChartTooltip unit={unit} dark={dark} />}
+              content={<ChartTooltip unit={unit} />}
             />
             <Legend content={() => null} />
             {series.map((s) => (
@@ -155,7 +154,7 @@ function MetricPanel({
 }
 
 function MetricsChart({ history }: Props) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const dark = useContext(DarkModeContext);
 
   const { rows, netUnit, diskUnit, hasLatency } = useMemo(() => {
@@ -177,7 +176,7 @@ function MetricsChart({ history }: Props) {
       diskUnit: disk,
       hasLatency: sampled.some((p) => p.latency_ms > 0),
       rows: sampled.map((p) => ({
-        time: formatAxisTime(p.recorded_at, spansMultipleDays),
+        time: formatAxisTime(p.recorded_at, spansMultipleDays, i18n.language),
         cpu: Math.round(p.cpu_percent * 10) / 10,
         memory: p.memory_total ? Math.round((p.memory_used / p.memory_total) * 1000) / 10 : 0,
         rx: Math.round((p.network_rx_bytes / net.divisor) * 100) / 100,
@@ -189,7 +188,7 @@ function MetricsChart({ history }: Props) {
         latency: p.latency_ms,
       })),
     };
-  }, [history]);
+  }, [history, i18n.language]);
 
   if (rows.length === 0) {
     return <div className="chart-empty">{t('metrics.noData')}</div>;

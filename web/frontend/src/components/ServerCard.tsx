@@ -67,7 +67,7 @@ function ServerCard({
       className={`server-card${isOnline ? '' : ' is-offline'}${selectable ? ' is-selectable' : ''}${selected ? ' is-selected' : ''}`}
       onClick={activate}
       tabIndex={0}
-      role={selectable ? 'checkbox' : undefined}
+      role={selectable ? 'checkbox' : 'link'}
       aria-checked={selectable ? !!selected : undefined}
       onKeyDown={(event) => {
         // Do not open/toggle the card when Enter/Space is used on an action

@@ -31,6 +31,40 @@ export function formatUptime(seconds: number): string {
   return parts.join(' ');
 }
 
+/** Long uptime, e.g. "3d 4h" / "3 天 4 小时" — the public status page style. */
+export function formatUptimeLong(seconds: number, zh: boolean): string {
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  if (zh) return `${days} 天 ${hours} 小时`;
+  return `${days}d ${hours}h`;
+}
+
+/** BCP 47 tag for the UI language, so dates follow the interface, not the OS. */
+function localeTag(lang: string): string {
+  return lang.startsWith('zh') ? 'zh-CN' : 'en-US';
+}
+
+/** Locale-aware date + time, e.g. a login stamp or an alert's start. */
+export function formatDateTime(value: string | number | Date, lang: string): string {
+  return new Date(value).toLocaleString(localeTag(lang));
+}
+
+export function formatDate(
+  value: string | number | Date,
+  lang: string,
+  options?: Intl.DateTimeFormatOptions,
+): string {
+  return new Date(value).toLocaleDateString(localeTag(lang), options);
+}
+
+export function formatTime(
+  value: string | number | Date,
+  lang: string,
+  options?: Intl.DateTimeFormatOptions,
+): string {
+  return new Date(value).toLocaleTimeString(localeTag(lang), options);
+}
+
 /**
  * Shared severity ramp so a number reads the same everywhere: calm below 75%,
  * warm past 75%, hot past 90%.

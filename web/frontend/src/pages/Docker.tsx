@@ -305,12 +305,15 @@ function ExecDrawer({ serverId, containerId, containerName, open, onClose }: {
 
 export function ServerDockerPanel({ serverId, version }: { serverId: string; version?: string }) {
   const { t } = useTranslation();
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const [containers, setContainers] = useState<DockerContainer[]>([]);
   const [loading, setLoading] = useState(true);
   const loadingRef = useRef(false);
   const [logsTarget, setLogsTarget] = useState<{ containerId: string; containerName: string } | null>(null);
   const [execTarget, setExecTarget] = useState<{ containerId: string; containerName: string } | null>(null);
+  // `${containerId}:${action}` of the action currently in flight, so the row's
+  // own button spins and repeat clicks are swallowed.
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
 
   const loadContainers = useCallback(async (showLoading = true) => {
     if (loadingRef.current) return;
@@ -338,14 +341,33 @@ export function ServerDockerPanel({ serverId, version }: { serverId: string; ver
   // detail panel is mounted, so the hidden tabs do not create SSH traffic.
   usePolling(() => loadContainers(false), 15000, { leading: false });
 
-  const handleAction = async (containerId: string, action: 'start' | 'stop' | 'restart') => {
+  const runAction = async (containerId: string, action: 'start' | 'stop' | 'restart') => {
+    setActionBusy(`${containerId}:${action}`);
     try {
       await serversApi.containerAction(serverId, containerId, action);
       message.success(t('docker.actionSuccess', { action: t(`docker.${action}`) }));
       await loadContainers();
     } catch {
       message.error(t('docker.actionFailed', { action: t(`docker.${action}`) }));
+    } finally {
+      setActionBusy(null);
     }
+  };
+
+  // start is the only verb that cannot interrupt something already serving
+  // traffic, so it is the only one that does not ask first.
+  const handleAction = (containerId: string, action: 'start' | 'stop' | 'restart') => {
+    if (action === 'start') {
+      void runAction(containerId, action);
+      return;
+    }
+    modal.confirm({
+      title: t('docker.confirmTitle', { action: t(`docker.${action}`) }),
+      content: t('docker.confirmBody'),
+      okText: t(`docker.${action}`),
+      okType: 'danger',
+      onOk: () => runAction(containerId, action),
+    });
   };
 
   const columns: ColumnsType<DockerContainer> = [
@@ -366,7 +388,7 @@ export function ServerDockerPanel({ serverId, version }: { serverId: string; ver
       dataIndex: 'state',
       key: 'state',
       width: 110,
-      render: (value: string) => <Tag color={stateColor[value] || 'default'}>{value}</Tag>,
+      render: (value: string) => <Tag color={stateColor[value] || 'default'}>{t(`docker.stateValue.${value}`, { defaultValue: value })}</Tag>,
     },
     ...containerResourceColumns(t),
     {
@@ -389,11 +411,11 @@ export function ServerDockerPanel({ serverId, version }: { serverId: string; ver
       render: (_, record) => (
         <Space size="small" wrap>
           {record.state !== 'running' ? (
-            <Button size="small" type="primary" icon={<CaretRightOutlined />} onClick={() => handleAction(record.id, 'start')}>{t('docker.start')}</Button>
+            <Button size="small" type="primary" icon={<CaretRightOutlined />} loading={actionBusy === `${record.id}:start`} onClick={() => handleAction(record.id, 'start')}>{t('docker.start')}</Button>
           ) : (
             <>
-              <Button size="small" icon={<PauseOutlined />} onClick={() => handleAction(record.id, 'stop')}>{t('docker.stop')}</Button>
-              <Button size="small" icon={<SyncOutlined />} onClick={() => handleAction(record.id, 'restart')}>{t('docker.restart')}</Button>
+              <Button size="small" icon={<PauseOutlined />} loading={actionBusy === `${record.id}:stop`} onClick={() => handleAction(record.id, 'stop')}>{t('docker.stop')}</Button>
+              <Button size="small" icon={<SyncOutlined />} loading={actionBusy === `${record.id}:restart`} onClick={() => handleAction(record.id, 'restart')}>{t('docker.restart')}</Button>
             </>
           )}
           <Button size="small" icon={<FileTextOutlined />} onClick={() => setLogsTarget({ containerId: record.id, containerName: record.name })}>{t('docker.logs')}</Button>
@@ -414,6 +436,7 @@ export function ServerDockerPanel({ serverId, version }: { serverId: string; ver
       extra={<Button icon={<ReloadOutlined />} onClick={() => { void loadContainers(); }}>{t('common.refresh')}</Button>}
     >
       <Table
+        className="server-table"
         rowKey="id"
         columns={columns}
         dataSource={containers}
@@ -421,7 +444,7 @@ export function ServerDockerPanel({ serverId, version }: { serverId: string; ver
         pagination={false}
         size="small"
         scroll={{ x: 1500 }}
-        locale={{ emptyText: <Empty description={t('docker.noContainers')} /> }}
+        locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('docker.noContainers')} /> }}
       />
 
       {logsTarget && (
@@ -446,7 +469,7 @@ export function ServerDockerPanel({ serverId, version }: { serverId: string; ver
 
 export default function Docker() {
   const { t } = useTranslation();
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const [servers, setServers] = useState<ServerDocker[]>([]);
   // Servers whose stored flag says "no Docker". Kept rather than filtered out:
   // the flag can be lost to a transient probe failure, and a server that
@@ -461,6 +484,9 @@ export default function Docker() {
   const navigate = useNavigate();
   const [logsTarget, setLogsTarget] = useState<{ serverId: string; containerId: string; containerName: string } | null>(null);
   const [execTarget, setExecTarget] = useState<{ serverId: string; containerId: string; containerName: string } | null>(null);
+  // `${containerId}:${action}` of the action currently in flight, so the row's
+  // own button spins and repeat clicks are swallowed.
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
 
   const expandServerId = searchParams.get('server');
 
@@ -532,14 +558,33 @@ export default function Docker() {
     setInitialLoading(false);
   }, [expandServerId, loadContainers, message, t]);
 
-  const handleAction = async (serverId: string, containerId: string, action: 'start' | 'stop' | 'restart') => {
+  const runAction = async (serverId: string, containerId: string, action: 'start' | 'stop' | 'restart') => {
+    setActionBusy(`${containerId}:${action}`);
     try {
       await serversApi.containerAction(serverId, containerId, action);
       message.success(t('docker.actionSuccess', { action: t(`docker.${action}`) }));
       loadContainers(serverId);
     } catch {
       message.error(t('docker.actionFailed', { action: t(`docker.${action}`) }));
+    } finally {
+      setActionBusy(null);
     }
+  };
+
+  // start is the only verb that cannot interrupt something already serving
+  // traffic, so it is the only one that does not ask first.
+  const handleAction = (serverId: string, containerId: string, action: 'start' | 'stop' | 'restart') => {
+    if (action === 'start') {
+      void runAction(serverId, containerId, action);
+      return;
+    }
+    modal.confirm({
+      title: t('docker.confirmTitle', { action: t(`docker.${action}`) }),
+      content: t('docker.confirmBody'),
+      okText: t(`docker.${action}`),
+      okType: 'danger',
+      onOk: () => runAction(serverId, containerId, action),
+    });
   };
 
   useEffect(() => {
@@ -573,7 +618,7 @@ export default function Docker() {
       dataIndex: 'state',
       key: 'state',
       width: 110,
-      render: (v: string) => <Tag color={stateColor[v] || 'default'}>{v}</Tag>,
+      render: (v: string) => <Tag color={stateColor[v] || 'default'}>{t(`docker.stateValue.${v}`, { defaultValue: v })}</Tag>,
     },
     ...containerResourceColumns(t),
     {
@@ -596,11 +641,11 @@ export default function Docker() {
       render: (_, record) => (
         <Space size="small" wrap>
           {record.state !== 'running' ? (
-            <Button size="small" type="primary" icon={<CaretRightOutlined />} onClick={() => handleAction(serverId, record.id, 'start')}>{t('docker.start')}</Button>
+            <Button size="small" type="primary" icon={<CaretRightOutlined />} loading={actionBusy === `${record.id}:start`} onClick={() => handleAction(serverId, record.id, 'start')}>{t('docker.start')}</Button>
           ) : (
             <>
-              <Button size="small" icon={<PauseOutlined />} onClick={() => handleAction(serverId, record.id, 'stop')}>{t('docker.stop')}</Button>
-              <Button size="small" icon={<SyncOutlined />} onClick={() => handleAction(serverId, record.id, 'restart')}>{t('docker.restart')}</Button>
+              <Button size="small" icon={<PauseOutlined />} loading={actionBusy === `${record.id}:stop`} onClick={() => handleAction(serverId, record.id, 'stop')}>{t('docker.stop')}</Button>
+              <Button size="small" icon={<SyncOutlined />} loading={actionBusy === `${record.id}:restart`} onClick={() => handleAction(serverId, record.id, 'restart')}>{t('docker.restart')}</Button>
             </>
           )}
           <Button size="small" icon={<FileTextOutlined />} onClick={() => setLogsTarget({ serverId, containerId: record.id, containerName: record.name })}>{t('docker.logs')}</Button>
@@ -679,6 +724,7 @@ export default function Docker() {
     ),
     children: (
       <Table
+        className="server-table"
         rowKey="id"
         columns={getColumns(sd.server.id)}
         dataSource={sd.containers}
@@ -686,7 +732,7 @@ export default function Docker() {
         pagination={false}
         size="small"
         scroll={{ x: 1500 }}
-        locale={{ emptyText: <Empty description={t('docker.noContainers')} /> }}
+        locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('docker.noContainers')} /> }}
       />
     ),
   }));

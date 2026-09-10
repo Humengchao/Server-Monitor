@@ -19,6 +19,7 @@ import {
   ReloadOutlined,
   RiseOutlined,
   SearchOutlined,
+  SunOutlined,
   SwapOutlined,
   TranslationOutlined,
   WarningFilled,
@@ -29,6 +30,7 @@ import { useTranslation } from 'react-i18next';
 import { convertCurrency, currencySymbol, useExchangeRates } from '../hooks/useExchangeRates';
 import { availabilityColor } from '../api/uptime';
 import { usePolling } from '../hooks/usePolling';
+import { formatBytes as formatBytesShared, formatDate, formatTime, formatUptimeLong } from '../utils/format';
 
 type NodeStatus = 'online' | 'degraded' | 'offline';
 type OverallStatus = 'operational' | 'degraded' | 'outage';
@@ -95,22 +97,11 @@ const apiBase = (import.meta.env.VITE_API_URL || `${window.location.origin}/api`
 const apiURL = `${apiBase}/public/status`;
 const STATUS_REQUEST_TIMEOUT_MS = 15000;
 
-const formatBytes = (value: number, digits = 1) => {
-  if (!Number.isFinite(value) || value <= 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
-  const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
-  const amount = value / 1024 ** index;
-  return `${amount.toFixed(index > 2 ? 1 : digits)} ${units[index]}`;
-};
+// The shared helper defaults to 2 fraction digits below GB; this page has
+// always shown 1, so pin it.
+const formatBytes = (value: number, digits = 1) => formatBytesShared(value, digits);
 
 const formatRate = (value: number) => `${formatBytes(value)}/s`;
-
-const formatUptime = (seconds: number, zh: boolean) => {
-  const days = Math.floor(seconds / 86400);
-  const hours = Math.floor((seconds % 86400) / 3600);
-  if (zh) return `${days} 天 ${hours} 小时`;
-  return `${days}d ${hours}h`;
-};
 
 export default function PublicStatus() {
   const { t, i18n } = useTranslation();
@@ -121,7 +112,15 @@ export default function PublicStatus() {
   const [filter, setFilter] = useState<FilterKey>('all');
   const [query, setQuery] = useState('');
   const [view, setView] = useState<'card' | 'list'>('card');
-  const [light, setLight] = useState(false);
+  // Same storage convention as the console theme (App.tsx): 'dark' | 'light'.
+  const [light, setLight] = useState(() => localStorage.getItem('theme') === 'light');
+  const toggleLight = () => {
+    setLight((value) => {
+      const next = !value;
+      localStorage.setItem('theme', next ? 'light' : 'dark');
+      return next;
+    });
+  };
   const ratesPerEUR = useExchangeRates();
   const requestRef = useRef<AbortController | null>(null);
   const requestIdRef = useRef(0);
@@ -215,7 +214,7 @@ export default function PublicStatus() {
   const overall = data?.overall || (error ? 'outage' : loading ? 'unknown' : 'operational');
   const generatedDate = data ? new Date(data.generated_at) : null;
   const updatedAt = generatedDate && Number.isFinite(generatedDate.getTime())
-    ? generatedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    ? formatTime(generatedDate, i18n.language, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     : '—';
   const hasRemainingValue = (data?.nodes || []).some((node) => node.remaining_value > 0);
   const remainingValueLabel = useMemo(() => {
@@ -227,7 +226,7 @@ export default function PublicStatus() {
   }, [data, displayCurrency, ratesPerEUR]);
 
   return (
-    <div className={`probe-page probe-glass-page ${light ? 'light' : ''}`}>
+    <div className={`probe-glass-page ${light ? 'light' : ''}`}>
       <div className="probe-bg" />
       <div className="probe-bg-shade" />
 
@@ -240,7 +239,7 @@ export default function PublicStatus() {
         </div>
         <div className="glass-header-actions">
           <Button type="text" icon={<TranslationOutlined />} onClick={toggleLanguage}>{zh ? 'EN' : '中文'}</Button>
-          <Button type="text" icon={<MoonOutlined />} aria-label={t('probe.theme')} onClick={() => setLight((value) => !value)} />
+          <Button type="text" icon={light ? <MoonOutlined /> : <SunOutlined />} aria-label={t('probe.theme')} onClick={toggleLight} />
           <Link to="/login" className="glass-admin-link"><LockOutlined /> {t('probe.console')}</Link>
         </div>
       </header>
@@ -340,7 +339,7 @@ function ProbeNodeCard({
   displayCurrency: string;
   ratesPerEUR: Record<string, number>;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const cycleLabel = t(`probe.cycle.${node.billing_cycle || 'year'}`);
   const symbol = currencySymbol(node.billing_currency);
   const displaySymbol = currencySymbol(displayCurrency);
@@ -351,7 +350,7 @@ function ProbeNodeCard({
     ratesPerEUR,
   );
   const totalTraffic = node.network_rx_total_bytes + node.network_tx_total_bytes;
-  const expiryText = node.expires_at ? new Date(node.expires_at).toLocaleDateString() : t('probe.notConfigured');
+  const expiryText = node.expires_at ? formatDate(node.expires_at, i18n.language) : t('probe.notConfigured');
 
   return (
     <article className={`glass-node-card ${node.status}`}>
@@ -362,7 +361,7 @@ function ProbeNodeCard({
       </header>
 
       <div className="node-plan-row">
-        <span><DashboardOutlined /> {t('probe.uptime')} <strong>{formatUptime(node.uptime_seconds, zh)}</strong></span>
+        <span><DashboardOutlined /> {t('probe.uptime')} <strong>{formatUptimeLong(node.uptime_seconds, zh)}</strong></span>
         {node.billing_price > 0 && <span><DollarOutlined /> <strong>{symbol}{node.billing_price.toFixed(2)}</strong> / {cycleLabel}</span>}
       </div>
 

@@ -15,7 +15,7 @@ export default function TagSelect({ value = [], onChange }: Props) {
   const [tags, setTags] = useState<Tag[]>([]);
   const [loading, setLoading] = useState(false);
   const [newName, setNewName] = useState('');
-  const [newColor, setNewColor] = useState('#1890ff');
+  const [newColor, setNewColor] = useState('#4f7cff');
   const [showNew, setShowNew] = useState(false);
   const [creating, setCreating] = useState(false);
 
@@ -44,7 +44,7 @@ export default function TagSelect({ value = [], onChange }: Props) {
       const res = await tagsApi.create(newName.trim(), newColor);
       setTags((prev) => [...prev, res.data]);
       setNewName('');
-      setNewColor('#1890ff');
+      setNewColor('#4f7cff');
       setShowNew(false);
     } catch {
       message.error(t('settings.tagCreateFailed'));
@@ -65,7 +65,7 @@ export default function TagSelect({ value = [], onChange }: Props) {
         popupRender={(menu) => (
           <>
             {menu}
-            <div style={{ padding: 8, borderTop: '1px solid #f0f0f0' }}>
+            <div style={{ padding: 8, borderTop: '1px solid var(--border)' }}>
               {showNew ? (
                 <Space>
                   <Input
@@ -73,6 +73,7 @@ export default function TagSelect({ value = [], onChange }: Props) {
                     value={newName}
                     onChange={(e) => setNewName(e.target.value)}
                     placeholder={t('settings.tagNamePlaceholder')}
+                    maxLength={32}
                     onPressEnter={handleCreate}
                   />
                   <input

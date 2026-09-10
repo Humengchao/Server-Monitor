@@ -76,7 +76,7 @@ export default function ServerTable({
             {server.server_type === 'windows' ? <WindowsOutlined /> : <CloudServerOutlined />}
           </span>
           <div>
-            <strong>
+            <strong title={server.name}>
               {server.name}
               {!!firing?.get(server.id)?.length && (
                 <Tooltip title={firing.get(server.id)!.map((e) => e.rule_name).filter(Boolean).join('\n') || undefined}>
@@ -86,7 +86,7 @@ export default function ServerTable({
                 </Tooltip>
               )}
             </strong>
-            <Text type="secondary">{server.host}</Text>
+            <Text type="secondary" title={server.host}>{server.host}</Text>
           </div>
         </div>
       ),

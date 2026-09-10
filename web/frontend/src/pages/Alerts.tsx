@@ -12,6 +12,7 @@ import { useNavigate } from 'react-router-dom';
 import { alertsApi, AlertEvent, AlertMetric, AlertRule, METRIC_UNITS, PERCENT_METRICS } from '../api/alerts';
 import { serversApi, Server } from '../api/servers';
 import { usePolling } from '../hooks/usePolling';
+import { formatDateTime } from '../utils/format';
 
 const { Title, Text } = Typography;
 
@@ -84,7 +85,7 @@ function formatElapsed(fromISO: string, toISO: string | null, t: Translate): str
 }
 
 export default function Alerts() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { message, modal } = App.useApp();
   const navigate = useNavigate();
   const [rules, setRules] = useState<AlertRule[]>([]);
@@ -397,6 +398,7 @@ export default function Alerts() {
       ) : view === 'rules' ? (
         <Card className="panel-card" styles={{ body: { padding: 0 } }}>
           <Table
+            className="server-table"
             dataSource={sortedRules}
             columns={ruleColumns}
             rowKey="id"
@@ -432,7 +434,7 @@ export default function Alerts() {
               </span>
               <span className="alert-entry-meta">
                 {formatValue(event) && <strong>{formatValue(event)}</strong>}
-                <small>{new Date(event.started_at).toLocaleString()}</small>
+                <small>{formatDateTime(event.started_at, i18n.language)}</small>
                 <small>
                   {event.resolved_at
                     ? t('alerts.lastedFor', { duration: formatElapsed(event.started_at, event.resolved_at, t) })

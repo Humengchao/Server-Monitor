@@ -6,7 +6,7 @@ import {
 } from 'antd';
 import {
   ArrowLeftOutlined, EditOutlined, DeleteOutlined, DockerOutlined, KeyOutlined, SaveOutlined,
-  WindowsOutlined, AppleOutlined, CopyOutlined, DownloadOutlined, CloudServerOutlined,
+  WindowsOutlined, DesktopOutlined, CopyOutlined, DownloadOutlined, CloudServerOutlined,
   ClockCircleOutlined, ThunderboltOutlined, ArrowDownOutlined, ArrowUpOutlined, DashboardOutlined,
   DatabaseOutlined, HddOutlined, LineChartOutlined,
 } from '@ant-design/icons';
@@ -22,7 +22,7 @@ import ServiceTable from '../components/ServiceTable';
 import PortTable from '../components/PortTable';
 import TagSelect from '../components/TagSelect';
 import CredentialSelect from '../components/CredentialSelect';
-import { formatBytes, formatUptime, getExpirationInfo, percentOf, severityColor } from '../utils/format';
+import { formatBytes, formatDate, formatTime, formatUptime, getExpirationInfo, percentOf, severityColor } from '../utils/format';
 import { downloadCSV, safeFilenamePart } from '../utils/csv';
 
 // xterm and the Docker panel are only reachable through their own tabs, so
@@ -481,8 +481,8 @@ export default function ServerDetail() {
         <StatTile
           icon={<LineChartOutlined />}
           label={t('detail.sampledAt')}
-          value={metrics?.recorded_at ? new Date(metrics.recorded_at).toLocaleTimeString() : '—'}
-          hint={t('detail.addedOn', { date: new Date(server.created_at).toLocaleDateString() })}
+          value={metrics?.recorded_at ? formatTime(metrics.recorded_at, i18n.language) : '—'}
+          hint={t('detail.addedOn', { date: formatDate(server.created_at, i18n.language) })}
           accent="#6f8cf5"
         />
       </div>
@@ -619,7 +619,7 @@ export default function ServerDetail() {
       >
         <Form form={form} layout="vertical" onFinish={handleSubmit} disabled={savingServer}>
           <Form.Item name="name" label={t('server.serverName')} rules={[{ required: true }]}>
-            <Input placeholder={t('server.serverNamePlaceholder')} />
+            <Input placeholder={t('server.serverNamePlaceholder')} maxLength={128} />
           </Form.Item>
           <Form.Item name="host" label={t('server.host')} rules={[{ required: true }]}>
             <Input placeholder={t('server.hostPlaceholder')} />
@@ -629,7 +629,7 @@ export default function ServerDetail() {
           </Form.Item>
           <Form.Item name="server_type" label={t('server.type')} initialValue="linux">
             <Select onChange={() => setSelectedCredential(undefined)}>
-              <Select.Option value="linux"><AppleOutlined /> Linux</Select.Option>
+              <Select.Option value="linux"><DesktopOutlined /> Linux</Select.Option>
               <Select.Option value="windows"><WindowsOutlined /> Windows</Select.Option>
             </Select>
           </Form.Item>

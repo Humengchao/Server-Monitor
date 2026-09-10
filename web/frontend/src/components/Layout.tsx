@@ -104,7 +104,7 @@ export default function AppLayout({ darkMode, onToggleTheme }: Props) {
           <div className="brand-mark"><CloudServerOutlined /></div>
           <div className="brand-copy">
             <span>{t('app.title')}</span>
-            <small>CONTROL CENTER</small>
+            <small>{t('nav.controlCenter')}</small>
           </div>
         </div>
         <Menu
@@ -132,6 +132,7 @@ export default function AppLayout({ darkMode, onToggleTheme }: Props) {
                 <Button
                   className="header-icon-button"
                   type="text"
+                  aria-label={t('nav.alerts')}
                   icon={<BellOutlined />}
                   onClick={() => navigate('/alerts')}
                 />

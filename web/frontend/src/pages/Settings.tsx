@@ -57,7 +57,7 @@ export default function Settings() {
     if (value && typeof (value as { toHexString?: unknown }).toHexString === 'function') {
       return (value as { toHexString: () => string }).toHexString();
     }
-    return '#1890ff';
+    return '#4f7cff';
   };
 
   const handleCreate = async (values: { name: string; color: unknown }) => {
@@ -241,9 +241,9 @@ export default function Settings() {
       >
         <Form form={form} layout="vertical" onFinish={handleCreate}>
           <Form.Item name="name" label={t('settings.tagName')} rules={[{ required: true }]}>
-            <Input placeholder={t('settings.tagNamePlaceholder')} />
+            <Input placeholder={t('settings.tagNamePlaceholder')} maxLength={32} />
           </Form.Item>
-          <Form.Item name="color" label={t('settings.color')} initialValue="#1890ff">
+          <Form.Item name="color" label={t('settings.color')} initialValue="#4f7cff">
             <ColorPicker format="hex" />
           </Form.Item>
         </Form>

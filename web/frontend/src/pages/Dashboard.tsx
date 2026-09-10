@@ -6,7 +6,7 @@ import {
 import { DatePicker } from 'antd';
 import dayjs, { Dayjs } from 'dayjs';
 import {
-  PlusOutlined, ReloadOutlined, FilterOutlined, SafetyOutlined, WindowsOutlined, AppleOutlined,
+  PlusOutlined, ReloadOutlined, FilterOutlined, SafetyOutlined, WindowsOutlined, DesktopOutlined,
   CloudServerOutlined, CheckCircleOutlined, DisconnectOutlined, SearchOutlined, AppstoreOutlined,
   BarsOutlined, DashboardOutlined, DatabaseOutlined, WalletOutlined, SortAscendingOutlined,
   CheckSquareOutlined, RiseOutlined,
@@ -22,7 +22,7 @@ import { convertCurrency, currencySymbol, useExchangeRates } from '../hooks/useE
 import { useFleetUptime, windowPercent } from '../hooks/useFleetUptime';
 import { useFiringAlerts } from '../hooks/useFiringAlerts';
 import { availabilityColor } from '../api/uptime';
-import { monthlyCost, percentOf } from '../utils/format';
+import { formatDateTime, monthlyCost, percentOf } from '../utils/format';
 import { usePolling } from '../hooks/usePolling';
 
 const { Title, Text } = Typography;
@@ -130,11 +130,14 @@ export default function Dashboard() {
     }
 
     const { ip, logged_at } = parsed;
-    const loginTime = new Date(logged_at).toLocaleString();
+    const loginTime = formatDateTime(logged_at, i18n.language);
 
-    // Helper to show/update the notification
+    // Helper to show/update the notification. Both calls share one key, so
+    // the geolocation-enriched copy replaces the instant one instead of
+    // stacking a second toast on top of it.
     const showNotification = (currentDesc: string, lastDesc: string) => {
       notification.info({
+        key: 'login-info',
         title: t('notification.loginSuccess'),
         description: (
           <div style={{ whiteSpace: 'pre-line' }}>
@@ -150,14 +153,14 @@ export default function Dashboard() {
             <div>{lastDesc}</div>
           </div>
         ),
-        icon: <SafetyOutlined style={{ color: '#1890ff' }} />,
+        icon: <SafetyOutlined style={{ color: '#4f7cff' }} />,
         placement: 'bottomRight',
         duration: 10,
       });
     };
 
     // Show basic notification immediately, then enrich with geolocation
-    showNotification('', `IP: ${ip}  Time: ${loginTime}`);
+    showNotification('', `${t('notification.ipLabel')} ${ip}  ${t('notification.timeLabel')} ${loginTime}`);
 
     const ac = new AbortController();
     const ipTimer = setTimeout(() => ac.abort(), 4000);
@@ -170,14 +173,16 @@ export default function Dashboard() {
           lookupIP(currentIP),
           lookupIP(ip),
         ]);
-        const currentDesc = currentLoc ? `IP: ${currentIP}\nLocation: ${currentLoc}` : `IP: ${currentIP}`;
+        const currentDesc = currentLoc
+          ? `${t('notification.ipLabel')} ${currentIP}\n${t('notification.locationLabel')} ${currentLoc}`
+          : `${t('notification.ipLabel')} ${currentIP}`;
         const lastDesc = lastLoc
-          ? `IP: ${ip}\nLocation: ${lastLoc}\nTime: ${loginTime}`
-          : `IP: ${ip}\nTime: ${loginTime}`;
+          ? `${t('notification.ipLabel')} ${ip}\n${t('notification.locationLabel')} ${lastLoc}\n${t('notification.timeLabel')} ${loginTime}`
+          : `${t('notification.ipLabel')} ${ip}\n${t('notification.timeLabel')} ${loginTime}`;
         showNotification(currentDesc, lastDesc);
       })
       .catch(() => { clearTimeout(ipTimer); /* silently degrade */ });
-  }, [notification, t]);
+  }, [notification, t, i18n.language]);
 
   const loadServers = useCallback(async (showLoading = true) => {
     if (loadInFlightRef.current) return;
@@ -655,7 +660,7 @@ export default function Dashboard() {
       >
         <Form form={form} layout="vertical" onFinish={handleSubmit} disabled={savingServer}>
           <Form.Item name="name" label={t('server.serverName')} rules={[{ required: true }]}>
-            <Input placeholder={t('server.serverNamePlaceholder')} />
+            <Input placeholder={t('server.serverNamePlaceholder')} maxLength={128} />
           </Form.Item>
           <Form.Item name="host" label={t('server.host')} rules={[{ required: true }]}>
             <Input placeholder={t('server.hostPlaceholder')} />
@@ -665,7 +670,7 @@ export default function Dashboard() {
           </Form.Item>
           <Form.Item name="server_type" label={t('server.type')} initialValue="linux">
             <Select onChange={() => setSelectedCredential(undefined)}>
-              <Select.Option value="linux"><AppleOutlined /> Linux</Select.Option>
+              <Select.Option value="linux"><DesktopOutlined /> Linux</Select.Option>
               <Select.Option value="windows"><WindowsOutlined /> Windows</Select.Option>
             </Select>
           </Form.Item>

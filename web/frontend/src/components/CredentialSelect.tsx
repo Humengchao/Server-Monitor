@@ -78,7 +78,7 @@ export default function CredentialSelect({ value, onChange, serverType }: Props)
       popupRender={(menu) => (
         <>
           {menu}
-          <div style={{ padding: 8, borderTop: '1px solid #f0f0f0' }}>
+          <div style={{ padding: 8, borderTop: '1px solid var(--border)' }}>
             {showNew ? (
               <Space orientation="vertical" style={{ width: '100%' }} size={4}>
                 <Input
@@ -126,7 +126,7 @@ export default function CredentialSelect({ value, onChange, serverType }: Props)
           <Space>
             <KeyOutlined />
             <span>{c.name}</span>
-            <span style={{ color: '#999', fontSize: 12 }}>({c.ssh_username})</span>
+            <span style={{ color: 'var(--muted)', fontSize: 12 }}>({c.ssh_username})</span>
             <Tag style={{ fontSize: 10, lineHeight: '16px' }}>{c.credential_type === 'windows' ? 'Win' : 'Linux'}</Tag>
           </Space>
         </Select.Option>

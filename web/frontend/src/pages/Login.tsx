@@ -40,12 +40,10 @@ export default function Login() {
 
   return (
     <div className="auth-page">
-      <div className="auth-backdrop auth-backdrop-one" />
-      <div className="auth-backdrop auth-backdrop-two" />
       <section className="auth-showcase">
         <div className="auth-brand"><span><CloudServerOutlined /></span>{t('app.title')}</div>
         <div className="auth-showcase-copy">
-          <Text className="eyebrow">INFRASTRUCTURE, SIMPLIFIED</Text>
+          <Text className="eyebrow">{t('auth.heroEyebrow')}</Text>
           <Title>{t('auth.heroTitle')}</Title>
           <Text>{t('auth.heroSubtitle')}</Text>
           <div className="auth-features">

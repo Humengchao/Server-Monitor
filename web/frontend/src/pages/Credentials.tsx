@@ -2,9 +2,10 @@ import React, { useEffect, useState, useCallback } from 'react';
 import {
   Table, Button, Modal, Form, Input, Select, Space, Typography, Popconfirm, App, Tag, Card,
 } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, KeyOutlined, WindowsOutlined, AppleOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, KeyOutlined, WindowsOutlined, DesktopOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { credentialsApi, Credential } from '../api/credentials';
+import { formatDateTime } from '../utils/format';
 
 const { Title, Text } = Typography;
 
@@ -22,7 +23,7 @@ function apiError(err: unknown, fallback: string): string {
 }
 
 export default function Credentials() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { message } = App.useApp();
   const [creds, setCreds] = useState<Credential[]>([]);
   const [loading, setLoading] = useState(true);
@@ -110,7 +111,7 @@ export default function Credentials() {
       dataIndex: 'credential_type',
       key: 'credential_type',
       width: 90,
-      render: (v: string) => v === 'windows' ? <Tag icon={<WindowsOutlined />}>Windows</Tag> : <Tag icon={<AppleOutlined />}>Linux</Tag>,
+      render: (v: string) => v === 'windows' ? <Tag icon={<WindowsOutlined />}>Windows</Tag> : <Tag icon={<DesktopOutlined />}>Linux</Tag>,
     },
     {
       title: t('credential.sshUsername'),
@@ -132,7 +133,7 @@ export default function Credentials() {
       title: t('common.created'),
       dataIndex: 'created_at',
       key: 'created_at',
-      render: (v: string) => new Date(v).toLocaleString(),
+      render: (v: string) => formatDateTime(v, i18n.language),
     },
     {
       title: t('common.actions'),
@@ -184,6 +185,7 @@ export default function Credentials() {
           rowKey="id"
           loading={loading}
           pagination={false}
+          scroll={{ x: 760 }}
         />
       </Card>
 
@@ -210,7 +212,7 @@ export default function Credentials() {
           </Form.Item>
           <Form.Item name="credential_type" label={t('common.type')} initialValue="linux">
             <Select>
-              <Select.Option value="linux"><AppleOutlined /> Linux</Select.Option>
+              <Select.Option value="linux"><DesktopOutlined /> Linux</Select.Option>
               <Select.Option value="windows"><WindowsOutlined /> Windows</Select.Option>
             </Select>
           </Form.Item>

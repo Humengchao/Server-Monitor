@@ -6,6 +6,7 @@ import {
   availabilityColor, uptimeApi, Outage, ServerUptimeDetail, UptimeWindow,
 } from '../api/uptime';
 import { usePolling } from '../hooks/usePolling';
+import { formatDateTime } from '../utils/format';
 
 const { Text } = Typography;
 
@@ -23,12 +24,12 @@ function formatDuration(seconds: number, t: (key: string, opts?: Record<string, 
   return t('uptime.durationDays', { count: Math.round((seconds / 86400) * 10) / 10 });
 }
 
-function OutageRow({ outage, t }: { outage: Outage; t: (k: string, o?: Record<string, unknown>) => string }) {
+function OutageRow({ outage, t, lang }: { outage: Outage; t: (k: string, o?: Record<string, unknown>) => string; lang: string }) {
   return (
     <li className={outage.ongoing ? 'ongoing' : undefined}>
       <span className="outage-dot" />
       <span className="outage-when">
-        {new Date(outage.started_at).toLocaleString()}
+        {formatDateTime(outage.started_at, lang)}
       </span>
       <span className="outage-length">
         {outage.ongoing
@@ -44,7 +45,7 @@ function OutageRow({ outage, t }: { outage: Outage; t: (k: string, o?: Record<st
  * daily strip, and the outage episodes behind them.
  */
 export default function AvailabilityPanel({ serverId }: Props) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [detail, setDetail] = useState<ServerUptimeDetail | null>(null);
   const [windows, setWindows] = useState<UptimeWindow[] | undefined>(undefined);
   const [loading, setLoading] = useState(true);
@@ -138,6 +139,8 @@ export default function AvailabilityPanel({ serverId }: Props) {
           {detail?.days.map((day) => (
             <Tooltip
               key={day.day}
+              // hover alone leaves keyboard users out; focus opens the same tip.
+              trigger={['hover', 'focus']}
               title={day.no_data
                 ? `${day.day} · ${t('uptime.noData')}`
                 : `${day.day} · ${day.percent.toFixed(2)}% (${day.observed_buckets}/${day.expected_buckets})`}
@@ -149,6 +152,7 @@ export default function AvailabilityPanel({ serverId }: Props) {
                 needs to be seen.
               */}
               <i
+                tabIndex={0}
                 className={day.no_data ? 'no-data' : undefined}
                 style={day.no_data ? undefined : { background: availabilityColor(day.percent) }}
               />
@@ -172,7 +176,7 @@ export default function AvailabilityPanel({ serverId }: Props) {
         {detail?.outages.length ? (
           <ul className="outage-list">
             {detail.outages.map((outage) => (
-              <OutageRow key={`${outage.started_at}-${outage.seconds}`} outage={outage} t={t} />
+              <OutageRow key={`${outage.started_at}-${outage.seconds}`} outage={outage} t={t} lang={i18n.language} />
             ))}
           </ul>
         ) : (

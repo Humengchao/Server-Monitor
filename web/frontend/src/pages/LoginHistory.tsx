@@ -4,11 +4,12 @@ import type { ColumnsType } from 'antd/es/table';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { authApi, LoginHistoryItem } from '../api/auth';
+import { formatDateTime } from '../utils/format';
 
 const { Title, Text } = Typography;
 
 export default function LoginHistory() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [records, setRecords] = useState<LoginHistoryItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -38,7 +39,7 @@ export default function LoginHistory() {
       title: t('loginHistory.time'),
       dataIndex: 'logged_at',
       key: 'logged_at',
-      render: (v: string) => new Date(v).toLocaleString(),
+      render: (v: string) => formatDateTime(v, i18n.language),
     },
     {
       title: t('loginHistory.ip'),

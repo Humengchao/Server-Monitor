@@ -34,7 +34,7 @@ function UsageCell({ percent, hue }: { percent: number; hue: 'blue' | 'green' })
   return (
     <div className="mini-bar">
       <Progress percent={value} showInfo={false} size="small" strokeColor={severityColor(value, hue)} railColor="rgba(128, 140, 170, .16)" />
-      <span>{percent.toFixed(1)}</span>
+      <span>{percent.toFixed(1)}%</span>
     </div>
   );
 }
@@ -203,7 +203,7 @@ export default function ProcessTable({ serverId, serverType }: Props) {
           </Tooltip>
           {serverType !== 'windows' && (
             <Tooltip title={t('process.kill')}>
-              <Button type="text" size="small" danger onClick={() => handleKill(proc, true)}>-9</Button>
+              <Button type="text" size="small" danger aria-label={`${t('process.kill')} ${proc.command || proc.pid}`} onClick={() => handleKill(proc, true)}>-9</Button>
             </Tooltip>
           )}
         </Space>
