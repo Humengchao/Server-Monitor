@@ -404,7 +404,7 @@ public partial class MainWindow : Window
     // MARK: - Shortcuts
 
     /// <summary>
-    /// The keyboard map from plan §5: Ctrl+1–7 for the pages, Ctrl+N for a new
+    /// The keyboard map from plan §5: Ctrl+1–8 for the pages, Ctrl+N for a new
     /// server, F5 to refresh.
     /// </summary>
     private void InstallShortcuts()
@@ -418,7 +418,8 @@ public partial class MainWindow : Window
         Bind(Key.D4, ModifierKeys.Control, () => Show(Page.SshKeys));
         Bind(Key.D5, ModifierKeys.Control, () => Show(Page.Snippets));
         Bind(Key.D6, ModifierKeys.Control, () => Show(Page.Docker));
-        Bind(Key.D7, ModifierKeys.Control, () => Show(Page.Sessions));
+        Bind(Key.D7, ModifierKeys.Control, () => Show(Page.Alerts));
+        Bind(Key.D8, ModifierKeys.Control, () => Show(Page.Sessions));
         Bind(Key.OemComma, ModifierKeys.Control, () => Show(Page.Settings));
         Bind(Key.N, ModifierKeys.Control, () => OnAddServer(this, new RoutedEventArgs()));
         Bind(Key.F5, ModifierKeys.None, () => _ = Monitor.PollAllAsync());

@@ -142,7 +142,7 @@ windows/
 | SwiftTerm | 见 D5 | |
 | Swift Charts | 自绘，见 D6 | |
 | 单实例（macOS 天然） | Mutex + 命名管道，二次启动激活已开窗口 | |
-| ⌘1–7 等快捷键 | Ctrl+1–7、Ctrl+N、Ctrl+Shift+N/I、Ctrl+T、Ctrl+Shift+T、F5 | |
+| ⌘1–7 等快捷键 | Ctrl+1–8、Ctrl+N、Ctrl+Shift+N/I、Ctrl+T、Ctrl+Shift+T、F5 | |
 
 ## 6. 功能对照与阶段归属
 

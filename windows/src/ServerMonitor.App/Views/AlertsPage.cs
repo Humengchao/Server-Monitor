@@ -26,6 +26,8 @@ namespace ServerMonitor.App.Views;
 public sealed class AlertsPage : UserControl
 {
     private readonly StackPanel _root = Ui.Rows(0);
+    /// <summary>What the badges currently show; compared against on each tick.</summary>
+    private HashSet<(Guid Rule, Guid Server)> _firing = [];
 
     private static Core.Collect.MonitorService Monitor => App.Current.Monitor;
 
@@ -34,6 +36,22 @@ public sealed class AlertsPage : UserControl
         _root.Margin = new Thickness(20, 0, 20, 20);
         Content = Ui.Scroll(_root);
         Rebuild();
+
+        // The firing badge is the page's one live value; the rest is config
+        // and history, rebuilt on navigation and on the page's own edits.
+        // Repaint when the firing set actually changes rather than on every
+        // tick — rebuilding every few seconds would churn the history list
+        // for nothing.
+        Monitor.Published += RefreshFiring;
+        Unloaded += (_, _) => Monitor.Published -= RefreshFiring;
+    }
+
+    private void RefreshFiring()
+    {
+        var firing = Monitor.Alerts?.Firing.ToHashSet() ?? [];
+        if (firing.SetEquals(_firing)) return;
+        _firing = firing;
+        Rebuild();
     }
 
     private void Rebuild()
@@ -41,7 +59,7 @@ public sealed class AlertsPage : UserControl
         _root.Children.Clear();
 
         var rules = Monitor.Database.AllAlertRules();
-        var firing = Monitor.Alerts?.Firing.ToList() ?? [];
+        _firing = Monitor.Alerts?.Firing.ToHashSet() ?? [];
 
         var add = Ui.Accent(Strings.Get("alert.new"), () => Edit(null));
 
@@ -56,7 +74,7 @@ public sealed class AlertsPage : UserControl
             _root.Children.Add(add);
             foreach (var rule in rules)
             {
-                _root.Children.Add(RuleCard(rule, firing.Count(f => f.Rule == rule.Id)));
+                _root.Children.Add(RuleCard(rule, _firing.Count(f => f.Rule == rule.Id)));
             }
         }
 
@@ -271,7 +289,7 @@ public static class Durations
 public sealed class AlertRuleEditorWindow : Window
 {
     /// <summary>
-    /// The durations offered, from the validator's floor to half a day.
+    /// The durations offered, from the validator's floor to its ceiling.
     /// </summary>
     /// <remarks>
     /// A picker rather than a number box: the useful values are these, and a
@@ -279,7 +297,7 @@ public sealed class AlertRuleEditorWindow : Window
     /// makes the user discover the bounds by being told no.
     /// </remarks>
     private static readonly int[] DurationChoices =
-        [30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 21600, 43200];
+        [30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 21600, 43200, 86400];
 
     private readonly AlertRule _rule;
     private readonly bool _isNew;
