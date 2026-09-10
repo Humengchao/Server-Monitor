@@ -26,8 +26,6 @@ public sealed class AlertRule
     public int DurationSeconds { get; set; } = 300;
     public bool Enabled { get; set; } = true;
     public Guid? ServerId { get; set; }
-    /// <summary>Set by list queries; the UI badges a rule without a second call.</summary>
-    public int FiringCount { get; set; }
 }
 
 /// <summary>What a rule can watch.</summary>
