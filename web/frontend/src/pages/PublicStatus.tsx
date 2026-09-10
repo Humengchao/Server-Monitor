@@ -36,7 +36,6 @@ type FilterKey = 'all' | `tag:${string}`;
 
 interface PublicNode {
   alias: string;
-  name: string;
   location: string;
   tags: Array<{ name: string; color: string }>;
   server_type: string;
@@ -198,7 +197,7 @@ export default function PublicStatus() {
   const visibleNodes = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return (data?.nodes || []).filter((node) => {
-      const matchesSearch = !normalized || `${node.name} ${node.location} ${node.server_type} ${(node.tags || []).map((tag) => tag.name).join(' ')}`.toLowerCase().includes(normalized);
+      const matchesSearch = !normalized || `${node.alias} ${node.location} ${node.server_type} ${(node.tags || []).map((tag) => tag.name).join(' ')}`.toLowerCase().includes(normalized);
       if (!matchesSearch) return false;
       if (filter.startsWith('tag:')) return (node.tags || []).some((tag) => tag.name === filter.slice(4));
       return true;
@@ -213,7 +212,7 @@ export default function PublicStatus() {
   // `error` describes the latest refresh, not the health of the monitored
   // fleet. Preserve the last known overall state while showing a separate
   // stale indicator when refreshes fail.
-  const overall = data?.overall || (error ? 'outage' : 'operational');
+  const overall = data?.overall || (error ? 'outage' : loading ? 'unknown' : 'operational');
   const generatedDate = data ? new Date(data.generated_at) : null;
   const updatedAt = generatedDate && Number.isFinite(generatedDate.getTime())
     ? generatedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -358,7 +357,7 @@ function ProbeNodeCard({
     <article className={`glass-node-card ${node.status}`}>
       <header className="glass-node-head">
         <span className="node-system-icon">{node.server_type === 'windows' ? <WindowsOutlined /> : <CloudServerOutlined />}</span>
-        <div className="node-title"><h2>{node.name || node.alias}</h2><small><EnvironmentOutlined /> {node.location || t('probe.locationUnset')}<b>·</b>{node.server_type === 'windows' ? 'Windows' : 'Linux'}</small></div>
+        <div className="node-title"><h2>{node.alias}</h2><small><EnvironmentOutlined /> {node.location || t('probe.locationUnset')}<b>·</b>{node.server_type === 'windows' ? 'Windows' : 'Linux'}</small></div>
         <span className={`node-online ${node.status}`}><i /> {t(`probe.nodeStatus.${node.status}`)}</span>
       </header>
 

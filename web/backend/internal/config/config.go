@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"strconv"
@@ -43,6 +44,12 @@ func Load() (*Config, error) {
 	jwtSecret, ok := os.LookupEnv("JWT_SECRET")
 	if !ok {
 		return nil, errors.New("JWT_SECRET is required")
+	}
+	if len(jwtSecret) < 32 {
+		// Warn but don't refuse: existing deployments with short secrets must
+		// keep booting. Anything under 32 bytes is below the HS256 key size
+		// recommended by RFC 7518 and is realistically brute-forceable.
+		log.Printf("WARNING: JWT_SECRET is only %d bytes long; tokens signed with a key this small are weak. Use at least 32 random bytes (e.g. `openssl rand -base64 48`)", len(jwtSecret))
 	}
 	encKey, ok := os.LookupEnv("ENCRYPTION_KEY")
 	if !ok {

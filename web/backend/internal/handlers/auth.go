@@ -45,6 +45,16 @@ type ChangePasswordRequest struct {
 // its password below what signup would have accepted.
 const minPasswordLength = 6
 
+// bcryptMaxPasswordBytes is bcrypt's hard input ceiling. The validator's max
+// tag counts runes, not bytes, so the byte length is checked explicitly before
+// hashing — a longer input would otherwise surface as a 500 from
+// bcrypt.GenerateFromPassword.
+const bcryptMaxPasswordBytes = 72
+
+func passwordTooLong(password string) bool {
+	return len(password) > bcryptMaxPasswordBytes
+}
+
 // tokenTTL bounds how long a single sign-in stays usable.
 const tokenTTL = 72 * time.Hour
 
@@ -52,6 +62,11 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if passwordTooLong(req.Password) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": fmt.Sprintf("the password must be at most %d bytes", bcryptMaxPasswordBytes)})
 		return
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
@@ -191,6 +206,11 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	if len(req.NewPassword) < minPasswordLength {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": fmt.Sprintf("the new password must be at least %d characters", minPasswordLength)})
+		return
+	}
+	if passwordTooLong(req.NewPassword) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": fmt.Sprintf("the new password must be at most %d bytes", bcryptMaxPasswordBytes)})
 		return
 	}
 	if req.NewPassword == req.CurrentPassword {

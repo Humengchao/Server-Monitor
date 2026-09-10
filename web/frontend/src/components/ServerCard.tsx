@@ -228,6 +228,7 @@ export default React.memo(ServerCard, (prev, next) => {
     prev.selectable === next.selectable &&
     prev.selected === next.selected &&
     prev.availability === next.availability &&
+    JSON.stringify(prev.firing || []) === JSON.stringify(next.firing || []) &&
     isOnlineAt(a, prev.observedAt) === isOnlineAt(b, next.observedAt) &&
     JSON.stringify(a.tags || []) === JSON.stringify(b.tags || []) &&
     JSON.stringify(a.latest_metrics) === JSON.stringify(b.latest_metrics)

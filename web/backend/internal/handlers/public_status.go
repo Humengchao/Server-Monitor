@@ -32,7 +32,6 @@ func NewPublicStatusHandler() *PublicStatusHandler { return &PublicStatusHandler
 
 type publicNode struct {
 	Alias             string             `json:"alias"`
-	Name              string             `json:"name"`
 	Location          string             `json:"location"`
 	Tags              []models.PublicTag `json:"tags"`
 	ServerType        string             `json:"server_type"`
@@ -146,7 +145,7 @@ func (h *PublicStatusHandler) Get(c *gin.Context) {
 		}
 
 		nodes = append(nodes, publicNode{
-			Alias: fmt.Sprintf("NODE %02d", index+1), Name: metric.Name, Location: metric.PublicLocation, Tags: metric.Tags,
+			Alias: fmt.Sprintf("NODE %02d", index+1), Location: metric.PublicLocation, Tags: metric.Tags,
 			ServerType: metric.ServerType, Status: status,
 			CPUCores: metric.CPUCores, CPUPercent: cpuPercent,
 			Load1: metric.Load1, Load5: metric.Load5, Load15: metric.Load15,
@@ -183,7 +182,7 @@ func (h *PublicStatusHandler) Get(c *gin.Context) {
 		"overall": overall, "generated_at": now, "summary": summary, "nodes": nodes,
 		"privacy": gin.H{
 			"anonymized":    true,
-			"hidden_fields": []string{"hostname", "ip_address", "port", "ssh_user", "credentials", "notes", "database_id"},
+			"hidden_fields": []string{"server_name", "hostname", "ip_address", "port", "ssh_user", "credentials", "notes", "database_id"},
 		},
 	}
 

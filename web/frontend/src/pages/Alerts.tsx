@@ -425,7 +425,7 @@ export default function Alerts() {
               <span className="alert-entry-body">
                 <span className="alert-entry-title">
                   <strong>{event.rule_name || t('alerts.deletedRule')}</strong>
-                  <Tag className="metric-chip" variant="filled">{t(`alerts.metric.${event.metric}`)}</Tag>
+                  <Tag className="metric-chip" variant="filled">{event.metric ? t(`alerts.metric.${event.metric}`) : t('alerts.deletedRule')}</Tag>
                   {event.server_name && <Text type="secondary">{event.server_name}</Text>}
                 </span>
                 <span className="alert-entry-message">{describeEvent(event, t)}</span>

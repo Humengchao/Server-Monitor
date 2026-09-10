@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Table, Tag, Typography } from 'antd';
+import { Button, Card, Result, Table, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import { ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { authApi, LoginHistoryItem } from '../api/auth';
 
@@ -11,6 +12,7 @@ export default function LoginHistory() {
   const [records, setRecords] = useState<LoginHistoryItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [page, setPage] = useState(1);
 
   const fetchData = async (p: number) => {
@@ -19,8 +21,9 @@ export default function LoginHistory() {
       const res = await authApi.getLoginHistory(20, (p - 1) * 20);
       setRecords(res.data.records || []);
       setTotal(res.data.total || 0);
+      setError(false);
     } catch {
-      // ignore
+      setError(true);
     }
     setLoading(false);
   };
@@ -68,6 +71,13 @@ export default function LoginHistory() {
         </div>
       </div>
       <Card className="panel-card">
+      {error && records.length === 0 ? (
+        <Result
+          status="error"
+          title={t('loginHistory.loadFailed')}
+          extra={<Button type="primary" icon={<ReloadOutlined />} onClick={() => { void fetchData(page); }}>{t('common.refresh')}</Button>}
+        />
+      ) : (
       <Table
         className="server-table"
         rowKey="id"
@@ -83,6 +93,7 @@ export default function LoginHistory() {
           showTotal: (cnt) => t('loginHistory.total', { count: cnt }),
         }}
       />
+      )}
       </Card>
     </div>
   );

@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"net"
 	"strings"
 	"testing"
@@ -223,6 +224,62 @@ func TestValidateWebhookURL(t *testing.T) {
 	}
 	if err := permissive.ValidateWebhookURL("http://192.168.1.10/hook"); err != nil {
 		t.Fatalf("private target should be allowed when opted in: %v", err)
+	}
+}
+
+func TestValidateTargetPinsResolvedIPs(t *testing.T) {
+	n := NewWebhookNotifier(false)
+	n.lookupIP = func(host string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("93.184.216.34"), net.ParseIP("93.184.216.35")}, nil
+	}
+	ips, err := n.validateTarget("https://hook.example/notify")
+	if err != nil {
+		t.Fatalf("validateTarget() unexpected error: %v", err)
+	}
+	if len(ips) != 2 || ips[0].String() != "93.184.216.34" {
+		t.Fatalf("validateTarget() IPs = %v, want the two resolved addresses", ips)
+	}
+
+	// A stub resolver keeps this hermetic: no external DNS needed to prove a
+	// private answer is still rejected (and therefore never pinned).
+	n.lookupIP = func(host string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("10.0.0.5")}, nil
+	}
+	if _, err := n.validateTarget("https://hook.example/notify"); err == nil {
+		t.Fatal("validateTarget() accepted a host resolving to a private address")
+	}
+}
+
+func TestDialPinnedNeverResolvesHostname(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	go func() {
+		conn, err := ln.Accept()
+		if err == nil {
+			conn.Close()
+		}
+	}()
+
+	_, port, err := net.SplitHostPort(ln.Addr().String())
+	if err != nil {
+		t.Fatalf("SplitHostPort: %v", err)
+	}
+	// A .invalid name can never resolve (RFC 2606), so a successful connection
+	// proves the dialer used the pinned IP with the URL's port, not DNS.
+	conn, err := dialPinned(context.Background(), &net.Dialer{Timeout: 2 * time.Second}, "tcp",
+		net.JoinHostPort("rebinding.invalid", port), []net.IP{net.ParseIP("127.0.0.1")})
+	if err != nil {
+		t.Fatalf("dialPinned() unexpected error: %v", err)
+	}
+	conn.Close()
+
+	// An unreachable pinned address must fail rather than fall back to DNS.
+	if _, err := dialPinned(context.Background(), &net.Dialer{Timeout: time.Second}, "tcp",
+		net.JoinHostPort("rebinding.invalid", port), []net.IP{net.ParseIP("127.0.0.2")}); err == nil {
+		t.Fatal("dialPinned() succeeded for a pinned IP with nothing listening")
 	}
 }
 

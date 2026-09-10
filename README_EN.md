@@ -12,7 +12,7 @@ Built with Claude Code & DeepSeek-v4-pro
 
 - 🌐 [Public Probe / Service Status](http://svr.hmchxd.com/status)
 
-The public probe refreshes every 15 seconds and exposes only anonymous node aliases, availability, and rounded CPU, memory, and uptime metrics. It does not return real server names, IP addresses / hostnames, ports, SSH users, credentials, notes, or database IDs.
+The public probe refreshes every 15 seconds and exposes only anonymous node aliases, manually configured public locations, tags, availability, and rounded CPU, memory, and uptime health metrics. It does not return real server names, IP addresses / hostnames, ports, SSH users, credentials, notes, or database IDs.
 
 > **Security note:** Management features handle login tokens and SSH credentials. Use them only after the domain has a valid HTTPS certificate and HTTP is forcibly redirected to HTTPS. The link above points only to the anonymous public status page.
 

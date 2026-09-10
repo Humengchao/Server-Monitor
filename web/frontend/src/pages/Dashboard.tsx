@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Row, Col, Button, Modal, Form, Input, InputNumber, Select, Segmented, Tooltip,
-  Typography, Space, App, Card, Skeleton, Empty, Result
+  Typography, Space, App, Card, Skeleton, Empty, Result, Alert
 } from 'antd';
 import { DatePicker } from 'antd';
 import dayjs, { Dayjs } from 'dayjs';
@@ -28,6 +28,10 @@ import { usePolling } from '../hooks/usePolling';
 const { Title, Text } = Typography;
 
 const ONLINE_WINDOW_MS = 120000;
+const POLL_INTERVAL_MS = 3000;
+// Show the stale banner only after several consecutive failed background
+// polls, so a single dropped request does not flash an alarm.
+const POLL_STALE_AFTER_MS = 3 * POLL_INTERVAL_MS;
 
 type StatusFilter = 'all' | 'online' | 'offline';
 type SortKey = 'default' | 'name' | 'cpu' | 'memory' | 'disk' | 'uptime' | 'expiry';
@@ -97,6 +101,9 @@ export default function Dashboard() {
   const [filterTagIds, setFilterTagIds] = useState<string[]>([]);
   const [selectedCredential, setSelectedCredential] = useState<string | undefined>(undefined);
   const [refreshTimestamp, setRefreshTimestamp] = useState(0);
+  // Timestamp of the last successful poll; drives the stale-data banner.
+  const lastPollSuccessRef = useRef(0);
+  const [pollStale, setPollStale] = useState(false);
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [sortKey, setSortKey] = useState<SortKey>(() => (localStorage.getItem('dashboard_sort') as SortKey) || 'default');
@@ -183,6 +190,8 @@ export default function Dashboard() {
       const res = await serversApi.list();
       setServers(res.data || []);
       setLoadError(false);
+      lastPollSuccessRef.current = Date.now();
+      setPollStale(false);
       // Judge online/offline against the server's clock (Date header), not the
       // browser's: local clock skew beyond the 2-minute threshold would
       // otherwise flip every card to offline (or keep dead ones online).
@@ -194,13 +203,17 @@ export default function Dashboard() {
         setLoadError(true);
         message.error(t('server.loadFailed'));
       }
+      // Background failures stay quiet at first, but once the outage outlasts
+      // a few poll cycles the stale banner surfaces; it clears on recovery.
+      const lastSuccess = lastPollSuccessRef.current;
+      if (lastSuccess > 0 && Date.now() - lastSuccess >= POLL_STALE_AFTER_MS) setPollStale(true);
     } finally {
       if (showLoading) setLoading(false);
       loadInFlightRef.current = false;
     }
   }, [message, t]);
 
-  usePolling(() => loadServers(false), 3000, { leading: false });
+  usePolling(() => loadServers(false), POLL_INTERVAL_MS, { leading: false });
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void loadServers(); }, 0);
@@ -550,6 +563,16 @@ export default function Dashboard() {
         <Text type="secondary">{filteredServers.length} / {servers.length}</Text>
       </div>
 
+      {pollStale && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message={t('dashboard.pollStale')}
+          description={t('dashboard.pollStaleHint')}
+        />
+      )}
+
       {loading ? (
         <Row gutter={[18, 18]}>{[1, 2, 3, 4].map((item) => <Col key={item} xs={24} sm={12} xl={6}><Card className="server-card"><Skeleton active /></Card></Col>)}</Row>
       ) : loadError && servers.length === 0 ? (
@@ -655,10 +678,10 @@ export default function Dashboard() {
                 <Input placeholder={t('server.sshUsernamePlaceholder')} />
               </Form.Item>
               <Form.Item name="ssh_password" label={t('server.sshPassword')}>
-                <Input.Password placeholder={t('server.sshPasswordPlaceholder')} />
+                <Input.Password placeholder={editingServer ? t('server.sshKeyEditPlaceholder') : t('server.sshPasswordPlaceholder')} />
               </Form.Item>
               <Form.Item name="ssh_key" label={t('server.sshKey')}>
-                <Input.TextArea rows={4} placeholder={t('server.sshKeyPlaceholder')} />
+                <Input.TextArea rows={4} placeholder={editingServer ? t('server.sshKeyEditPlaceholder') : t('server.sshKeyPlaceholder')} />
               </Form.Item>
             </>
           )}

@@ -65,6 +65,18 @@ export function useMetrics(serverId: string, timeRange: TimeRange, interval = 30
     timeRangeRef.current = timeRange;
   }, [timeRange]);
 
+  // Navigating between hosts reuses this hook instance; clear the previous
+  // host's data so it never renders under the new title. Deferred like the
+  // initial fetch below to avoid setState during the commit phase.
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setMetrics(null);
+      setHistory([]);
+      setLoading(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [serverId]);
+
   const fetchLatest = useCallback(async () => {
     latestAbortRef.current?.abort();
     const controller = new AbortController();

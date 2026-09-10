@@ -353,12 +353,25 @@ func DeleteServer(db *sql.DB, id, userID uuid.UUID) error {
 	return err
 }
 
+// SetServerTags replaces a server's tag set. Both statements are owner-scoped
+// and a foreign server is refused up front with sql.ErrNoRows (the handler
+// maps that to 404 like every other "not your resource" path), so calling this
+// with somebody else's server ID never writes anything.
 func SetServerTags(db *sql.DB, serverID, userID uuid.UUID, tagIDs []uuid.UUID) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+
+	var owned bool
+	if err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM servers WHERE id=$1 AND user_id=$2)`,
+		serverID, userID).Scan(&owned); err != nil {
+		return err
+	}
+	if !owned {
+		return sql.ErrNoRows
+	}
 
 	_, err = tx.Exec(`DELETE FROM server_tags WHERE server_id=$1
 		AND server_id IN (SELECT id FROM servers WHERE id=$1 AND user_id=$2)`, serverID, userID)
@@ -367,7 +380,8 @@ func SetServerTags(db *sql.DB, serverID, userID uuid.UUID, tagIDs []uuid.UUID) e
 	}
 	if len(tagIDs) > 0 {
 		_, err = tx.Exec(`INSERT INTO server_tags (server_id, tag_id)
-			SELECT $1, id FROM tags WHERE id = ANY($2) AND user_id = $3`,
+			SELECT $1, id FROM tags WHERE id = ANY($2) AND user_id = $3
+			AND EXISTS (SELECT 1 FROM servers WHERE id = $1 AND user_id = $3)`,
 			serverID, pq.Array(tagIDs), userID)
 		if err != nil {
 			return err

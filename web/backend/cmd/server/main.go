@@ -78,10 +78,19 @@ func main() {
 		exitWithError(exitConfigError, "Router setup failed", err)
 	}
 
-	// Create http.Server for graceful shutdown support
+	// Create http.Server for graceful shutdown support.
+	// ReadHeaderTimeout blunts slowloris-style header trickles; IdleTimeout
+	// recycles keep-alive connections. ReadTimeout/WriteTimeout stay zero
+	// (unbounded) on purpose: a bulk execution against the maximum 50 targets
+	// can legitimately run for several minutes (services.BatchCommandTimeout is
+	// per host, waves of services.BatchConcurrency), and the SSH terminal
+	// hijacks its websocket, after which server write deadlines no longer
+	// apply anyway. A total deadline would cut those off mid-stream.
 	srv := &http.Server{
-		Addr:    ":" + cfg.ServerPort,
-		Handler: r,
+		Addr:              ":" + cfg.ServerPort,
+		Handler:           r,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	// Start server in goroutine

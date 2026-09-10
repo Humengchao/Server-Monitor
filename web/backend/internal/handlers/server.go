@@ -354,6 +354,10 @@ func (h *ServerHandler) SetTags(c *gin.Context) {
 	}
 	db := c.MustGet("db").(*models.DB)
 	if err := models.SetServerTags(db.Raw, id, userID, req.TagIDs); err != nil {
+		if err == sql.ErrNoRows {
+			c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to set tags"})
 		return
 	}

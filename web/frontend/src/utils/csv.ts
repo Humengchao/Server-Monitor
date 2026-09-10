@@ -9,7 +9,10 @@ const UTF8_BOM = '\uFEFF';
  */
 export function csvField(value: string | number | null | undefined): string {
   const text = String(value ?? '');
-  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  // Excel runs cells starting with =, +, -, @ (or a leading tab/CR) as
+  // formulas; a leading apostrophe makes it treat the value as text instead.
+  const neutralized = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+  return /[",\n\r]/.test(neutralized) ? `"${neutralized.replace(/"/g, '""')}"` : neutralized;
 }
 
 /** Joins rows, prefixes the BOM, and triggers a browser download. */

@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -12,6 +13,17 @@ type bucket struct {
 	tokens     int
 	lastFill   time.Time
 	lastAccess time.Time
+}
+
+// rateLimitKey buckets IPv6 clients by their /64 prefix: a single subscriber
+// typically controls that whole range, so per-address buckets would let the
+// limit be dodged by rotating through it. IPv4 buckets stay per address.
+func rateLimitKey(ip string) string {
+	parsed := net.ParseIP(ip)
+	if parsed == nil || parsed.To4() != nil {
+		return ip
+	}
+	return (&net.IPNet{IP: parsed.Mask(net.CIDRMask(64, 128)), Mask: net.CIDRMask(64, 128)}).String()
 }
 
 // RateLimit returns a token-bucket rate limiter middleware.
@@ -36,12 +48,12 @@ func RateLimit(requests int, per time.Duration) gin.HandlerFunc {
 	}()
 
 	return func(c *gin.Context) {
-		ip := c.ClientIP()
+		key := rateLimitKey(c.ClientIP())
 		mu.Lock()
-		b, ok := buckets[ip]
+		b, ok := buckets[key]
 		if !ok {
 			b = &bucket{tokens: requests, lastFill: time.Now(), lastAccess: time.Now()}
-			buckets[ip] = b
+			buckets[key] = b
 		}
 		// refill
 		now := time.Now()

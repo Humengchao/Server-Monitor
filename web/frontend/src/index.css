@@ -1107,6 +1107,7 @@ button, input, textarea, select { font: inherit; }
 .overall-dot { width: 7px; height: 7px; border-radius: 50%; background: #4de5b3; box-shadow: 0 0 0 4px rgba(77,229,179,.12), 0 0 16px rgba(77,229,179,.7); }
 .overall-dot.degraded { background: #ffc968; box-shadow: 0 0 0 4px rgba(255,201,104,.12); }
 .overall-dot.outage { background: #ff7588; box-shadow: 0 0 0 4px rgba(255,117,136,.12); }
+.overall-dot.unknown { background: #9aa7bd; box-shadow: 0 0 0 4px rgba(154,167,189,.12); }
 .glass-header-actions { justify-self: end; display: flex; align-items: center; gap: 5px; }
 .glass-header-actions .ant-btn { color: rgba(239,242,255,.75); }
 .glass-header-actions .ant-btn:hover { color: #fff !important; background: rgba(255,255,255,.09) !important; }

@@ -376,21 +376,43 @@ func formatDuration(d time.Duration) string {
 // WebhookNotifier delivers alert transitions to a user-configured URL.
 type WebhookNotifier struct {
 	client       *http.Client
+	dialer       *net.Dialer
+	lookupIP     func(host string) ([]net.IP, error)
 	allowPrivate bool
 }
 
+// webhookPinnedIPs carries the addresses validateTarget approved for one
+// request, so the transport dials exactly those instead of re-resolving the
+// hostname — which DNS rebinding could flip to a private address between the
+// check and the dial.
+type webhookPinnedIPs struct{}
+
 func NewWebhookNotifier(allowPrivate bool) *WebhookNotifier {
-	return &WebhookNotifier{
-		client: &http.Client{
-			Timeout: webhookTimeout,
-			// Alerting must not follow redirects: a public URL could otherwise
-			// bounce the request into the private network the guard rejects.
-			CheckRedirect: func(*http.Request, []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		},
+	n := &WebhookNotifier{
+		dialer:       &net.Dialer{Timeout: webhookTimeout},
+		lookupIP:     net.LookupIP,
 		allowPrivate: allowPrivate,
 	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	// Keep-alives off: a pooled connection would outlive the validation that
+	// pinned its address, and webhook volume is far too low to miss them.
+	transport.DisableKeepAlives = true
+	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if ips, ok := ctx.Value(webhookPinnedIPs{}).([]net.IP); ok && len(ips) > 0 {
+			return dialPinned(ctx, n.dialer, network, addr, ips)
+		}
+		return n.dialer.DialContext(ctx, network, addr)
+	}
+	n.client = &http.Client{
+		Timeout:   webhookTimeout,
+		Transport: transport,
+		// Alerting must not follow redirects: a public URL could otherwise
+		// bounce the request into the private network the guard rejects.
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	return n
 }
 
 type webhookPayload struct {
@@ -435,7 +457,8 @@ func (n *WebhookNotifier) Send(rule models.AlertRule, snap models.AlertSnapshot,
 }
 
 func (n *WebhookNotifier) Post(ctx context.Context, target string, payload any) error {
-	if err := n.validateTarget(target); err != nil {
+	ips, err := n.validateTarget(target)
+	if err != nil {
 		return err
 	}
 	body, err := json.Marshal(payload)
@@ -444,6 +467,10 @@ func (n *WebhookNotifier) Post(ctx context.Context, target string, payload any) 
 	}
 	ctx, cancel := context.WithTimeout(ctx, webhookTimeout)
 	defer cancel()
+	// Dial only the addresses just validated, never a fresh DNS answer.
+	if len(ips) > 0 {
+		ctx = context.WithValue(ctx, webhookPinnedIPs{}, ips)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -463,32 +490,58 @@ func (n *WebhookNotifier) Post(ctx context.Context, target string, payload any) 
 
 // validateTarget rejects anything that is not a plain http(s) URL pointing at a
 // routable address. Without this, an authenticated user could use the alerting
-// pipeline to probe hosts on the server's private network.
-func (n *WebhookNotifier) validateTarget(target string) error {
+// pipeline to probe hosts on the server's private network. The returned IPs are
+// the only ones the dialer may connect to; pinning them closes the DNS
+// rebinding window between this check and the actual connection. A nil list
+// (allowPrivate, or nothing resolved) leaves dialing to the system resolver.
+func (n *WebhookNotifier) validateTarget(target string) ([]net.IP, error) {
 	parsed, err := url.Parse(target)
 	if err != nil {
-		return fmt.Errorf("invalid webhook URL: %w", err)
+		return nil, fmt.Errorf("invalid webhook URL: %w", err)
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return fmt.Errorf("webhook URL must use http or https")
+		return nil, fmt.Errorf("webhook URL must use http or https")
 	}
 	host := parsed.Hostname()
 	if host == "" {
-		return fmt.Errorf("webhook URL has no host")
+		return nil, fmt.Errorf("webhook URL has no host")
 	}
 	if n.allowPrivate {
-		return nil
+		return nil, nil
 	}
-	ips, err := net.LookupIP(host)
+	ips, err := n.lookupIP(host)
 	if err != nil {
-		return fmt.Errorf("resolve webhook host: %w", err)
+		return nil, fmt.Errorf("resolve webhook host: %w", err)
 	}
 	for _, ip := range ips {
 		if isRestrictedIP(ip) {
-			return fmt.Errorf("webhook host %s resolves to a non-public address (set ALLOW_PRIVATE_WEBHOOKS=true to permit)", host)
+			return nil, fmt.Errorf("webhook host %s resolves to a non-public address (set ALLOW_PRIVATE_WEBHOOKS=true to permit)", host)
 		}
 	}
-	return nil
+	return ips, nil
+}
+
+// dialPinned connects to the first reachable address in ips, taking only the
+// port from addr so the hostname is never re-resolved. TLS is unaffected: with
+// TLSClientConfig.ServerName empty, http.Transport derives the SNI and the
+// certificate name from the request URL's host, not from the dialed IP.
+func dialPinned(ctx context.Context, dialer *net.Dialer, network, addr string, ips []net.IP) (net.Conn, error) {
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, fmt.Errorf("webhook dial: %w", err)
+	}
+	var lastErr error
+	for _, ip := range ips {
+		conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no validated addresses")
+	}
+	return nil, fmt.Errorf("webhook dial: %w", lastErr)
 }
 
 func isRestrictedIP(ip net.IP) bool {
@@ -513,5 +566,6 @@ func (n *WebhookNotifier) ValidateWebhookURL(target string) error {
 	if len(target) > webhookMaxBodyLength {
 		return fmt.Errorf("webhook URL is too long")
 	}
-	return n.validateTarget(target)
+	_, err := n.validateTarget(target)
+	return err
 }

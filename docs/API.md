@@ -570,8 +570,10 @@ GET /api/servers/:id/uptime?days=30
 公开状态页（`GET /api/public/status`，无需认证）的每个节点会带上 `availability_30d`：
 
 ```json
-{ "name": "web-01", "availability_30d": 99.86 }
+{ "alias": "NODE 01", "availability_30d": 99.86 }
 ```
+
+节点只有匿名编号 `alias`，不返回真实服务器名称。
 
 口径与上面的 30 天窗口完全一致（15 分钟层、终点对齐、起点夹到创建时刻）。
 当该服务器的应采集桶数少于 16 个（即不足四小时）时，字段为 `null` 而不是一个百分比——
