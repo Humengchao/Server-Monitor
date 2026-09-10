@@ -1,0 +1,11 @@
+# EnableCompressionInSingleFile measured on this machine, 2026-09-10.
+# win-x64 self-contained single file, Release, same tree for both builds.
+# private_mb: PrivateMemorySize64 of the running app (9 hosts, 5 s cadence),
+# four samples 10 s apart after a 75 s settle. Decision: compression off.
+# The exe is 2.4x larger uncompressed, but nobody downloads the raw exe: the
+# portable zip re-compresses it (75.4 vs 74.9 MB, +0.7%) and the installer's
+# lzma2 does the same, while the compressed bundle is decompressed into memory
+# at startup and stays there (~209 vs ~124 MB private).
+build,exe_bytes,portable_zip_bytes,private_mb
+compressed,80960343,74892589,"209, 208, 206, 212"
+uncompressed,191001017,75384820,"128, 123, 122, 124"

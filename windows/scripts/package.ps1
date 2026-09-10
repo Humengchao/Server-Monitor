@@ -59,13 +59,19 @@ foreach ($runtime in $toPublish) {
     Write-Host "== publishing $runtime" -ForegroundColor Cyan
     $out = Join-Path $dist $runtime
 
+    # Bundle compression is off, measured (artifacts/singlefile-compression.csv):
+    # it halved the exe (77 vs 182 MB) but barely changed what anyone
+    # downloads — the zip re-compresses (74.9 vs 75.4 MB) and so does the
+    # installer's lzma2 — while costing ~85 MB of resident memory for the
+    # life of the process, because the compressed image is decompressed
+    # into memory at startup and stays there.
     dotnet publish $app `
         -c Release `
         -r $runtime `
         --self-contained true `
         -p:PublishSingleFile=true `
         -p:IncludeNativeLibrariesForSelfExtract=true `
-        -p:EnableCompressionInSingleFile=true `
+        -p:EnableCompressionInSingleFile=false `
         -p:PublishTrimmed=false `
         -p:DebugType=none `
         -p:Version=$assemblyVersion `

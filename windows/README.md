@@ -77,6 +77,12 @@ cd windows
 ./scripts/package.ps1 -Version 0.1.0          # 本地可加 -SkipInstaller
 ```
 
+发布包不做单文件压缩：exe 因此是 182 MB 而不是 77 MB，但没人直接下载 exe ——
+便携 zip 会重新压缩（75.4 MB，与压缩单文件的 74.9 MB 几乎一样），安装包的
+lzma2 同理；而压缩镜像启动时要整个解到内存里，常驻 private 从约 124 MB 涨到
+约 209 MB。0.5 MB 的下载换 85 MB 内存，不值。测量存档在
+`artifacts/singlefile-compression.csv`。
+
 `windows/v*` 标签会触发 [CI](../.github/workflows/windows-app.yml) 出 Release。
 
 ### 命令行采集
@@ -133,10 +139,6 @@ dotnet run --project windows/src/ServerMonitor.Cli -- probe  my-host --alias -v
 - **告警 Toast 也没法在这里验**：告警按「状态跳变」发，而不是按「当前状态」，
   所以一开始就不可达的主机不会触发（这是对的：否则每次启动都会弹一串）。
   要看到 Toast 需要一台先在线后离线的主机。
-- **打包后的常驻内存明显更高**：自包含单文件跑起来是 private 约 200 MB
-  （framework-dependent 直接 `dotnet run` 约 115 MB）。原因是
-  `EnableCompressionInSingleFile`，压缩过的镜像启动时要解到内存里 —— 用下载
-  体积换常驻内存。这个取舍要不要改，归 P7。
 - **P7 还剩：中文 Windows 的 GBK 代码页现场验证、多显示器混合缩放实机验证。**
   已经做完的部分：10 台主机可见态 CPU 0.23%（仪表板）/ 0.59%（机器详情）、
   最小化 0.10%（20 逻辑核，出口要求分别是 <3% 与 <0.5%）；进程 DPI 感知从
@@ -237,6 +239,14 @@ dotnet run --project windows/src/ServerMonitor.App
 cd windows; ./scripts/package.ps1 -Version 0.1.0   # zip + installer, x64 + arm64
 ```
 
+The published bundle is not single-file-compressed: the exe is 182 MB rather
+than 77 MB, but nobody downloads the raw exe — the portable zip re-compresses
+it (75.4 MB, against 74.9 MB for the compressed bundle) and the installer's
+lzma2 does likewise, while a compressed image is decompressed into memory at
+startup and stays there, taking resident private bytes from about 124 MB to
+about 209 MB. Half a megabyte of download is not worth 85 MB of memory; the
+measurements are archived in `artifacts/singlefile-compression.csv`.
+
 A `windows/v*` tag publishes a Release through
 [CI](../.github/workflows/windows-app.yml).
 
@@ -307,12 +317,6 @@ key: it really does write to `authorized_keys`), `SM_WIN_HOST` / `SM_WIN_USER` /
 - Alerts fire on a status *transition*, not a state, so a host that was already
   unreachable when the app started does not raise one — which is right, or
   every launch would fire a volley.
-- **The packaged build's resident memory is markedly higher**: about 200 MB
-  private for the self-contained single file, against about 115 MB running
-  framework-dependent through `dotnet run`. The cause is
-  `EnableCompressionInSingleFile` — the compressed image is decompressed into
-  memory at startup, trading resident memory for download size. Whether that
-  trade is the right one belongs to P7.
 - **P7 still owes**: the GBK code page verified against a real Chinese Windows
   host, and mixed-scale multi-monitor tried on hardware with two displays.
   Done: CPU with ten hosts is 0.23% on the dashboard, 0.59% on the machine

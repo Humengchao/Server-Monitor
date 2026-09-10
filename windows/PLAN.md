@@ -47,7 +47,7 @@
 
 ### D2 · 语言与运行时
 
-C# 14 / .NET 10 LTS（支持到 2028-11），自包含单文件发布，win-x64 + win-arm64。用户机器不需装运行时。代价：单文件 60–80 MB；未签名的自包含 exe 偶有杀软误报（R7）。
+C# 14 / .NET 10 LTS（支持到 2028-11），自包含单文件发布，win-x64 + win-arm64。用户机器不需装运行时。代价：单文件 182 MB（不做包内压缩 —— 实测压缩只省 0.5 MB 下载、却常驻多花 85 MB 内存，见 `artifacts/singlefile-compression.csv`）；未签名的自包含 exe 偶有杀软误报（R7）。
 
 ### D3 · SSH 传输：SSH.NET 长连接为默认，ssh.exe 子进程为备选
 
@@ -102,7 +102,7 @@ windows/
                 SshKeyScanner · SshKeyManager · PublicKeyInstaller
     Collect/    ProcParsers · WindowsMetrics · MetricsCollector · MonitorService · PingProbe · Vnstat · VnstatInstaller
                 GeoLookup · HistoryReducer · Lines（CRLF 归一）
-    Alerts/     AlertService（投递用委托注入，规则可测）
+    Alerts/     RuleEngine（从 web 端移植；投递用委托注入，规则可测）· RuleSeed（旧阈值的一次性迁移）
     L10n/       zh / en 字典，key 与 L10n.swift 一致
   src/ServerMonitor.App/             net10.0-windows · WPF + WPF-UI
     Views/ ViewModels/               Dashboard · Machines · ServerDetail（卡片）· Docker · Snippets · Identities
@@ -119,7 +119,7 @@ windows/
   README.md
 ```
 
-数据流：ISshTransport → MetricsCollector → MonitorService（tick 屏障，每 tick 只发布一次）→ ViewModel → View；SQLite 与 AlertService 在旁路；托盘读同一份状态。线程模型：MonitorService 固定在 UI 线程的 SynchronizationContext 上（对应 `@MainActor`），SSH 与数据库工作在线程池，测试里换成单线程上下文。
+数据流：ISshTransport → MetricsCollector → MonitorService（tick 屏障，每 tick 只发布一次）→ ViewModel → View；SQLite 与 RuleEngine 在旁路；托盘读同一份状态。线程模型：MonitorService 固定在 UI 线程的 SynchronizationContext 上（对应 `@MainActor`），SSH 与数据库工作在线程池，测试里换成单线程上下文。
 
 ## 5. macOS 专属能力的对应
 
@@ -174,7 +174,7 @@ windows/
 - SshConfig、KnownHosts。
 - `shared/probes/` 与 `shared/fixtures/` 建立（D9），ProcParsers、WindowsMetrics、HostDetail、Vnstat、GeoLookup、HistoryReducer、Lines 移植，fixture 从 `macos/Tests/` 搬过去。
 - MetricsCollector：detectOS、批量脚本、docker 缓存、按需 ps；memoryTotal 与 cores 同为 0 时抛错而不是返回假数据。
-- MonitorService：tick 屏障、inFlight、退避、detailedServers、每 tick 一次发布、删除与在途轮询的竞态守卫。AlertService。
+- MonitorService：tick 屏障、inFlight、退避、detailedServers、每 tick 一次发布、删除与在途轮询的竞态守卫。RuleEngine。
 - CLI `smctl`：poll / detail / docker 直出 JSON。
 - 出口：`dotnet test` 全绿；`SM_LIVE_ALIAS=<alias> dotnet test` 全链路通过；smctl 对 Linux 主机与 Windows 测试主机各拿到一份完整快照。
 
