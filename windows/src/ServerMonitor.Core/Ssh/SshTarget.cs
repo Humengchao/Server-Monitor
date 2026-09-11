@@ -6,15 +6,42 @@ namespace ServerMonitor.Core.Ssh;
 /// <remarks>
 /// The password case carries no payload on purpose: the secret then cannot end
 /// up in a log line, a crash dump, or anything that prints an
-/// <see cref="SshTarget"/>. It is fetched from the credential store at connect
-/// time, keyed by the server id.
+/// <see cref="SshTarget"/>. Only the credential store's <em>key</em> travels
+/// here, and a Guid is not a secret.
 /// </remarks>
-public readonly record struct SshCredential(AuthMethod Method, string KeyPath)
+public readonly record struct SshCredential(
+    AuthMethod Method, string KeyPath, Guid SecretOwner = default)
 {
     public static readonly SshCredential ConfigAlias = new(AuthMethod.ConfigAlias, "");
     public static readonly SshCredential Agent = new(AuthMethod.Agent, "");
+
+    /// <summary>A password belonging to the server itself.</summary>
     public static readonly SshCredential Password = new(AuthMethod.Password, "");
+
+    /// <summary>
+    /// A password belonging to an identity, and so to every host using it.
+    /// </summary>
+    /// <remarks>
+    /// The whole point of an identity is that one login covers a fleet, so its
+    /// password is stored once under the identity's own id rather than copied
+    /// to each server. Changing it updates every machine; deleting the
+    /// identity takes exactly one secret with it.
+    /// </remarks>
+    public static SshCredential SharedPassword(Guid identityId) =>
+        new(AuthMethod.Password, "", identityId);
+
     public static SshCredential Key(string path) => new(AuthMethod.IdentityFile, path);
+
+    /// <summary>
+    /// Which credential-store entry holds this password.
+    /// </summary>
+    /// <remarks>
+    /// An unset owner means the server's own entry, which is what every
+    /// server-level password is and what the store was keyed by before
+    /// identities could carry one.
+    /// </remarks>
+    public Guid SecretKeyFor(Guid serverId) =>
+        SecretOwner == default ? serverId : SecretOwner;
 }
 
 public enum AuthMethod { ConfigAlias, IdentityFile, Agent, Password }

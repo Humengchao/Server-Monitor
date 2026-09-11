@@ -64,6 +64,11 @@ public class LocalizationTests
         // selectable text, so it never needed a word for it.
         "common.copied",
 
+        // An identity can hold a password here, stored once under the
+        // identity and shared by every host using it. macOS identities are
+        // key-or-agent only, so it has no word for keeping the stored one.
+        "identity.passwordKeep",
+
         // The whole alerts surface. macOS has no alert rules at all — its
         // notifications are the three fixed thresholds — so every word this
         // page needs is new on this side. The vocabulary follows the web

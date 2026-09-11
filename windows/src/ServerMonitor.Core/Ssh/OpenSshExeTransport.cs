@@ -365,7 +365,8 @@ public sealed class OpenSshExeTransport : ISshTransport
         public static Askpass? Create(SshTarget target, ICredentialStore credentials)
         {
             if (target.Credential.Method != AuthMethod.Password) return null;
-            var password = credentials.GetPassword(target.ServerId);
+            var password = credentials.GetPassword(
+                target.Credential.SecretKeyFor(target.ServerId));
             if (string.IsNullOrEmpty(password)) return null;
 
             var directory = Path.Combine(Path.GetTempPath(), $"sm-askpass-{Guid.NewGuid():N}");

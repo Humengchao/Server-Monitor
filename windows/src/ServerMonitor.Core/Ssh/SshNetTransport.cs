@@ -353,11 +353,16 @@ public sealed class SshNetTransport : ISshTransport
         {
             var host = resolved.HostName;
             var port = resolved.Port;
+            // Whose stored password this connection uses: the server's own,
+            // or the identity's when a shared login is what points here.
+            // Key passphrases and the agent stay keyed by server — those
+            // are about a file on this machine, not about the login.
+            var passwordOwner = target.Credential.SecretKeyFor(target.ServerId);
 
             foreach (var jump in resolved.ProxyJump)
             {
                 var jumpResolved = _config.Resolve(jump);
-                var jumpClient = new SshClient(BuildInfo(jumpResolved, target.ServerId));
+                var jumpClient = new SshClient(BuildInfo(jumpResolved, target.ServerId, passwordOwner));
                 Arm(jumpClient, jumpResolved.HostName);
                 await jumpClient.ConnectAsync(cancellationToken).ConfigureAwait(false);
                 hops.Add(jumpClient);
@@ -373,7 +378,8 @@ public sealed class SshNetTransport : ISshTransport
                 port = (int)forward.BoundPort;
             }
 
-            var info = BuildInfo(resolved with { HostName = host, Port = port }, target.ServerId);
+            var info = BuildInfo(
+                resolved with { HostName = host, Port = port }, target.ServerId, passwordOwner);
             client = build(info);
             Arm(client, resolved.HostName);
             await client.ConnectAsync(cancellationToken).ConfigureAwait(false);
@@ -412,7 +418,7 @@ public sealed class SshNetTransport : ISshTransport
         }
     }
 
-    private ConnectionInfo BuildInfo(ResolvedHost resolved, Guid serverId)
+    private ConnectionInfo BuildInfo(ResolvedHost resolved, Guid serverId, Guid passwordOwner)
     {
         var methods = new List<AuthenticationMethod>();
         var user = resolved.User;
@@ -421,7 +427,7 @@ public sealed class SshNetTransport : ISshTransport
         {
             case AuthMethod.Password:
                 {
-                    var password = _credentials.GetPassword(serverId)
+                    var password = _credentials.GetPassword(passwordOwner)
                         ?? throw SshException.MissingCredential();
                     methods.Add(new PasswordAuthenticationMethod(user, password));
                     // Some sshd configurations answer password auth as

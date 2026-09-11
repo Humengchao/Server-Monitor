@@ -594,6 +594,85 @@ public class PollResultTests
     }
 
     [Fact]
+    public async Task AnIdentityPasswordIsKeyedByTheIdentityNotTheServer()
+    {
+        // The point of a shared login: the secret is stored once and every
+        // host pointing at it reads the same entry. Keyed by server — which is
+        // what every password did before an identity could hold one — the same
+        // password would have to be retyped for each machine, and changing it
+        // would mean visiting all of them.
+        using var harness = new Harness();
+        var identity = new Identity
+        {
+            Name = "ops",
+            Username = "ops",
+            AuthKind = AuthKind.Password,
+        };
+        harness.Service.Save(identity);
+
+        var first = harness.AddServer("web-1");
+        var second = harness.AddServer("web-2");
+        foreach (var server in new[] { first, second })
+        {
+            var updated = server.Clone();
+            updated.IdentityId = identity.Id;
+            harness.Service.UpdateServer(updated);
+        }
+        await Task.Yield();
+
+        foreach (var server in new[] { first, second })
+        {
+            var target = harness.Service.Target(harness.Service.Server(server.Id)!);
+            Assert.Equal("ops", target.Username);
+            Assert.Equal(AuthMethod.Password, target.Credential.Method);
+            Assert.Equal(identity.Id, target.Credential.SecretKeyFor(server.Id));
+        }
+    }
+
+    [Fact]
+    public void APasswordIdentitySaysSoWithoutSayingWhat()
+    {
+        // The summary is shown on the identity card and under every server
+        // pointing at it, so it must name the method and nothing else — not
+        // the secret, and not its length.
+        var identity = new Identity
+        {
+            Name = "ops",
+            Username = "ops",
+            AuthKind = AuthKind.Password,
+        };
+
+        using (var _ = new LanguageScope(Store.AppLanguage.En))
+        {
+            Assert.Equal("ops · password", identity.Summary);
+        }
+        using (var _ = new LanguageScope(Store.AppLanguage.Zh))
+        {
+            Assert.Equal("ops · 密码", identity.Summary);
+        }
+    }
+
+    [Fact]
+    public void AServersOwnPasswordStaysKeyedByTheServer()
+    {
+        // The unset owner is what every existing stored password has, so it
+        // has to keep meaning "this server's own entry".
+        using var harness = new Harness();
+        var server = new Server
+        {
+            Name = "box",
+            Host = "203.0.113.10",
+            Username = "root",
+            AuthKind = AuthKind.Password,
+        };
+        harness.Service.AddServer(server);
+
+        var target = harness.Service.Target(harness.Service.Server(server.Id)!);
+        Assert.Equal(AuthMethod.Password, target.Credential.Method);
+        Assert.Equal(server.Id, target.Credential.SecretKeyFor(server.Id));
+    }
+
+    [Fact]
     public void AnAliasServerDialsTheAliasNotTheAddress()
     {
         // The whole point of choosing "ssh config alias": OpenSSH — or, on the

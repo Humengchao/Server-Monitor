@@ -93,6 +93,10 @@ public sealed class IdentitiesPage : UserControl
         }
         if (!Ui.Confirm(Window.GetWindow(this), message)) return;
         Monitor.DeleteIdentity(identity.Id);
+        // The shared password goes with it. Nothing else can reach that entry
+        // once the identity is gone, and a secret with no owner is exactly the
+        // kind of leftover the credential manager should not accumulate.
+        App.Current.Credentials.DeletePassword(identity.Id);
         Rebuild();
     }
 }
@@ -104,6 +108,7 @@ public sealed class IdentityEditorWindow : Window
     private readonly TextBox _name = Ui.Input();
     private readonly TextBox _username = Ui.Input();
     private readonly TextBox _identityFile = Ui.Input();
+    private readonly PasswordBox _password = Ui.Secret();
     private readonly StackPanel _authFields = Ui.Rows(0);
     private readonly TextBlock _error = Ui.Wrapped("", "Text.Caption");
     private AuthKind _authKind;
@@ -137,14 +142,18 @@ public sealed class IdentityEditorWindow : Window
             Ui.Field("identity.name", _name),
             Ui.Field("server.username", _username),
             Ui.Field("server.authMethod", Ui.Picker(
-                // No "ssh config alias" or "password" here: an identity that
-                // was either would add nothing the server row does not already
-                // carry, which is why MonitorService.Target ignores them.
-                new[] { AuthKind.IdentityFile, AuthKind.Agent },
+                // No "ssh config alias": an identity that was one would add
+                // nothing the server row does not already carry, which is why
+                // MonitorService.Target ignores it. A password does add
+                // something — it is stored once and shared by the fleet.
+                new[] { AuthKind.IdentityFile, AuthKind.Agent, AuthKind.Password },
                 _authKind,
-                kind => kind == AuthKind.Agent
-                    ? Strings.Get("auth.agent")
-                    : Strings.Get("auth.identityFile"),
+                kind => kind switch
+                {
+                    AuthKind.Agent => Strings.Get("auth.agent"),
+                    AuthKind.Password => Strings.Get("server.password"),
+                    _ => Strings.Get("auth.identityFile"),
+                },
                 kind =>
                 {
                     _authKind = kind;
@@ -170,13 +179,22 @@ public sealed class IdentityEditorWindow : Window
             "server.identityPath",
             Ui.Grid("*,auto", _identityFile, Ui.Button(Strings.Get("common.browse"), Browse)),
             "auth.identityHelp"));
+        _authFields.Children.Add(Ui.Field(
+            "server.password",
+            _password,
+            _isNew ? "auth.passwordHelp" : "identity.passwordKeep"));
         RefreshAuthFields();
     }
 
-    private void RefreshAuthFields() =>
+    private void RefreshAuthFields()
+    {
         _authFields.Children[0].Visibility = _authKind == AuthKind.IdentityFile
             ? Visibility.Visible
             : Visibility.Collapsed;
+        _authFields.Children[1].Visibility = _authKind == AuthKind.Password
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
 
     private void Browse()
     {
@@ -202,6 +220,45 @@ public sealed class IdentityEditorWindow : Window
         if (_authKind == AuthKind.IdentityFile && _identityFile.Text.Trim().Length == 0)
         {
             _error.Text = Strings.Get("server.keyRequired");
+            _error.Visibility = Visibility.Visible;
+            return;
+        }
+        var credentials = App.Current.Credentials;
+        // An empty box keeps the stored password — but only if there is one.
+        // Switching an existing key identity over to a password would
+        // otherwise save happily and then fail every connection with
+        // "no usable SSH credential", which names nothing the user can act on.
+        if (_authKind == AuthKind.Password
+            && _password.Password.Length == 0
+            && string.IsNullOrEmpty(credentials.GetPassword(_identity.Id)))
+        {
+            _error.Text = Strings.Get("server.passwordRequired");
+            _error.Visibility = Visibility.Visible;
+            return;
+        }
+
+        try
+        {
+            if (_authKind == AuthKind.Password)
+            {
+                if (_password.Password.Length > 0)
+                {
+                    // Under the identity's own id, so every server pointing at
+                    // it reads the same entry (SshCredential.SharedPassword).
+                    credentials.SetPassword(_identity.Id, _password.Password);
+                }
+            }
+            else
+            {
+                // Switched away from a password: drop the secret rather than
+                // leave an entry in Credential Manager that nothing reads and
+                // the user has no way to connect to anything.
+                credentials.DeletePassword(_identity.Id);
+            }
+        }
+        catch (Exception error)
+        {
+            _error.Text = error.Message;
             _error.Visibility = Visibility.Visible;
             return;
         }

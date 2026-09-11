@@ -23,6 +23,9 @@ public sealed class Identity
             ? Username
             : $"{Username} · {System.IO.Path.GetFileName(IdentityFile)}",
         AuthKind.Agent => $"{Username} · agent",
+        // No hint of the secret, not even its length — the summary is shown
+        // in the list and in every server row pointing at this identity.
+        AuthKind.Password => $"{Username} · {(L10n.Strings.IsChinese ? "密码" : "password")}",
         _ => Username,
     };
 

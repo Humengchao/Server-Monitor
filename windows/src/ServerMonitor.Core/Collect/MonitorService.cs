@@ -272,8 +272,14 @@ public sealed class MonitorService : INotifyPropertyChanged, IAsyncDisposable
                     credential = SshCredential.Agent;
                     host = server.Host;
                     break;
+                case AuthKind.Password:
+                    // Keyed by the identity, not by this server: one stored
+                    // password covers the whole fleet pointing at it.
+                    credential = SshCredential.SharedPassword(identity.Id);
+                    host = server.Host;
+                    break;
                 default:
-                    // An identity that is itself an alias or a password adds
+                    // An identity that is itself an ssh config alias adds
                     // nothing the server row does not already say.
                     break;
             }

@@ -126,6 +126,7 @@ public static partial class Strings
         ["identity.empty"] = ("把常用的登录方式存成身份，多台机器可以共用。", "Save a login once and share it across machines."),
         ["identity.required"] = ("名称和用户名都不能为空", "Name and username are both required"),
         ["identity.usedBy"] = ("{} 台在用", "{} in use"),
+        ["identity.passwordKeep"] = ("留空则沿用已保存的密码。密码存在 Windows 凭据管理器，使用该身份的所有服务器共用这一份。", "Leave blank to keep the saved password. It lives in the Windows credential manager, shared by every server using this identity."),
         ["identity.inUse"] = ("有 {} 台服务器正在使用它，删除后这些服务器会退回各自的设置。", "{} servers use it; they will fall back to their own settings."),
         ["identity.deleteConfirm"] = ("确定删除身份「{}」吗？", "Delete identity “{}”?"),
         ["keys.empty"] = ("%USERPROFILE%\\.ssh 下没有找到私钥。", "No private keys found in %USERPROFILE%\\.ssh."),
