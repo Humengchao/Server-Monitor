@@ -125,6 +125,7 @@
 ### 接口防护
 
 - 登录和注册接口启用 **令牌桶限流**（5 次/分钟/IP），防止暴力破解和恶意注册
+- 注册接口默认开放；账号创建完毕后可用 `ALLOW_REGISTRATION=false` 关闭，此后 `POST /api/auth/register` 一律返回 403
 - 请求参数通过结构体绑定自动校验，防止非法输入
 - 支持配置 CORS 白名单，限制跨域请求来源
 - 告警 Webhook **默认拒绝内网目标**：解析到 loopback / RFC1918 / link-local / CGNAT 地址的地址会在保存时被拒绝，且请求不跟随重定向，避免被当作 SSRF 跳板探测服务端内网（可用 `ALLOW_PRIVATE_WEBHOOKS=true` 显式放开）。Webhook 自测接口另有 6 次/分钟/IP 限流
@@ -137,6 +138,7 @@
 ### 部署安全
 
 - Docker 镜像基于 **Alpine Linux 最小化构建**，减少攻击面
+- 后端容器内进程以 **非 root 用户** 运行，仅 `ping` 二进制携带 `CAP_NET_RAW` 能力用于延迟探测
 - 敏感配置（数据库密码、JWT 密钥、加密密钥）通过 **GitHub Secrets** 管理，不写入代码
 - 数据库使用 `ON DELETE CASCADE` 外键约束，确保数据一致性
 

@@ -25,6 +25,10 @@ type Config struct {
 	// RFC1918 addresses. Off by default so an authenticated user cannot use the
 	// alerting pipeline to reach the server's private network.
 	AllowPrivateWebhooks bool
+	// AllowRegistration gates POST /api/auth/register. On by default so existing
+	// deployments keep their behavior; set ALLOW_REGISTRATION=false to close
+	// signup once the initial accounts exist.
+	AllowRegistration bool
 }
 
 // defaultTrustedProxies covers loopback and RFC1918 ranges, matching the
@@ -70,6 +74,10 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	allowRegistration, err := loadBoolDefault("ALLOW_REGISTRATION", true)
+	if err != nil {
+		return nil, err
+	}
 	return &Config{
 		DatabaseURL:          dbURL,
 		JWTSecret:            jwtSecret,
@@ -82,7 +90,24 @@ func Load() (*Config, error) {
 		AlertInterval:        alertInterval,
 		TrustedProxies:       trustedProxies,
 		AllowPrivateWebhooks: strings.EqualFold(strings.TrimSpace(os.Getenv("ALLOW_PRIVATE_WEBHOOKS")), "true"),
+		AllowRegistration:    allowRegistration,
 	}, nil
+}
+
+// loadBoolDefault parses a boolean switch. Empty keeps the fallback; accepted
+// spellings are strconv.ParseBool's (true/false/1/0/t/f, any case). Anything
+// else is a configuration error rather than a silent fallback — a typo on a
+// security toggle must not quietly keep the feature in its default state.
+func loadBoolDefault(key string, fallback bool) (bool, error) {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback, nil
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return false, fmt.Errorf("%s must be a boolean (true/false/1/0), got %q", key, v)
+	}
+	return b, nil
 }
 
 func loadInterval(key string, fallback int) (int, error) {

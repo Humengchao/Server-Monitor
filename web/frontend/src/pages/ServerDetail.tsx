@@ -35,7 +35,7 @@ const tabFallback = (
 );
 import { usePolling } from '../hooks/usePolling';
 
-const { Title } = Typography;
+const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
 
 type PresetKey = '1h' | 'today' | 'yesterday' | '7d' | '30d';
@@ -150,6 +150,7 @@ export default function ServerDetail() {
   const [savingNotes, setSavingNotes] = useState(false);
   const [form] = Form.useForm<ServerFormValues>();
   const serverType = Form.useWatch('server_type', form) || 'linux';
+  const sshHostKey = Form.useWatch('ssh_host_key', form);
   const [tagValues, setTagValues] = useState<string[]>([]);
   const [selectedCredential, setSelectedCredential] = useState<string | undefined>(undefined);
   const [dockerInstalled, setDockerInstalled] = useState<boolean | null>(null);
@@ -649,7 +650,11 @@ export default function ServerDetail() {
               </Form.Item>
             </>
           )}
-          <Form.Item name="ssh_host_key" label={t('server.sshHostKey')}>
+          <Form.Item
+            name="ssh_host_key"
+            label={t('server.sshHostKey')}
+            extra={sshHostKey?.trim() ? undefined : <Text type="warning">{t('server.sshHostKeyWarning')}</Text>}
+          >
             <Input.TextArea rows={2} placeholder={t('server.sshHostKeyPlaceholder')} />
           </Form.Item>
           <Form.Item name="expires_at" label={t('server.expiresAt')}>

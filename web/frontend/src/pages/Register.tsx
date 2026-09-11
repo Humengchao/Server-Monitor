@@ -63,7 +63,7 @@ export default function Register() {
             { required: true, message: t('register.passwordRequired') },
             { min: 6, message: t('register.passwordMin') },
           ]}>
-            <Input.Password autoComplete="new-password" prefix={<LockOutlined />} placeholder={t('register.passwordPlaceholder')} />
+            <Input.Password autoComplete="new-password" prefix={<LockOutlined />} maxLength={72} placeholder={t('register.passwordPlaceholder')} />
           </Form.Item>
           <Form.Item className="auth-submit">
             <Button type="primary" htmlType="submit" loading={loading} block>

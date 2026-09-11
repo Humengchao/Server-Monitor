@@ -96,6 +96,7 @@
   "server.sshKeyEditPlaceholder": "留空则保持不变",
   "server.sshHostKey": "SSH 主机密钥（可选）",
   "server.sshHostKeyPlaceholder": "粘贴服务器公钥用于主机验证",
+  "server.sshHostKeyWarning": "留空将跳过主机密钥验证，SSH 连接可能遭受中间人攻击。",
   "server.tags": "标签",
   "server.copyHost": "点击复制主机 IP",
   "server.hostCopied": "主机 IP 已复制",

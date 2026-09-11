@@ -1,6 +1,14 @@
 package middleware
 
-import "testing"
+import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
+)
 
 func TestRateLimitKey(t *testing.T) {
 	tests := []struct {
@@ -23,5 +31,36 @@ func TestRateLimitKey(t *testing.T) {
 				t.Fatalf("rateLimitKey(%q) = %q, want %q", tc.ip, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestRateLimitCapRejectsNewKeys(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/", RateLimit(2, time.Minute), func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	serve := func(remoteAddr string) int {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = remoteAddr
+		r.ServeHTTP(w, req)
+		return w.Code
+	}
+
+	// Fill the bucket map to its 10000-key cap with one-shot addresses.
+	for i := 0; i < 10000; i++ {
+		addr := fmt.Sprintf("10.%d.%d.%d:8080", (i>>16)&0xff, (i>>8)&0xff, i&0xff)
+		if code := serve(addr); code != http.StatusOK {
+			t.Fatalf("request %d from %s: status = %d, want %d", i, addr, code, http.StatusOK)
+		}
+	}
+
+	// A known key is unaffected by the cap: its second request still has a token.
+	if code := serve("10.0.0.0:8080"); code != http.StatusOK {
+		t.Fatalf("repeat request from a known key: status = %d, want %d", code, http.StatusOK)
+	}
+	// A brand-new key is rejected while the map stays full.
+	if code := serve("10.255.255.255:8080"); code != http.StatusTooManyRequests {
+		t.Fatalf("request from a new key at capacity: status = %d, want %d", code, http.StatusTooManyRequests)
 	}
 }

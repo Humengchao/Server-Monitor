@@ -196,7 +196,7 @@ export default function Settings() {
                 label={t('settings.currentPassword')}
                 rules={[{ required: true, message: t('settings.currentPasswordRequired') }]}
               >
-                <Input.Password prefix={<LockOutlined />} autoComplete="current-password" />
+                <Input.Password prefix={<LockOutlined />} autoComplete="current-password" maxLength={72} />
               </Form.Item>
               <Form.Item
                 name="new_password"
@@ -206,7 +206,7 @@ export default function Settings() {
                   { min: 6, message: t('register.passwordMin') },
                 ]}
               >
-                <Input.Password prefix={<LockOutlined />} autoComplete="new-password" />
+                <Input.Password prefix={<LockOutlined />} autoComplete="new-password" maxLength={72} />
               </Form.Item>
               <Form.Item
                 name="confirm_password"
@@ -222,7 +222,7 @@ export default function Settings() {
                   }),
                 ]}
               >
-                <Input.Password prefix={<LockOutlined />} autoComplete="new-password" />
+                <Input.Password prefix={<LockOutlined />} autoComplete="new-password" maxLength={72} />
               </Form.Item>
               <Button type="primary" htmlType="submit" loading={savingPassword} block>
                 {t('settings.updatePassword')}

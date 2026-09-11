@@ -96,6 +96,7 @@
   "server.sshKeyEditPlaceholder": "Leave blank to keep unchanged",
   "server.sshHostKey": "SSH Host Key (optional)",
   "server.sshHostKeyPlaceholder": "Paste server public key for host verification",
+  "server.sshHostKeyWarning": "Leave blank and host verification is skipped, exposing SSH connections to man-in-the-middle attacks.",
   "server.tags": "Tags",
   "server.copyHost": "Click to copy host IP",
   "server.hostCopied": "Host IP copied",

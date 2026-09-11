@@ -59,6 +59,10 @@ func passwordTooLong(password string) bool {
 const tokenTTL = 72 * time.Hour
 
 func (h *AuthHandler) Register(c *gin.Context) {
+	if !h.cfg.AllowRegistration {
+		c.JSON(http.StatusForbidden, gin.H{"error": "registration is disabled on this server"})
+		return
+	}
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

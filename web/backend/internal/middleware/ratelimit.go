@@ -32,17 +32,27 @@ func RateLimit(requests int, per time.Duration) gin.HandlerFunc {
 	var mu sync.Mutex
 	buckets := make(map[string]*bucket)
 
+	// The map is bounded so a flood of one-shot IPs can't grow it without
+	// limit between cleanups. At the cap, stale entries are pruned inline; if
+	// it is still full, new keys are rejected — which is the limiter's job
+	// anyway. Known keys always keep working.
+	const maxBuckets = 10000
+
+	pruneStale := func(now time.Time) {
+		cutoff := now.Add(-10 * time.Minute)
+		for ip, b := range buckets {
+			if b.lastAccess.Before(cutoff) {
+				delete(buckets, ip)
+			}
+		}
+	}
+
 	// Periodic cleanup of stale buckets (every 5 minutes, remove entries idle > 10 minutes)
 	go func() {
 		for {
 			time.Sleep(5 * time.Minute)
 			mu.Lock()
-			cutoff := time.Now().Add(-10 * time.Minute)
-			for ip, b := range buckets {
-				if b.lastAccess.Before(cutoff) {
-					delete(buckets, ip)
-				}
-			}
+			pruneStale(time.Now())
 			mu.Unlock()
 		}
 	}()
@@ -52,6 +62,14 @@ func RateLimit(requests int, per time.Duration) gin.HandlerFunc {
 		mu.Lock()
 		b, ok := buckets[key]
 		if !ok {
+			if len(buckets) >= maxBuckets {
+				pruneStale(time.Now())
+			}
+			if len(buckets) >= maxBuckets {
+				mu.Unlock()
+				c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "rate limit exceeded"})
+				return
+			}
 			b = &bucket{tokens: requests, lastFill: time.Now(), lastAccess: time.Now()}
 			buckets[key] = b
 		}

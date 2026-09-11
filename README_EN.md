@@ -124,6 +124,7 @@ Enter multi-select from the dashboard toolbar; both the card and list views beco
 ### API Protection
 
 - Login and registration endpoints are protected by **token bucket rate limiting** (5 requests/min/IP) to prevent brute-force attacks and abuse
+- Registration is open by default; once your accounts exist, set `ALLOW_REGISTRATION=false` to close signup — `POST /api/auth/register` then answers 403
 - Request parameters are automatically validated via struct binding to prevent malformed input
 - Configurable CORS whitelist to restrict cross-origin request sources
 - Alert webhooks **reject private targets by default**: URLs resolving to loopback / RFC1918 / link-local / CGNAT addresses are refused at save time and redirects are never followed, so the alerting pipeline can't be used as an SSRF probe into the server's private network (opt out with `ALLOW_PRIVATE_WEBHOOKS=true`). The webhook self-test endpoint is additionally rate limited to 6 requests/min/IP
@@ -136,6 +137,7 @@ Enter multi-select from the dashboard toolbar; both the card and list views beco
 ### Deployment Security
 
 - Docker images are based on **minimal Alpine Linux builds** to reduce the attack surface
+- The backend container process runs as a **non-root user**; only the `ping` binary carries `CAP_NET_RAW` for latency probes
 - Sensitive configuration (database credentials, JWT secret, encryption key) is managed via **GitHub Secrets**, never committed to code
 - Database uses `ON DELETE CASCADE` foreign key constraints to ensure data consistency
 

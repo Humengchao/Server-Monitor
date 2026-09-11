@@ -15,6 +15,9 @@ services:
       retries: 3
       start_period: 15s
     environment:
+      # sslmode defaults to disable, which is only safe while the database sits
+      # on this host or the same bridge network; set POSTGRES_SSLMODE=require
+      # when the database is remote.
       DATABASE_URL: postgres://${POSTGRES_USER:-monitor}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-server_monitor}?sslmode=${POSTGRES_SSLMODE:-disable}
       JWT_SECRET: ${JWT_SECRET}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
@@ -25,6 +28,9 @@ services:
       # Alert webhooks may not target the host's private network unless this is
       # explicitly enabled. See README security notes.
       ALLOW_PRIVATE_WEBHOOKS: ${ALLOW_PRIVATE_WEBHOOKS:-false}
+      # Open signup is on by default; set to false once your accounts exist and
+      # the register endpoint starts answering 403. See README security notes.
+      ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-true}
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"

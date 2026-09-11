@@ -97,6 +97,7 @@ export default function Dashboard() {
   const [editingServer, setEditingServer] = useState<Server | null>(null);
   const [form] = Form.useForm<ServerFormValues>();
   const serverType = Form.useWatch('server_type', form) || 'linux';
+  const sshHostKey = Form.useWatch('ssh_host_key', form);
   const [tagValues, setTagValues] = useState<string[]>([]);
   const [filterTagIds, setFilterTagIds] = useState<string[]>([]);
   const [selectedCredential, setSelectedCredential] = useState<string | undefined>(undefined);
@@ -690,7 +691,11 @@ export default function Dashboard() {
               </Form.Item>
             </>
           )}
-          <Form.Item name="ssh_host_key" label={t('server.sshHostKey')}>
+          <Form.Item
+            name="ssh_host_key"
+            label={t('server.sshHostKey')}
+            extra={sshHostKey?.trim() ? undefined : <Text type="warning">{t('server.sshHostKeyWarning')}</Text>}
+          >
             <Input.TextArea rows={2} placeholder={t('server.sshHostKeyPlaceholder')} />
           </Form.Item>
           <Form.Item name="expires_at" label={t('server.expiresAt')}>
