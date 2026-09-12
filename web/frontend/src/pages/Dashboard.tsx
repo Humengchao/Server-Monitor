@@ -360,8 +360,6 @@ export default function Dashboard() {
     return values.reduce((sum, v) => sum + v, 0) / values.length;
   }, [availability]);
 
-  // Stable identities: ServerCard is memoized and holds onto these callbacks
-  // across renders it deliberately skips.
   const handleEdit = useCallback((server: Server) => {
     setEditingServer(server);
     setSelectedCredential(server.credential_id || undefined);
@@ -630,8 +628,6 @@ export default function Dashboard() {
               <ServerCard
                 server={s}
                 observedAt={refreshTimestamp}
-                onEdit={handleEdit}
-                onDelete={handleDelete}
                 selectable={selecting}
                 selected={selectedIds.includes(s.id)}
                 onToggleSelect={toggleSelect}

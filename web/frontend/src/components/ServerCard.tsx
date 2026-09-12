@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button, Card, Checkbox, Tag, Progress, Typography, Space, Tooltip } from 'antd';
+import { Card, Checkbox, Tag, Progress, Typography, Space, Tooltip } from 'antd';
 import {
   WindowsOutlined,
   CloudServerOutlined,
@@ -12,8 +12,6 @@ import {
   CalendarOutlined,
   ThunderboltOutlined,
   EnvironmentOutlined,
-  EditOutlined,
-  DeleteOutlined,
   RiseOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
@@ -28,8 +26,6 @@ const { Text } = Typography;
 interface Props {
   server: Server;
   observedAt: number;
-  onEdit?: (server: Server) => void;
-  onDelete?: (server: Server) => void;
   /** While selecting, a click toggles selection instead of opening the host. */
   selectable?: boolean;
   selected?: boolean;
@@ -41,7 +37,7 @@ interface Props {
 }
 
 function ServerCard({
-  server, observedAt, onEdit, onDelete, selectable, selected, onToggleSelect, availability, firing,
+  server, observedAt, selectable, selected, onToggleSelect, availability, firing,
 }: Props) {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
@@ -70,8 +66,6 @@ function ServerCard({
       role={selectable ? 'checkbox' : 'link'}
       aria-checked={selectable ? !!selected : undefined}
       onKeyDown={(event) => {
-        // Do not open/toggle the card when Enter/Space is used on an action
-        // button inside it.
         if (event.target !== event.currentTarget) return;
         if (event.key === 'Enter' || (selectable && event.key === ' ')) {
           event.preventDefault();
@@ -101,23 +95,6 @@ function ServerCard({
           <span />{isOnline ? t('dashboard.online') : t('dashboard.offline')}
         </div>
       </div>
-
-      {!selectable && (onEdit || onDelete) && (
-        // Revealed on hover/focus so the resting card stays uncluttered. The
-        // click must not bubble, or it would also open the detail page.
-        <div className="server-card-actions" onClick={(event) => event.stopPropagation()}>
-          {onEdit && (
-            <Tooltip title={t('common.edit')}>
-              <Button size="small" type="text" aria-label={t('common.edit')} icon={<EditOutlined />} onClick={() => onEdit(server)} />
-            </Tooltip>
-          )}
-          {onDelete && (
-            <Tooltip title={t('common.delete')}>
-              <Button size="small" type="text" danger aria-label={t('common.delete')} icon={<DeleteOutlined />} onClick={() => onDelete(server)} />
-            </Tooltip>
-          )}
-        </div>
-      )}
 
       {/* Rendered only when there is something to show: an empty tag row still
           took 24px plus 25px of margin, which is where the odd band of white

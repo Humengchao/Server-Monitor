@@ -467,27 +467,7 @@ button, input, textarea, select { font: inherit; }
 .sort-select { min-width: 150px; }
 .fleet-toolbar .ant-segmented { background: var(--surface-soft); }
 
-/* Card hover actions */
 .server-card { position: relative; }
-.server-card-actions {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 2;
-  display: flex;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--surface) 92%, transparent);
-  box-shadow: var(--shadow-sm);
-  opacity: 0;
-  transform: translateY(-4px);
-  transition: opacity .16s ease, transform .16s ease;
-  backdrop-filter: blur(8px);
-}
-.server-card:hover .server-card-actions,
-.server-card:focus-within .server-card-actions { opacity: 1; transform: none; }
 .server-card.is-offline { opacity: .84; }
 .server-card.is-offline .server-platform { filter: grayscale(.5); }
 .location-tag.ant-tag { color: var(--muted); background: var(--surface-soft); }
@@ -860,8 +840,6 @@ button, input, textarea, select { font: inherit; }
   .detail-actions { width: 100%; }
   .detail-actions .ant-space-item { flex: 1; }
   .detail-actions .ant-btn { width: 100%; }
-  /* Hover is unavailable on touch screens; keep card actions discoverable. */
-  .server-card-actions { opacity: 1; transform: none; }
   .stat-tile-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .stat-tile { padding: 12px; gap: 9px; }
   .stat-tile-icon { width: 32px; height: 32px; flex-basis: 32px; font-size: 14px; }
