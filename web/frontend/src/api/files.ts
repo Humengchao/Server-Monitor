@@ -11,28 +11,36 @@ export interface RemoteFileEntry {
   is_file: boolean;
   is_symlink: boolean;
 }
-export interface RemoteFileList { path: string; parent: string; entries: RemoteFileEntry[]; truncated: boolean }
+export interface RemoteFileList { path: string; parent: string; entries: RemoteFileEntry[]; truncated: boolean; next_cursor?: string }
+export interface FileMetadata { exists: boolean; entry?: RemoteFileEntry; version: string }
+export interface FileAudit { id: string; action: string; path: string; target: string; backup_path: string; outcome: string; error_code: string; created_at: string }
 export interface RemoteText { path: string; content: string; revision: string }
 const endpoint = (target: FileTarget) => '/servers/' + encodeURIComponent(target.serverId) + '/files';
 const params = (target: FileTarget, path: string) => ({ path, container: target.containerId || undefined });
 
 export const filesApi = {
-  list: (target: FileTarget, path: string, signal: AbortSignal) =>
-    client.get<RemoteFileList>(endpoint(target), { params: params(target, path), signal, timeout: 120000 }),
+  list: (target: FileTarget, path: string, signal: AbortSignal, cursor = '') =>
+    client.get<RemoteFileList>(endpoint(target), { params: { ...params(target, path), cursor: cursor || undefined, limit: 100 }, signal, timeout: 120000 }),
+  metadata: (target: FileTarget, path: string, signal: AbortSignal) =>
+    client.get<FileMetadata>(endpoint(target) + '/metadata', { params: params(target, path), signal, timeout: 120000 }),
+  change: (target: FileTarget, path: string, request: { action: string; kind?: string; name?: string; version?: string }, signal: AbortSignal) =>
+    client.post(endpoint(target) + '/change', request, { params: params(target, path), signal, timeout: 120000 }),
+  history: (target: FileTarget, signal: AbortSignal) =>
+    client.get<FileAudit[]>(endpoint(target) + '/audit', { params: { container: target.containerId || undefined }, signal }),
   read: (target: FileTarget, path: string, signal: AbortSignal) =>
     client.get<RemoteText>(endpoint(target) + '/text', { params: params(target, path), signal, timeout: 120000 }),
   save: (target: FileTarget, path: string, content: string, revision: string, signal: AbortSignal) =>
-    client.put<{ revision: string }>(endpoint(target) + '/text', { content, revision }, { params: params(target, path), signal, timeout: 120000 }),
+    client.put<{ revision: string; backup_path: string }>(endpoint(target) + '/text', { content, revision }, { params: params(target, path), signal, timeout: 120000 }),
   download: (target: FileTarget, path: string, signal: AbortSignal, progress: (percent: number) => void) =>
     client.get<Blob>(endpoint(target) + '/download', {
       params: params(target, path), signal, timeout: 120000, responseType: 'blob',
       onDownloadProgress: (event) => { if (event.total) progress(Math.round(event.loaded / event.total * 100)); },
     }),
-  upload: (target: FileTarget, path: string, file: File, overwrite: boolean, signal: AbortSignal, progress: (percent: number) => void) => {
+  upload: (target: FileTarget, path: string, file: File, overwrite: boolean, version: string, signal: AbortSignal, progress: (percent: number) => void) => {
     const body = new FormData();
     body.append('file', file);
     return client.post(endpoint(target) + '/upload', body, {
-      params: { ...params(target, path), overwrite: overwrite ? '1' : undefined }, signal, timeout: 120000,
+      params: { ...params(target, path), overwrite: overwrite ? '1' : undefined, version }, signal, timeout: 120000,
       onUploadProgress: (event) => { if (event.total) progress(Math.round(event.loaded / event.total * 100)); },
     });
   },

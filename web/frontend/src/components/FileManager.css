@@ -1,4 +1,5 @@
 .file-manager .ant-alert { margin-bottom: 16px; }
+.file-pagination { margin-top: 16px; display: flex; justify-content: flex-end; }
 .file-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
 .file-toolbar > .ant-input-search { flex: 1 1 280px; }
 .file-location { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }

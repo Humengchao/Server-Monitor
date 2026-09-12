@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -27,11 +29,13 @@ var validDockerID = regexp.MustCompile(`^[a-fA-F0-9]{1,64}$`)
 // exec sessions dial their own connection: they are long-lived and their
 // teardown closes the client.
 type DockerHandler struct {
-	sshCache *services.SSHConnCache
+	sshCache   *services.SSHConnCache
+	results    *services.RequestCache[[]DockerContainer]
+	statistics *services.RequestCache[[]DockerContainer]
 }
 
 func NewDockerHandler(sshCache *services.SSHConnCache) *DockerHandler {
-	return &DockerHandler{sshCache: sshCache}
+	return &DockerHandler{sshCache: sshCache, results: services.NewRequestCache[[]DockerContainer](4), statistics: services.NewRequestCache[[]DockerContainer](4)}
 }
 
 type DockerContainer struct {
@@ -116,47 +120,67 @@ func (h *DockerHandler) CheckDocker(c *gin.Context) {
 	})
 }
 
-func (h *DockerHandler) ListContainers(c *gin.Context) {
-	userID := c.MustGet("user_id").(uuid.UUID)
+func dockerCacheKey(server *models.Server, detailed bool) string {
+	fingerprint := sha256.Sum256([]byte(fmt.Sprintf("%s:%d:%s:%s:%s:%s", server.Host, server.Port, server.SSHUsername, server.SSHPassword, server.SSHKey, server.SSHHostKey)))
+	return fmt.Sprintf("%s:%x:%t", server.ID, fingerprint, detailed)
+}
+func (h *DockerHandler) ListContainers(c *gin.Context) { h.containers(c, false) }
+func (h *DockerHandler) ContainerStats(c *gin.Context) { h.containers(c, true) }
+func (h *DockerHandler) containers(c *gin.Context, detailed bool) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		c.JSON(400, gin.H{"error": "invalid id"})
 		return
 	}
-	db := c.MustGet("db").(*models.DB)
-	server, err := models.GetServerByIDAndUser(db, id, userID)
+	server, err := models.GetServerByIDAndUser(c.MustGet("db").(*models.DB), id, c.MustGet("user_id").(uuid.UUID))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
+		c.JSON(404, gin.H{"error": "server not found"})
 		return
 	}
-
+	ttl := 3 * time.Second
+	cache := h.results
+	if detailed {
+		ttl = 10 * time.Second
+		cache = h.statistics
+	}
+	result, err := cache.Get(c.Request.Context(), dockerCacheKey(server, detailed), ttl, func(ctx context.Context) ([]DockerContainer, error) { return h.loadContainers(ctx, server, detailed) })
+	if err != nil {
+		c.JSON(502, gin.H{"error": "failed to read Docker data"})
+		return
+	}
+	c.JSON(200, result)
+}
+func (h *DockerHandler) loadContainers(ctx context.Context, server *models.Server, detailed bool) ([]DockerContainer, error) {
 	client, err := h.sshCache.Get(server)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "SSH connection failed"})
-		return
+		return nil, err
 	}
+	return readDockerContainers(ctx, detailed, func(task context.Context, arguments string, limit int) (string, error) {
+		return services.RunDockerContext(task, client, arguments, limit)
+	})
+}
 
-	// --size adds the writable-layer size to each row. It is supported by both
-	// Linux and Windows Docker CLIs. The command is bounded because a host can
-	// have an unexpectedly large number of containers.
-	psFormat := `ps -a --size --format '{"id":"{{.ID}}","name":"{{.Names}}","image":"{{.Image}}","status":"{{.Status}}","state":"{{.State}}","ports":"{{.Ports}}","created":"{{.CreatedAt}}","size":"{{.Size}}"}'`
-	output, _, err := services.RunDockerCmdBounded(client, psFormat, services.DockerCommandTimeout, services.DockerListOutputLimit)
+func readDockerContainers(ctx context.Context, detailed bool, run func(context.Context, string, int) (string, error)) ([]DockerContainer, error) {
+	options := "ps -a --no-trunc "
+	if detailed {
+		options += "--size "
+	}
+	format := `--format '{"id":"{{.ID}}","name":"{{.Names}}","image":"{{.Image}}","status":"{{.Status}}","state":"{{.State}}","ports":"{{.Ports}}","created":"{{.CreatedAt}}","size":"{{.Size}}"}'`
+	output, err := run(ctx, options+format, services.DockerListOutputLimit)
+	if err != nil && detailed && ctx.Err() == nil {
+		output, err = run(ctx, "ps -a --no-trunc "+format, services.DockerListOutputLimit)
+	}
 	if err != nil {
-		// Very old Docker versions may not understand --size. Retain the
-		// container list in that case; metrics simply remain unavailable.
-		output, _, err = services.RunDockerCmdBounded(client, `ps -a --format '{"id":"{{.ID}}","name":"{{.Names}}","image":"{{.Image}}","status":"{{.Status}}","state":"{{.State}}","ports":"{{.Ports}}","created":"{{.CreatedAt}}"}'`, services.DockerCommandTimeout, services.DockerListOutputLimit)
+		return nil, err
 	}
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list containers"})
-		return
+	statsByID := map[string]services.DockerContainerStats{}
+	if detailed {
+		statsOutput, statsErr := run(ctx, `stats --no-stream --no-trunc --format '{{json .}}'`, services.DockerStatsOutputLimit)
+		if statsErr != nil {
+			return nil, statsErr
+		}
+		statsByID = services.ParseDockerStats(statsOutput)
 	}
-
-	// `docker stats` only reports running containers. It is deliberately
-	// best-effort: a stopped container still has useful ps metadata and disk
-	// usage, even if a daemon refuses the stats request.
-	statsOutput, _, _ := services.RunDockerCmdBounded(client, `stats --no-stream --format '{{json .}}'`, services.DockerCommandTimeout, services.DockerStatsOutputLimit)
-	statsByID := services.ParseDockerStats(statsOutput)
-
 	type dockerContainerWire struct {
 		DockerContainer
 		Size string `json:"size"`
@@ -171,6 +195,9 @@ func (h *DockerHandler) ListContainers(c *gin.Context) {
 		if err := json.Unmarshal([]byte(line), &wire); err == nil {
 			dc := wire.DockerContainer
 			dc.DiskUsage, dc.DiskVirtualUsage, dc.DiskAvailable = services.DockerSizesFromPS(wire.Size)
+			if !detailed {
+				dc.DiskAvailable = false
+			}
 			if stat, ok := statsByID[dc.ID]; ok {
 				dc.CPUPercent = stat.CPUPercent
 				dc.MemoryUsage = stat.MemoryUsage
@@ -204,7 +231,7 @@ func (h *DockerHandler) ListContainers(c *gin.Context) {
 		containers = []DockerContainer{}
 	}
 
-	c.JSON(http.StatusOK, containers)
+	return containers, nil
 }
 
 func (h *DockerHandler) ContainerAction(c *gin.Context) {
@@ -239,6 +266,8 @@ func (h *DockerHandler) ContainerAction(c *gin.Context) {
 		return
 	}
 
+	defer h.results.Forget(dockerCacheKey(server, false))
+	defer h.statistics.Forget(dockerCacheKey(server, true))
 	_, err = services.RunDockerCmd(client, action+" "+containerID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "action failed"})

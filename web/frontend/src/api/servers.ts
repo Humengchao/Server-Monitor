@@ -224,6 +224,9 @@ export const serversApi = {
   getContainers: (id: string, signal?: AbortSignal) =>
     client.get<DockerContainer[]>(`/servers/${id}/docker/containers`, { timeout: 20000, signal }),
 
+  getContainerStats: (id: string, signal?: AbortSignal) =>
+    client.get<DockerContainer[]>(`/servers/${id}/docker/stats`, { timeout: 35000, signal }),
+
   containerAction: (id: string, containerId: string, action: 'start' | 'stop' | 'restart') =>
     client.post(`/servers/${id}/docker/containers/${containerId}/${action}`, undefined, { timeout: 20000 }),
 

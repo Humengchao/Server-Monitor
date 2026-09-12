@@ -1,8 +1,10 @@
 package router
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -88,6 +90,16 @@ func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, noti
 		c.JSON(200, gin.H{"status": "ok"})
 	})
 
+	r.GET("/api/ready", func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+		defer cancel()
+		if err := db.PingContext(ctx); err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "unavailable"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "ready"})
+	})
+
 	// Public, anonymized status endpoint. It is rate-limited separately and its
 	// model query never selects connection details or ownership information.
 	r.GET("/api/public/status", middleware.RateLimit(60, 1*time.Minute), publicStatusH.Get)
@@ -138,10 +150,14 @@ func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, noti
 			files := servers.Group("/:id/files", filesH.Deadline)
 			files.GET("", filesH.List)
 			files.GET("/text", filesH.ReadText)
-			files.PUT("/text", middleware.RateLimit(60, time.Minute), filesH.SaveText)
+			files.PUT("/text", middleware.RateLimit(60, time.Minute), filesH.Audit, filesH.SaveText)
 			files.GET("/download", filesH.Download)
-			files.POST("/upload", middleware.RateLimit(60, time.Minute), filesH.Upload)
+			files.POST("/upload", middleware.RateLimit(60, time.Minute), filesH.Audit, filesH.Upload)
+			files.GET("/metadata", filesH.Metadata)
+			files.GET("/audit", filesH.History)
+			files.POST("/change", middleware.RateLimit(60, time.Minute), filesH.Audit, filesH.Change)
 			servers.GET("/:id/docker/containers", dockerH.ListContainers)
+			servers.GET("/:id/docker/stats", dockerH.ContainerStats)
 			servers.POST("/:id/docker/containers/:containerId/:action", dockerH.ContainerAction)
 			servers.GET("/:id/docker/containers/:containerId/logs", dockerH.ContainerLogs)
 		}

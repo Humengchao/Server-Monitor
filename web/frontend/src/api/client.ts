@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { useAuthStore } from '../store/authStore';
 
 declare module 'axios' {
   export interface AxiosRequestConfig {
@@ -23,6 +24,7 @@ const client = axios.create({
 });
 
 client.interceptors.request.use((config) => {
+  if (useAuthStore.getState().expired && !config.skipAuthRedirect) throw new axios.CanceledError('Session expired');
   const token = localStorage.getItem('token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -39,9 +41,7 @@ client.interceptors.response.use(
     const skipRedirect = (err.config as { skipAuthRedirect?: boolean } | undefined)?.skipAuthRedirect;
     if (err.response?.status === 401 && !skipRedirect
       && !['/login', '/register'].includes(window.location.pathname)) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      window.location.href = '/login';
+      useAuthStore.getState().expire();
     }
     return Promise.reject(err);
   }

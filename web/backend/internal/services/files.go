@@ -49,10 +49,11 @@ type RemoteFileEntry struct {
 }
 
 type RemoteFileList struct {
-	Path      string            `json:"path"`
-	Parent    string            `json:"parent"`
-	Entries   []RemoteFileEntry `json:"entries"`
-	Truncated bool              `json:"truncated"`
+	Path       string            `json:"path"`
+	Parent     string            `json:"parent"`
+	Entries    []RemoteFileEntry `json:"entries"`
+	Truncated  bool              `json:"truncated"`
+	NextCursor string            `json:"next_cursor,omitempty"`
 }
 
 type RemoteFiles interface {
@@ -150,11 +151,12 @@ func SaveRemoteText(store RemoteFiles, filename, content, revision string) error
 }
 
 type sftpFiles struct {
-	client  *sftp.Client
-	session *ssh.Session
-	context context.Context
-	stop    func() bool
-	windows bool
+	transport *ssh.Client
+	client    *sftp.Client
+	session   *ssh.Session
+	context   context.Context
+	stop      func() bool
+	windows   bool
 }
 
 func NewSFTPFiles(ctx context.Context, client *ssh.Client, serverType string) (RemoteFiles, error) {
@@ -187,7 +189,7 @@ func NewSFTPFiles(ctx context.Context, client *ssh.Client, serverType string) (R
 		return nil, err
 	}
 	failed = false
-	return &sftpFiles{client: remote, session: session, context: ctx, stop: stop, windows: serverType == "windows"}, nil
+	return &sftpFiles{transport: client, client: remote, session: session, context: ctx, stop: stop, windows: serverType == "windows"}, nil
 }
 
 func (store *sftpFiles) Close() error {

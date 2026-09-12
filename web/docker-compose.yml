@@ -6,6 +6,7 @@ name: server-monitor
 services:
   backend:
     image: ${BACKEND_IMAGE}
+    restart: unless-stopped
     ports:
       - "19527:19527"
     healthcheck:
@@ -42,6 +43,13 @@ services:
 
   frontend:
     image: ${FRONTEND_IMAGE}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/api/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     ports:
       - "19080:80"
     environment:

@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Form, Input, Button, Card, Typography, App } from 'antd';
 import { UserOutlined, LockOutlined, CloudServerOutlined, SafetyCertificateOutlined, LineChartOutlined, GlobalOutlined } from '@ant-design/icons';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '../store/authStore';
 import { authApi } from '../api/auth';
@@ -19,6 +19,8 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const { setAuth } = useAuthStore();
+  const [searchParams] = useSearchParams();
+  useEffect(() => { if (searchParams.get('logout') === '1') useAuthStore.getState().logout(); }, [searchParams]);
 
   const handleLogin = async (values: { username: string; password: string }) => {
     setLoading(true);

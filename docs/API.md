@@ -998,8 +998,13 @@ GET /api/servers/:id/docker/check?refresh=1
 GET /api/servers/:id/docker/containers
 ```
 
-返回该主机上的全部容器（包括已停止容器）。资源字段均为尽力而为：运行中的容器从
-`docker stats --no-stream` 获取实时 CPU/内存，磁盘字段从 `docker ps --size` 获取容器层大小。
+此接口只读取基础信息（包括已停止容器），不执行 --size 或 stats，资源 available 标记为 false。基础结果短时缓存 3 秒，先返回给界面。
+
+```
+GET /api/servers/:id/docker/stats
+```
+
+资源接口返回同形状的容器数组，通过 id 合并到基础列表。运行中容器从 `docker stats --no-stream` 获取 CPU/内存，磁盘字段从 `docker ps --size` 获取容器层大小；结果缓存 10 秒。两类请求分别限制并发、合并相同连接配置的请求，容器操作后清除缓存。以下示例为资源接口响应：
 
 ```json
 [
@@ -1038,14 +1043,13 @@ GET /api/servers/:id/docker/containers
 | `disk_available` | 是否成功执行并解析了 `docker ps --size` |
 | `stats_available` | 是否拿到实时 `docker stats`；停止容器通常为 `false`，前端应显示为暂无数据而不是 0 |
 
-资源命令有 15 秒超时和输出上限；旧版 Docker 不支持 `--size` 时仍返回容器基础信息，但磁盘字段标记为不可用。
+共享资源任务有 30 秒上下文预算和输出上限；单个等待者取消不打断其他等待者。旧版 Docker 不支持 `--size` 时回退基础查询并继续读取 CPU/内存。统计失败不会影响已返回的基础列表。
 
 | 状态码 | 说明 |
 |---|---|
 | 200 | 成功；单个容器缺少实时统计时仍会返回基础信息 |
 | 404 | 服务器不存在或不属于当前用户 |
-| 500 | Docker 容器列表读取失败 |
-| 502 | SSH 连接失败 |
+| 502 | SSH / Docker 列表或资源读取失败 |
 
 ---
 
@@ -1119,4 +1123,8 @@ Token 本身是无状态的 JWT（HS256，有效期 72 小时），但 `users.to
 
 ## 文件管理（Web）
 
-新增受登录及服务器归属校验保护的 `/api/servers/:id/files` 接口：目录列表、`GET/PUT /text` 文本读取/保存、`GET /download` 下载及 `POST /upload` 上传。可通过 `container` 查询参数选择运行中的 Linux 容器，省略则使用主机 SFTP。保存文本需提交读取时的 `revision`；同名上传默认返回 409，确认覆盖需 `overwrite=1`。完整字段、大小限制和前置条件见 [文件管理说明](web-files.md)。
+`/api/servers/:id/files` 提供有界分页目录、文本读写、上传/下载、metadata 预检、新建/重命名/非递归删除及操作记录；所有接口校验登录和服务器归属。`container` 选择运行中的 Linux 容器，省略使用主机 SFTP。文本保存携带 SHA-256 revision 并先备份；上传须先读取 metadata version，再明确确认覆盖，后台最终校验冲突且不自动重传。修改类接口在审计不可写时返回 503 并拒绝执行。完整参数、限制和并发边界见 [文件管理说明](web-files.md)。
+
+## 就绪检查
+
+`GET /api/ready` 无需登录，使用 2 秒超时 ping 数据库；成功返回 200 `{"status":"ready"}`，不可用返回 503 `{"status":"unavailable"}`，不暴露数据库错误细节。`/api/health` 保留原存活语义。发布通过前端代理访问 ready，配合生产浏览器冒烟；流程见 [发布说明](web-deployment.md)。

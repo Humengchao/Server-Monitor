@@ -12,6 +12,12 @@ import { formatBytes, severityColor } from '../utils/format';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { usePolling } from '../hooks/usePolling';
+import { createRequestQueue } from '../utils/requestQueue';
+const queueStats = createRequestQueue(4);
+function mergeStats(containers: DockerContainer[], stats: DockerContainer[]) {
+  const readings = new Map(stats.map(item => [item.id, item]));
+  return containers.map(item => { const reading = readings.get(item.id); return reading && reading.state === item.state ? { ...reading, id: item.id, name: item.name, image: item.image, state: item.state, status: item.status, ports: item.ports, created: item.created } : item; });
+}
 import '@xterm/xterm/css/xterm.css';
 
 const { Title, Text } = Typography;
@@ -23,6 +29,8 @@ interface ServerDocker {
   loading: boolean;
   loaded: boolean;
   error: boolean;
+  statsLoading?: boolean;
+  statsError?: boolean;
 }
 
 const stateColor: Record<string, string> = {
@@ -310,7 +318,10 @@ export function ServerDockerPanel({ serverId, version }: { serverId: string; ver
   const { message, modal } = App.useApp();
   const [containers, setContainers] = useState<DockerContainer[]>([]);
   const [loading, setLoading] = useState(true);
-  const loadingRef = useRef(false);
+  const inventoryRequest = useRef<AbortController | null>(null);
+  const statsRequest = useRef<AbortController | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [statsError, setStatsError] = useState(false);
   const [logsTarget, setLogsTarget] = useState<{ containerId: string; containerName: string } | null>(null);
   const [execTarget, setExecTarget] = useState<{ containerId: string; containerName: string } | null>(null);
   // `${containerId}:${action}` of the action currently in flight, so the row's
@@ -318,25 +329,42 @@ export function ServerDockerPanel({ serverId, version }: { serverId: string; ver
   const [actionBusy, setActionBusy] = useState<string | null>(null);
 
   const loadContainers = useCallback(async (showLoading = true) => {
-    if (loadingRef.current) return;
-    loadingRef.current = true;
+    if (inventoryRequest.current) return;
+    const controller = new AbortController();
+    inventoryRequest.current = controller;
     if (showLoading) setLoading(true);
     try {
-      const res = await serversApi.getContainers(serverId);
-      setContainers(res.data || []);
+      const response = await serversApi.getContainers(serverId, controller.signal);
+      if (controller.signal.aborted) return;
+      setContainers(previous => mergeStats(response.data || [], previous));
+      setStatsLoading(true);
+      setStatsError(false);
+      statsRequest.current?.abort();
+      const statistics = new AbortController();
+      statsRequest.current = statistics;
+      void queueStats(() => serversApi.getContainerStats(serverId, statistics.signal)).then(response => {
+        if (!statistics.signal.aborted) setContainers(current => mergeStats(current, response.data || []));
+      }).catch(() => { if (!statistics.signal.aborted) setStatsError(true); })
+        .finally(() => { if (statsRequest.current === statistics) { statsRequest.current = null; setStatsLoading(false); } });
     } catch {
-      if (showLoading) message.error(t('docker.loadFailed'));
+      if (!controller.signal.aborted && showLoading) message.error(t('docker.loadFailed'));
     } finally {
-      if (showLoading) setLoading(false);
-      loadingRef.current = false;
+      if (inventoryRequest.current === controller) { inventoryRequest.current = null; setLoading(false); }
     }
   }, [message, serverId, t]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
+      setContainers([]);
       void loadContainers();
     }, 0);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      inventoryRequest.current?.abort();
+      inventoryRequest.current = null;
+      statsRequest.current?.abort();
+      statsRequest.current = null;
+    };
   }, [loadContainers]);
 
   // Container resource values are live readings. Refresh only while this
@@ -348,6 +376,9 @@ export function ServerDockerPanel({ serverId, version }: { serverId: string; ver
     try {
       await serversApi.containerAction(serverId, containerId, action);
       message.success(t('docker.actionSuccess', { action: t(`docker.${action}`) }));
+      inventoryRequest.current?.abort();
+      inventoryRequest.current = null;
+      statsRequest.current?.abort();
       await loadContainers();
     } catch {
       message.error(t('docker.actionFailed', { action: t(`docker.${action}`) }));
@@ -436,7 +467,7 @@ export function ServerDockerPanel({ serverId, version }: { serverId: string; ver
           <Text type="secondary">{t('docker.containers', { count: containers.length })}</Text>
         </Space>
       )}
-      extra={<Button icon={<ReloadOutlined />} onClick={() => { void loadContainers(); }}>{t('common.refresh')}</Button>}
+      extra={<Space>{statsLoading && <Tag>{t('docker.statsLoading')}</Tag>}{statsError && <Tag color="warning">{t('docker.statsError')}</Tag>}<Button icon={<ReloadOutlined />} onClick={() => { void loadContainers(); }}>{t('common.refresh')}</Button></Space>}
     >
       <Table
         className="server-table"
@@ -507,7 +538,17 @@ export default function Docker() {
     try {
       const response = await serversApi.getContainers(serverId, controller.signal);
       if (generation !== loadGenerationRef.current || controller.signal.aborted) return;
-      setServers((previous) => previous.map((item) => item.server.id === serverId ? { ...item, containers: response.data || [], loading: false, loaded: true, error: false } : item));
+      setServers((previous) => previous.map((item) => item.server.id === serverId ? { ...item, containers: mergeStats(response.data || [], item.containers), loading: false, loaded: true, error: false, statsLoading: true, statsError: false } : item));
+      const statsController = new AbortController();
+      requestsRef.current.get('stats:' + serverId)?.abort();
+      requestsRef.current.set('stats:' + serverId, statsController);
+      void queueStats(() => serversApi.getContainerStats(serverId, statsController.signal)).then((stats) => {
+        if (generation !== loadGenerationRef.current || statsController.signal.aborted) return;
+        setServers(previous => previous.map(item => item.server.id === serverId ? { ...item, containers: mergeStats(item.containers, stats.data || []), statsLoading: false } : item));
+      }).catch(() => {
+        if (generation !== loadGenerationRef.current || statsController.signal.aborted) return;
+        setServers(previous => previous.map(item => item.server.id === serverId ? { ...item, statsLoading: false, statsError: true } : item));
+      }).finally(() => { if (requestsRef.current.get('stats:' + serverId) === statsController) requestsRef.current.delete('stats:' + serverId); });
     } catch {
       if (generation !== loadGenerationRef.current || controller.signal.aborted) return;
       setServers((previous) => previous.map((item) => item.server.id === serverId ? { ...item, loading: false, error: true } : item));
@@ -558,7 +599,10 @@ export default function Docker() {
     try {
       await serversApi.containerAction(serverId, containerId, action);
       message.success(t('docker.actionSuccess', { action: t(`docker.${action}`) }));
-      loadContainers(serverId);
+      requestsRef.current.get(serverId)?.abort();
+      requestsRef.current.delete(serverId);
+      requestsRef.current.get('stats:' + serverId)?.abort();
+      void loadContainers(serverId);
     } catch {
       message.error(t('docker.actionFailed', { action: t(`docker.${action}`) }));
     } finally {
@@ -698,6 +742,8 @@ export default function Docker() {
         </div>
         <div className="docker-host-counts">
           {sd.error && <Tag color="error">{t('docker.loadFailed')}</Tag>}
+          {sd.statsLoading && <Tag>{t('docker.statsLoading')}</Tag>}
+          {sd.statsError && <Tag color="warning">{t('docker.statsFailed')}</Tag>}
           {sd.loaded ? (
             <>
               <span className="docker-count running">

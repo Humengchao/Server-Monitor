@@ -185,6 +185,8 @@ npm install && npm run dev
 
 The project uses GitHub Actions to automatically build Docker images and deploy to the server. Push to the `main` branch or manually trigger the workflow.
 
+Releases run backend tests and browser smoke tests before deployment, deploy the exact SHA, verify production readiness/pages, and roll back on failure. Production settings live in `/opt/server-monitor/shared/.env`; an existing `web/.env` is imported once and never overwritten. **New installations must provision shared/.env first.** Database credentials, JWT/encryption keys and runtime switches are no longer rewritten from GitHub Secrets. See [release operations and rollback (Chinese)](docs/web-deployment.md).
+
 ### Prerequisites
 
 - Server with Docker and Docker Compose installed
@@ -200,13 +202,6 @@ Add the following secrets in **Settings -> Secrets and variables -> actions**:
 | `DEPLOY_HOST` | Server IP or domain | `1.2.3.4` |
 | `DEPLOY_USER` | SSH login username | `root` |
 | `DEPLOY_PASSWORD` | SSH login password | - |
-| `POSTGRES_HOST` | PostgreSQL host | `127.0.0.1` |
-| `POSTGRES_PORT` | PostgreSQL port | `5432` |
-| `POSTGRES_USER` | PostgreSQL username | `postgres` |
-| `POSTGRES_PASSWORD` | PostgreSQL password | - |
-| `POSTGRES_DB` | Database name | `svrmonitor` |
-| `JWT_SECRET` | JWT signing secret (random string) | `openssl rand -hex 32` |
-| `ENCRYPTION_KEY` | SSH credential encryption key (32 bytes) | `openssl rand -hex 16` |
 | `DOMAIN` | Website domain name | `svr.hmchxd.com` |
 | `GHCR_PAT` | GitHub personal access token (read:packages scope) | See note below |
 

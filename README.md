@@ -186,6 +186,8 @@ npm install && npm run dev
 
 项目通过 GitHub Actions 自动构建 Docker 镜像并部署到服务器。Push 到 `main` 分支或手动触发 workflow 即可。
 
+发布前执行后端测试与前端浏览器回归，按本次 SHA 发布；部署后校验数据库就绪与生产页面，失败自动回滚。生产配置持久保存在 `/opt/server-monitor/shared/.env`，首次升级自动保留旧 `web/.env`，不再从 GitHub Secrets 重写应用配置。**新部署须先配置 shared/.env**；迁移、必要配置、手动回滚与保留策略见 [Web 发布说明](docs/web-deployment.md)。
+
 ### 前置条件
 
 - 服务器已安装 Docker 和 Docker Compose
@@ -201,13 +203,6 @@ npm install && npm run dev
 | `DEPLOY_HOST` | 服务器 IP 或域名 | `1.2.3.4` |
 | `DEPLOY_USER` | SSH 登录用户名 | `root` |
 | `DEPLOY_PASSWORD` | SSH 登录密码 | - |
-| `POSTGRES_HOST` | PostgreSQL 地址 | `127.0.0.1` |
-| `POSTGRES_PORT` | PostgreSQL 端口 | `5432` |
-| `POSTGRES_USER` | PostgreSQL 用户名 | `postgres` |
-| `POSTGRES_PASSWORD` | PostgreSQL 密码 | - |
-| `POSTGRES_DB` | 数据库名称 | `svrmonitor` |
-| `JWT_SECRET` | JWT 签名密钥（随机字符串） | `openssl rand -hex 32` |
-| `ENCRYPTION_KEY` | SSH 凭据加密密钥（32 字节） | `openssl rand -hex 16` |
 | `DOMAIN` | 网站域名 | `svr.hmchxd.com` |
 | `GHCR_PAT` | GitHub 个人访问令牌（read:packages 权限） | 见下方说明 |
 

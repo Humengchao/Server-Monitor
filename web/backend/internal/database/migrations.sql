@@ -260,3 +260,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_alert_events_open ON alert_events(rule_id,
 -- last_seen_at was never written; liveness comes from
 -- server_latest_metrics.recorded_at instead.
 ALTER TABLE servers DROP COLUMN IF EXISTS last_seen_at;
+
+CREATE TABLE IF NOT EXISTS file_operations (
+ id UUID PRIMARY KEY,
+ user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ server_id UUID NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+ container_id TEXT NOT NULL DEFAULT '',
+ action TEXT NOT NULL,
+ path TEXT NOT NULL,
+ target TEXT NOT NULL DEFAULT '',
+ backup_path TEXT NOT NULL DEFAULT '',
+ outcome TEXT NOT NULL,
+ error_code TEXT NOT NULL DEFAULT '',
+ created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_file_operations_owner_time ON file_operations(user_id,server_id,container_id,created_at DESC);

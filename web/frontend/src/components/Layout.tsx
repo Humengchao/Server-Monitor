@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { Layout as AntLayout, Menu, Button, Avatar, Badge, Space, Tooltip, Typography, App } from 'antd';
+import React, { useCallback, useContext, useEffect, useState } from 'react';
+import { Layout as AntLayout, Menu, Button, Avatar, Badge, Space, Tooltip, Typography } from 'antd';
 import {
   DashboardOutlined,
   SunOutlined,
@@ -20,28 +20,19 @@ import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '../store/authStore';
 import { alertsApi } from '../api/alerts';
 import { usePolling } from '../hooks/usePolling';
-import { UnsavedChangesContext } from '../contexts/UnsavedChangesContext';
+import { DarkModeContext, ToggleThemeContext } from '../contexts/DarkModeContext';
 
 const { Header, Sider, Content } = AntLayout;
 const { Text } = Typography;
 
-interface Props {
-  darkMode: boolean;
-  onToggleTheme: () => void;
-}
-
-export default function AppLayout({ darkMode, onToggleTheme }: Props) {
+export default function AppLayout() {
+  const darkMode = useContext(DarkModeContext);
+  const onToggleTheme = useContext(ToggleThemeContext);
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, logout } = useAuthStore();
+  const { user } = useAuthStore();
   const { t, i18n } = useTranslation();
   const [activeAlerts, setActiveAlerts] = useState(0);
-  const [navigationBlocked, setNavigationBlocked] = useState(false);
-  const { modal } = App.useApp();
-  const guardNavigation = (action: () => void) => {
-    if (!navigationBlocked) { action(); return; }
-    modal.confirm({ title: t('files.discardTitle'), content: t('files.discardPrompt'), okText: t('files.discard'), okType: 'danger', onOk: () => { setNavigationBlocked(false); action(); } });
-  };
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
 
   useEffect(() => {
@@ -96,10 +87,7 @@ export default function AppLayout({ darkMode, onToggleTheme }: Props) {
     localStorage.setItem('lang', next);
   };
 
-  const handleLogout = () => guardNavigation(() => {
-    logout();
-    navigate('/login');
-  });
+  const handleLogout = () => navigate('/login?logout=1');
 
   const selectedKey = location.pathname.startsWith('/servers/') ? '/dashboard' : location.pathname;
   const currentItem = menuItems.find((item) => item.key === selectedKey);
@@ -122,7 +110,7 @@ export default function AppLayout({ darkMode, onToggleTheme }: Props) {
           mode="inline"
           selectedKeys={[selectedKey]}
           items={menuItems}
-          onClick={({ key }) => guardNavigation(() => navigate(key))}
+          onClick={({ key }) => navigate(key)}
         />
         <div className="sidebar-footer">
           <span className={`sidebar-status-dot${activeAlerts > 0 ? ' alerting' : ''}`} />
@@ -143,7 +131,7 @@ export default function AppLayout({ darkMode, onToggleTheme }: Props) {
                   type="text"
                   aria-label={t('nav.alerts')}
                   icon={<BellOutlined />}
-                  onClick={() => guardNavigation(() => navigate('/alerts'))}
+                  onClick={() => navigate('/alerts')}
                 />
               </Badge>
             </Tooltip>
@@ -173,7 +161,7 @@ export default function AppLayout({ darkMode, onToggleTheme }: Props) {
                 <span>{t('nav.networkOffline')}</span>
               </div>
             )}
-            <UnsavedChangesContext.Provider value={setNavigationBlocked}><Outlet /></UnsavedChangesContext.Provider>
+            <Outlet />
           </div>
         </Content>
       </AntLayout>

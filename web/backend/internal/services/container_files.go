@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path"
 	"regexp"
 	"strconv"
@@ -70,6 +71,9 @@ func (writer *fileOutputWriter) Write(data []byte) (int, error) {
 		return 0, ErrFileTooLarge
 	}
 	written, err := writer.output.Write(data)
+	if err != nil {
+		_ = writer.close()
+	}
 	writer.remaining -= int64(written)
 	return written, err
 }
@@ -106,6 +110,10 @@ func (store *containerFiles) run(script string, arguments []string, input io.Rea
 			return ErrFileExists
 		case 45:
 			return ErrFileNotRegular
+		case 46:
+			return os.ErrNotExist
+		case 47:
+			return os.ErrPermission
 		}
 	}
 	return err

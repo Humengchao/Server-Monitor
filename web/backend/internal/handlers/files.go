@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -121,6 +122,7 @@ func fileError(httpContext *gin.Context, err error) {
 	if status == http.StatusBadGateway {
 		log.Printf("file operation server=%s: %v", httpContext.Param("id"), err)
 	}
+	httpContext.Set("file_error", code)
 	httpContext.JSON(status, gin.H{"error": message, "code": code})
 }
 
@@ -129,12 +131,18 @@ func (handler *FileHandler) List(httpContext *gin.Context) {
 	if !ok {
 		return
 	}
-	store, closeStore, ok := handler.connect(httpContext)
+	offset, parseErr := strconv.Atoi(httpContext.DefaultQuery("cursor", "0"))
+	limit, limitErr := strconv.Atoi(httpContext.DefaultQuery("limit", "100"))
+	if parseErr != nil || limitErr != nil || offset < 0 || offset > 1000000 || limit < 1 || limit > 200 {
+		fileError(httpContext, services.ErrFilePath)
+		return
+	}
+	store, closeStore, ok := handler.managed(httpContext)
 	if !ok {
 		return
 	}
 	defer closeStore()
-	listing, err := store.List(directory)
+	listing, err := store.Page(directory, offset, limit)
 	if err != nil {
 		fileError(httpContext, err)
 		return
@@ -202,11 +210,26 @@ func (handler *FileHandler) SaveText(httpContext *gin.Context) {
 	defer closeStore()
 	unlock := handler.lock(httpContext, filename)
 	defer unlock()
+	current, err := services.ReadRemoteText(store, filename)
+	if err != nil {
+		fileError(httpContext, err)
+		return
+	}
+	if services.FileRevision(current) != request.Revision {
+		fileError(httpContext, services.ErrFileChanged)
+		return
+	}
+	backup, err := services.BackupRemoteText(store, filename, current)
+	if err != nil {
+		fileError(httpContext, err)
+		return
+	}
+	httpContext.Set("file_backup", backup)
 	if err := services.SaveRemoteText(store, filename, request.Content, request.Revision); err != nil {
 		fileError(httpContext, err)
 		return
 	}
-	httpContext.JSON(http.StatusOK, gin.H{"revision": services.FileRevision([]byte(request.Content))})
+	httpContext.JSON(http.StatusOK, gin.H{"revision": services.FileRevision([]byte(request.Content)), "backup_path": backup})
 }
 
 func (handler *FileHandler) Download(httpContext *gin.Context) {
@@ -303,8 +326,18 @@ func (handler *FileHandler) Upload(httpContext *gin.Context) {
 		return
 	}
 	filename := path.Join(directory, name)
+	httpContext.Set("file_target", filename)
 	unlock := handler.lock(httpContext, filename)
 	defer unlock()
+	version := httpContext.Query("version")
+	if version == "" {
+		fileError(httpContext, services.ErrFileChanged)
+		return
+	}
+	if err := expectedUpload(store.(services.ManagedFiles), filename, version); err != nil {
+		fileError(httpContext, err)
+		return
+	}
 	if err := store.Write(filename, temporary, size, httpContext.Query("overwrite") == "1"); err != nil {
 		fileError(httpContext, err)
 		return

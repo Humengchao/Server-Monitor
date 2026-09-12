@@ -57,9 +57,12 @@ func fileHandlerRoutes(engine *gin.Engine, handler *FileHandler) {
 	group := engine.Group("/servers/:id/files", handler.Deadline)
 	group.GET("", handler.List)
 	group.GET("/text", handler.ReadText)
-	group.PUT("/text", handler.SaveText)
+	group.PUT("/text", handler.Audit, handler.SaveText)
 	group.GET("/download", handler.Download)
-	group.POST("/upload", handler.Upload)
+	group.POST("/upload", handler.Audit, handler.Upload)
+	group.GET("/metadata", handler.Metadata)
+	group.GET("/audit", handler.History)
+	group.POST("/change", handler.Audit, handler.Change)
 }
 
 func TestFileRoutesRequireAuthentication(t *testing.T) {
@@ -67,7 +70,7 @@ func TestFileRoutesRequireAuthentication(t *testing.T) {
 	engine := gin.New()
 	engine.Use(middleware.AuthRequired(&config.Config{}))
 	fileHandlerRoutes(engine, NewFileHandler(nil))
-	for _, request := range []struct{ method, suffix string }{{"GET", ""}, {"GET", "/text"}, {"PUT", "/text"}, {"GET", "/download"}, {"POST", "/upload"}} {
+	for _, request := range []struct{ method, suffix string }{{"GET", ""}, {"GET", "/text"}, {"PUT", "/text"}, {"GET", "/download"}, {"POST", "/upload"}, {"GET", "/metadata"}, {"GET", "/audit"}, {"POST", "/change"}} {
 		response := httptest.NewRecorder()
 		engine.ServeHTTP(response, httptest.NewRequest(request.method, "/servers/"+uuid.NewString()+"/files"+request.suffix+"?path=/etc/passwd", nil))
 		if response.Code != http.StatusUnauthorized {
@@ -79,7 +82,7 @@ func TestFileRoutesRequireAuthentication(t *testing.T) {
 func TestEveryFileRouteChecksServerOwnership(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	serverID, userID := uuid.New(), uuid.New()
-	for _, request := range []struct{ method, suffix string }{{"GET", ""}, {"GET", "/text"}, {"PUT", "/text"}, {"GET", "/download"}, {"POST", "/upload"}} {
+	for _, request := range []struct{ method, suffix string }{{"GET", ""}, {"GET", "/text"}, {"PUT", "/text"}, {"GET", "/download"}, {"POST", "/upload"}, {"GET", "/metadata"}, {"GET", "/audit"}, {"POST", "/change"}} {
 		t.Run(request.method+request.suffix, func(t *testing.T) {
 			connector := &fileOwnershipConnector{}
 			database := sql.OpenDB(connector)

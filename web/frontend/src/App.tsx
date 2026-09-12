@@ -1,12 +1,13 @@
 import React, { useState, useEffect, Suspense, lazy } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { createBrowserRouter, createRoutesFromElements, RouterProvider, Route, Navigate } from 'react-router-dom';
 import { ConfigProvider, App as AntApp, Spin, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import enUS from 'antd/locale/en_US';
 import i18n from './i18n';
 import AppLayout from './components/Layout';
 import { useAuthStore } from './store/authStore';
-import { DarkModeContext } from './contexts/DarkModeContext';
+import { DarkModeContext, ToggleThemeContext } from './contexts/DarkModeContext';
+import NavigationGuard from './components/NavigationGuard';
 
 // Route-level code splitting: heavy dependencies (recharts, xterm) load only
 // with the pages that use them, instead of on every first visit.
@@ -28,6 +29,34 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token);
   return token ? <>{children}</> : <Navigate to="/login" />;
 }
+
+const router = createBrowserRouter(createRoutesFromElements(
+          <Route element={<NavigationGuard />}>
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
+            <Route path="/status" element={<PublicStatus />} />
+            <Route path="/probe" element={<Navigate to="/status" />} />
+            <Route
+              path="/"
+              element={
+                <PrivateRoute>
+                  <AppLayout />
+                </PrivateRoute>
+              }
+            >
+              <Route index element={<Navigate to="/dashboard" />} />
+              <Route path="dashboard" element={<Dashboard />} />
+              <Route path="servers/:id" element={<ServerDetail />} />
+              <Route path="settings" element={<Settings />} />
+              <Route path="login-history" element={<LoginHistory />} />
+              <Route path="docker" element={<Docker />} />
+              <Route path="files" element={<Files />} />
+              <Route path="credentials" element={<Credentials />} />
+              <Route path="alerts" element={<Alerts />} />
+            </Route>
+            <Route path="*" element={<Navigate to="/dashboard" />} />
+          </Route>
+));
 
 export default function App() {
   const [lang, setLang] = useState(i18n.language);
@@ -78,7 +107,7 @@ export default function App() {
     >
       <DarkModeContext.Provider value={darkMode}>
       <AntApp>
-        <BrowserRouter>
+        <ToggleThemeContext.Provider value={toggleTheme}>
           <Suspense
             fallback={
               <div style={{ display: 'flex', minHeight: '60vh', alignItems: 'center', justifyContent: 'center' }}>
@@ -86,33 +115,9 @@ export default function App() {
               </div>
             }
           >
-          <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-            <Route path="/status" element={<PublicStatus />} />
-            <Route path="/probe" element={<Navigate to="/status" />} />
-            <Route
-              path="/"
-              element={
-                <PrivateRoute>
-                  <AppLayout darkMode={darkMode} onToggleTheme={toggleTheme} />
-                </PrivateRoute>
-              }
-            >
-              <Route index element={<Navigate to="/dashboard" />} />
-              <Route path="dashboard" element={<Dashboard />} />
-              <Route path="servers/:id" element={<ServerDetail />} />
-              <Route path="settings" element={<Settings />} />
-              <Route path="login-history" element={<LoginHistory />} />
-              <Route path="docker" element={<Docker />} />
-              <Route path="files" element={<Files />} />
-              <Route path="credentials" element={<Credentials />} />
-              <Route path="alerts" element={<Alerts />} />
-            </Route>
-            <Route path="*" element={<Navigate to="/dashboard" />} />
-          </Routes>
+          <RouterProvider router={router} />
           </Suspense>
-        </BrowserRouter>
+        </ToggleThemeContext.Provider>
       </AntApp>
       </DarkModeContext.Provider>
     </ConfigProvider>
