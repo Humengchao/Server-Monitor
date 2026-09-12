@@ -143,9 +143,12 @@ public class RuleEngineTests
         Assert.NotNull(_events[^1].ResolvedAt);
     }
 
-    [Fact]
-    public void AnOfflineRuleFiresWhenTheHostGoesDown()
+    [Theory]
+    [InlineData(AppLanguage.Zh, "web-01 离线")]
+    [InlineData(AppLanguage.En, "web-01 is offline")]
+    public void AnOfflineRuleFiresWhenTheHostGoesDown(AppLanguage language, string expectedMessage)
     {
+        using var languageScope = new LanguageScope(language);
         _rules.Add(Rule(metric: AlertMetric.Offline, comparator: ">", threshold: 0, duration: 60));
         var engine = Engine();
 
@@ -155,7 +158,7 @@ public class RuleEngineTests
 
         engine.Evaluate(_server, Down(), null, T0.AddSeconds(90));
         Assert.Single(_fired);
-        Assert.Contains("离线", _delivered[0]);
+        Assert.Contains(expectedMessage, Assert.Single(_delivered), StringComparison.Ordinal);
     }
 
     [Fact]
