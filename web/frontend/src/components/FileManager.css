@@ -7,7 +7,15 @@
 .file-name.ant-btn { max-width: 100%; height: auto; padding-inline: 0; text-align: left; white-space: normal; }
 .file-name > span { overflow-wrap: anywhere; }
 .file-name .anticon-folder-open { color: #d4a23b; }
-.file-editor.ant-input { margin: 12px 0; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px; line-height: 1.65; tab-size: 2; }
+.file-code-editor { margin: 12px 0; }
+.file-editor-toolbar { margin-bottom: 8px; }
+.file-editor-language { min-width: 240px; max-width: 100%; }
+.file-editor-surface .cm-editor { height: min(58vh, 560px); min-height: 240px; border: 1px solid #d9d9d9; border-radius: 6px; overflow: hidden; }
+.file-editor-surface .cm-editor.cm-focused { outline: 2px solid #1677ff; outline-offset: 1px; }
+.file-editor-surface .cm-scroller { overflow: auto; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px; line-height: 1.65; }
+.file-editor-surface .cm-content { padding: 10px 0; }
+.file-code-editor[data-theme="dark"] .cm-editor { border-color: #434343; }
+.file-editor-loading { min-height: 240px; display: flex; justify-content: center; align-items: center; gap: 12px; }
 .file-editor-name { overflow-wrap: anywhere; }
 .file-transfer { display: flex; gap: 16px; align-items: center; margin-bottom: 16px; }
 .file-transfer .ant-progress { flex: 1; }

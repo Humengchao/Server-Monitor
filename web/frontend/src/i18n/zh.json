@@ -1,4 +1,10 @@
 {
+  "files.language": "语法高亮",
+  "files.languageAuto": "自动（{{language}}）",
+  "files.plainText": "纯文本",
+  "files.editorLabel": "文件编辑器：{{path}}",
+  "files.editorLoading": "正在加载编辑器…",
+  "files.highlightFailed": "语法高亮加载失败，已使用纯文本，仍可编辑和保存。",
   "files.error.rate_limited": "请求过于频繁，请稍后重试。上传和保存分别限制为每分钟 60 次。",
   "files.close": "关闭",
   "nav.files": "文件管理",

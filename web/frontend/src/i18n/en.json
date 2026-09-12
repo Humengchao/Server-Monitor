@@ -1,4 +1,10 @@
 {
+  "files.language": "Syntax highlighting",
+  "files.languageAuto": "Auto ({{language}})",
+  "files.plainText": "Plain text",
+  "files.editorLabel": "File editor: {{path}}",
+  "files.editorLoading": "Loading editor…",
+  "files.highlightFailed": "Syntax highlighting could not be loaded. You can still edit and save as plain text.",
   "files.error.rate_limited": "Too many requests. Try again shortly; uploads and saves are each limited to 60 requests per minute.",
   "files.close": "Close",
   "nav.files": "Files",

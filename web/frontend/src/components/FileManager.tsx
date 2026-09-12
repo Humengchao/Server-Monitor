@@ -1,5 +1,5 @@
-import { useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { Alert, App, Breadcrumb, Button, Card, Empty, Input, Modal, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { lazy, Suspense, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { Alert, App, Breadcrumb, Button, Card, Empty, Input, Modal, Progress, Space, Spin, Table, Tag, Tooltip, Typography } from 'antd';
 import { ArrowUpOutlined, DownloadOutlined, EditOutlined, FileOutlined, FolderOpenOutlined, HomeOutlined, LinkOutlined, ReloadOutlined, SaveOutlined, UploadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useTranslation } from 'react-i18next';
@@ -8,6 +8,8 @@ import type { FileTarget, RemoteFileEntry, RemoteFileList } from '../api/files';
 import { formatBytes, formatDate } from '../utils/format';
 import { UnsavedChangesContext } from '../contexts/UnsavedChangesContext';
 import './FileManager.css';
+
+const FileCodeEditor = lazy(() => import('./FileCodeEditor'));
 
 const { Text } = Typography;
 interface Editor { entry: RemoteFileEntry; content: string; original: string; revision: string; crlf: boolean }
@@ -199,7 +201,9 @@ export default function FileManager({ serverId, containerId, onLockedChange }: P
     <Table rowKey="path" columns={columns} dataSource={listing?.entries.filter((entry) => entry.name.toLowerCase().includes(filter.toLowerCase())) || []} loading={loading} size="small" scroll={{ x: 820 }} pagination={{ pageSize: 50, showSizeChanger: true, pageSizeOptions: [25, 50, 100] }} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={error ? t('files.loadFailed') : t('files.empty')} /> }} />
     <Modal destroyOnHidden open={!!editor} title={<Space><FileOutlined /><span className="file-editor-name">{editor?.entry.path}</span>{dirty && <Tag color="orange">{t('files.unsaved')}</Tag>}</Space>} width="min(1100px, 95vw)" onCancel={closeEditor} mask={{ closable: !dirty && !busy }} keyboard={!busy} footer={<Space><Button disabled={busy} onClick={closeEditor}>{t('files.close')}</Button><Button type="primary" icon={<SaveOutlined />} loading={busy} disabled={!dirty || editor?.entry.is_symlink} onClick={() => { void saveText(); }}>{t('common.save')}</Button></Space>}>
       {editor?.entry.is_symlink && <Alert type="warning" showIcon title={t('files.symlinkReadOnly')} />}
-      <Input.TextArea className="file-editor" value={editor?.content || ''} readOnly={busy || editor?.entry.is_symlink} spellCheck={false} rows={24} onChange={(event) => setEditor((current) => current ? { ...current, content: event.target.value } : current)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === 's') { event.preventDefault(); void saveText(); } }} />
+      {editor && <Suspense fallback={<div className="file-editor-loading"><Spin /><Text type="secondary">{t('files.editorLoading')}</Text></div>}>
+        <FileCodeEditor key={editor.entry.path} path={editor.entry.path} value={editor.content} readOnly={busy || editor.entry.is_symlink} onChange={(content) => setEditor((current) => current ? { ...current, content } : current)} onSave={() => { void saveText(); }} />
+      </Suspense>}
       <Text type="secondary">{t('files.textLimit')} · UTF-8 · Ctrl/Cmd+S</Text>
     </Modal>
   </Card>;
