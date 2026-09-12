@@ -84,11 +84,20 @@ func (h *CredentialHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if req.SSHPassword == "" && strings.TrimSpace(req.SSHKey) == "" {
+	if credentialType == "windows" {
+		if strings.TrimSpace(req.SSHPassword) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Windows password is required"})
+			return
+		}
+		req.SSHKey = ""
+	} else if req.SSHPassword == "" && strings.TrimSpace(req.SSHKey) == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "SSH password or key is required"})
 		return
 	}
 	req.Name, req.SSHUsername, req.CredentialType = name, username, credentialType
+	if credentialType == "windows" {
+		req.SSHKey = ""
+	}
 	cred := &models.Credential{
 		UserID:      userID,
 		Name:        req.Name,

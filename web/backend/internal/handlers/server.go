@@ -196,6 +196,10 @@ func (h *ServerHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if serverType == "windows" {
+		req.SSHKey = ""
+		req.SSHHostKey = ""
+	}
 	req.Name, req.Host, req.SSHUsername, req.Port, req.ServerType = name, host, username, port, serverType
 	if req.BillingCurrency == "" {
 		req.BillingCurrency = "CNY"
@@ -205,10 +209,14 @@ func (h *ServerHandler) Create(c *gin.Context) {
 	}
 	db := c.MustGet("db").(*models.DB)
 	if req.CredentialID != nil {
-		if _, err := models.GetCredentialByID(db, *req.CredentialID, userID); err != nil {
+		credential, err := models.GetCredentialByID(db, *req.CredentialID, userID)
+		if err != nil || credential.CredType != req.ServerType {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid credential"})
 			return
 		}
+	} else if req.ServerType == "windows" && strings.TrimSpace(req.SSHPassword) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Windows password is required"})
+		return
 	} else if req.SSHPassword == "" && strings.TrimSpace(req.SSHKey) == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "SSH password or key is required"})
 		return
@@ -261,6 +269,10 @@ func (h *ServerHandler) Update(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if serverType == "windows" {
+		req.SSHKey = ""
+		req.SSHHostKey = ""
+	}
 	req.Name, req.Host, req.SSHUsername, req.Port, req.ServerType = name, host, username, port, serverType
 	if req.BillingCurrency == "" {
 		req.BillingCurrency = "CNY"
@@ -270,7 +282,8 @@ func (h *ServerHandler) Update(c *gin.Context) {
 	}
 	db := c.MustGet("db").(*models.DB)
 	if req.CredentialID != nil {
-		if _, err := models.GetCredentialByID(db, *req.CredentialID, userID); err != nil {
+		credential, err := models.GetCredentialByID(db, *req.CredentialID, userID)
+		if err != nil || credential.CredType != req.ServerType {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid credential"})
 			return
 		}

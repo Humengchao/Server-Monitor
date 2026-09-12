@@ -77,7 +77,36 @@ jobs:
         # Everything is offline: the live suites only run when SM_LIVE_ALIAS /
         # SM_WIN_HOST are set, and nothing sets them here. They report as
         # skipped, which is not a failure.
-        run: dotnet test ServerMonitor.slnx -c Release --no-build --logger 'console;verbosity=normal'
+        run: |
+          dotnet test ServerMonitor.slnx -c Release --no-build \
+            --logger 'console;verbosity=normal' \
+            --logger "trx;LogFileName=tests.trx" \
+            --results-directory "${RUNNER_TEMP}/trx"
+
+      # A failing test used to be readable only by downloading the job log,
+      # which needs a token this project's maintainer does not always have to
+      # hand — so "the Windows suite is red" could be known without knowing
+      # *which* test, for several commits running. Annotations are part of the
+      # check run and readable without one, so the names go there.
+      - name: Name the failing tests
+        if: failure()
+        shell: pwsh
+        run: |
+          $trx = Get-ChildItem -Path "$env:RUNNER_TEMP/trx" -Filter *.trx -Recurse -ErrorAction SilentlyContinue
+          if (-not $trx) { Write-Host "::error title=Tests::No .trx was written — the run failed before or during test start"; exit 0 }
+          $ns = @{ t = 'http://microsoft.com/schemas/VisualStudio/TeamTest/2010' }
+          foreach ($file in $trx) {
+            $failed = Select-Xml -Path $file.FullName -Namespace $ns `
+              -XPath '//t:UnitTestResult[@outcome="Failed"]'
+            foreach ($node in $failed) {
+              $name = $node.Node.testName
+              $text = $node.Node.Output.ErrorInfo.Message + "`n" + $node.Node.Output.ErrorInfo.StackTrace
+              # Annotations are one line: the workflow command reads %0A as a
+              # newline and a raw one would truncate the message.
+              $text = ($text -replace "`r", '') -replace "`n", '%0A'
+              Write-Host "::error title=$name::$text"
+            }
+          }
 
       - name: Offscreen card render
         # The App's render tests write PNGs of each card, kept as an artifact

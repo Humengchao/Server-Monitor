@@ -115,7 +115,12 @@ func UpdateCredential(db *DB, c *Credential) error {
 			return err
 		}
 	}
-	if c.SSHKey != "" {
+	if c.CredType == "windows" {
+		_, err = tx.Exec(`UPDATE credentials SET ssh_key='' WHERE id=$1 AND user_id=$2`, c.ID, c.UserID)
+		if err != nil {
+			return err
+		}
+	} else if c.SSHKey != "" {
 		enc, err := crypto.Encrypt(c.SSHKey, db.EncryptionKey)
 		if err != nil {
 			return err

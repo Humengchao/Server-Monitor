@@ -270,9 +270,11 @@ export default function ServerDetail() {
         // Do not send stale direct-auth values while a shared credential is
         // selected; the fields are intentionally hidden in that mode.
         ssh_password: selectedCredential ? undefined : values.ssh_password,
-        ssh_key: selectedCredential ? undefined : values.ssh_key,
+        ssh_key: serverType === 'windows' || selectedCredential ? undefined : values.ssh_key,
+        ssh_host_key: serverType === 'windows' ? undefined : values.ssh_host_key,
+        port: serverType === 'windows' ? undefined : values.port,
         credential_id: selectedCredential || null,
-        server_type: values.server_type || 'linux',
+        server_type: serverType,
         expires_at: values.expires_at ? values.expires_at.toISOString() : null,
         traffic_limit_bytes: Math.round((values.traffic_limit_gb || 0) * 1024 * 1024 * 1024),
         notes: server.notes || '',
@@ -625,11 +627,16 @@ export default function ServerDetail() {
           <Form.Item name="host" label={t('server.host')} rules={[{ required: true }]}>
             <Input placeholder={t('server.hostPlaceholder')} />
           </Form.Item>
-          <Form.Item name="port" label={t('server.sshPort')} initialValue={22}>
+          {serverType !== 'windows' && <Form.Item name="port" label={t('server.sshPort')} initialValue={22}>
             <InputNumber min={1} max={65535} style={{ width: '100%' }} />
-          </Form.Item>
+          </Form.Item>}
           <Form.Item name="server_type" label={t('server.type')} initialValue="linux">
-            <Select onChange={() => setSelectedCredential(undefined)}>
+            <Select onChange={(value) => {
+              setSelectedCredential(undefined);
+              form.setFieldsValue(value === 'windows'
+                ? { port: undefined, ssh_key: undefined, ssh_host_key: undefined }
+                : { port: form.getFieldValue('port') || 22 });
+            }}>
               <Select.Option value="linux"><DesktopOutlined /> Linux</Select.Option>
               <Select.Option value="windows"><WindowsOutlined /> Windows</Select.Option>
             </Select>
@@ -639,24 +646,24 @@ export default function ServerDetail() {
           </Form.Item>
           {!selectedCredential && (
             <>
-              <Form.Item name="ssh_username" label={t('server.sshUsername')} rules={[{ required: true }]}>
-                <Input placeholder={t('server.sshUsernamePlaceholder')} />
+              <Form.Item name="ssh_username" label={t(serverType === 'windows' ? 'server.username' : 'server.sshUsername')} rules={[{ required: true }]}>
+                <Input placeholder={t(serverType === 'windows' ? 'server.usernamePlaceholder' : 'server.sshUsernamePlaceholder')} />
               </Form.Item>
-              <Form.Item name="ssh_password" label={t('server.sshPassword')}>
+              <Form.Item name="ssh_password" label={t(serverType === 'windows' ? 'server.password' : 'server.sshPassword')}>
                 <Input.Password placeholder={t('server.sshKeyEditPlaceholder')} />
               </Form.Item>
-              <Form.Item name="ssh_key" label={t('server.sshKey')}>
+              {serverType !== 'windows' && <Form.Item name="ssh_key" label={t('server.sshKey')}>
                 <Input.TextArea rows={4} placeholder={t('server.sshKeyEditPlaceholder')} />
-              </Form.Item>
+              </Form.Item>}
             </>
           )}
-          <Form.Item
+          {serverType !== 'windows' && <Form.Item
             name="ssh_host_key"
             label={t('server.sshHostKey')}
             extra={sshHostKey?.trim() ? undefined : <Text type="warning">{t('server.sshHostKeyWarning')}</Text>}
           >
             <Input.TextArea rows={2} placeholder={t('server.sshHostKeyPlaceholder')} />
-          </Form.Item>
+          </Form.Item>}
           <Form.Item name="expires_at" label={t('server.expiresAt')}>
             <DatePicker showTime style={{ width: '100%' }} placeholder={t('server.expiresAtPlaceholder')} />
           </Form.Item>

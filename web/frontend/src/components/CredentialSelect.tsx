@@ -48,7 +48,7 @@ export default function CredentialSelect({ value, onChange, serverType }: Props)
         name: newName.trim(),
         ssh_username: newUsername.trim() || 'root',
         ssh_password: newPassword,
-        ssh_key: newKey,
+        ssh_key: serverType === 'windows' ? undefined : newKey,
         credential_type: serverType || 'linux',
       });
       setCreds((prev) => [res.data, ...prev]);
@@ -91,24 +91,24 @@ export default function CredentialSelect({ value, onChange, serverType }: Props)
                   size="small"
                   value={newUsername}
                   onChange={(e) => setNewUsername(e.target.value)}
-                  placeholder={t('credential.sshUsernameInlinePlaceholder')}
+                  placeholder={t(serverType === 'windows' ? 'credential.usernamePlaceholder' : 'credential.sshUsernameInlinePlaceholder')}
                 />
                 <Input.Password
                   size="small"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder={t('credential.sshPasswordInlinePlaceholder')}
+                  placeholder={t(serverType === 'windows' ? 'credential.passwordPlaceholder' : 'credential.sshPasswordInlinePlaceholder')}
                 />
-                <Input.TextArea
+                {serverType !== 'windows' && <Input.TextArea
                   size="small"
                   rows={2}
                   value={newKey}
                   onChange={(e) => setNewKey(e.target.value)}
                   placeholder={t('credential.sshKeyInlinePlaceholder')}
                   style={{ fontSize: 12 }}
-                />
+                />}
                 <Space>
-                  <Button size="small" type="primary" loading={creating} disabled={!newName.trim()} onClick={handleCreate}>{t('common.create')}</Button>
+                  <Button size="small" type="primary" loading={creating} disabled={!newName.trim() || (serverType === 'windows' && !newPassword.trim())} onClick={handleCreate}>{t('common.create')}</Button>
                   <Button size="small" disabled={creating} onClick={() => setShowNew(false)}>{t('common.cancel')}</Button>
                 </Space>
               </Space>

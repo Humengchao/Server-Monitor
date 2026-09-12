@@ -31,6 +31,7 @@ export default function Credentials() {
   const [savingCredential, setSavingCredential] = useState(false);
   const [editing, setEditing] = useState<Credential | null>(null);
   const [form] = Form.useForm();
+  const credentialType = Form.useWatch('credential_type', form) || 'linux';
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -55,6 +56,7 @@ export default function Credentials() {
         ...values,
         name: typeof values.name === 'string' ? values.name.trim() : values.name,
         ssh_username: typeof values.ssh_username === 'string' ? values.ssh_username.trim() : values.ssh_username,
+        ssh_key: credentialType === 'windows' ? undefined : values.ssh_key,
       };
       if (editing) {
         await credentialsApi.update(editing.id, payload);
@@ -114,7 +116,7 @@ export default function Credentials() {
       render: (v: string) => v === 'windows' ? <Tag icon={<WindowsOutlined />}>Windows</Tag> : <Tag icon={<DesktopOutlined />}>Linux</Tag>,
     },
     {
-      title: t('credential.sshUsername'),
+      title: t('credential.username'),
       dataIndex: 'ssh_username',
       key: 'ssh_username',
     },
@@ -199,30 +201,30 @@ export default function Credentials() {
       >
         <Form form={form} layout="vertical" onFinish={handleSubmit} disabled={savingCredential}>
           <Form.Item name="name" label={t('credential.name')} rules={[{ required: true }]}>
-            <Input placeholder={t('credential.namePlaceholder')} />
+            <Input placeholder={t(credentialType === 'windows' ? 'credential.nameWindowsPlaceholder' : 'credential.namePlaceholder')} />
           </Form.Item>
-          <Form.Item name="ssh_username" label={t('credential.sshUsername')} rules={[{ required: true }]}>
-            <Input placeholder={t('credential.sshUsernamePlaceholder')} />
+          <Form.Item name="ssh_username" label={t(credentialType === 'windows' ? 'credential.username' : 'credential.sshUsername')} rules={[{ required: true }]}>
+            <Input placeholder={t(credentialType === 'windows' ? 'credential.usernamePlaceholder' : 'credential.sshUsernamePlaceholder')} />
           </Form.Item>
-          <Form.Item name="ssh_password" label={t('credential.sshPassword')}>
+          <Form.Item name="ssh_password" label={t(credentialType === 'windows' ? 'credential.password' : 'credential.sshPassword')} rules={credentialType === 'windows' && !editing ? [{ required: true }] : undefined}>
             <Input.Password
               autoComplete="new-password"
-              placeholder={t(editing ? 'credential.sshPasswordKeepPlaceholder' : 'credential.sshPasswordPlaceholder')}
+              placeholder={t(editing ? 'credential.sshPasswordKeepPlaceholder' : credentialType === 'windows' ? 'credential.passwordPlaceholder' : 'credential.sshPasswordPlaceholder')}
             />
           </Form.Item>
           <Form.Item name="credential_type" label={t('common.type')} initialValue="linux">
-            <Select>
+            <Select onChange={(value) => { if (value === 'windows') form.setFieldValue('ssh_key', undefined); }}>
               <Select.Option value="linux"><DesktopOutlined /> Linux</Select.Option>
               <Select.Option value="windows"><WindowsOutlined /> Windows</Select.Option>
             </Select>
           </Form.Item>
-          <Form.Item name="ssh_key" label={t('credential.sshKey')}>
+          {credentialType === 'linux' && <Form.Item name="ssh_key" label={t('credential.sshKey')}>
             <Input.TextArea
               autoComplete="off"
               rows={4}
               placeholder={t(editing ? 'credential.sshKeyKeepPlaceholder' : 'credential.sshKeyPlaceholder')}
             />
-          </Form.Item>
+          </Form.Item>}
         </Form>
       </Modal>
     </div>

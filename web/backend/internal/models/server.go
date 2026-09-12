@@ -251,7 +251,12 @@ func UpdateServer(db *DB, s *Server) error {
 			return err
 		}
 	}
-	if s.SSHKey != "" {
+	if s.ServerType == "windows" {
+		_, err = tx.Exec(`UPDATE servers SET ssh_key='', ssh_host_key='' WHERE id=$1 AND user_id=$2`, s.ID, s.UserID)
+		if err != nil {
+			return err
+		}
+	} else if s.SSHKey != "" {
 		enc, err := crypto.Encrypt(s.SSHKey, db.EncryptionKey)
 		if err != nil {
 			return err
