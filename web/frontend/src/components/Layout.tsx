@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Layout as AntLayout, Menu, Button, Avatar, Badge, Space, Tooltip, Typography } from 'antd';
+import { Layout as AntLayout, Menu, Button, Avatar, Badge, Space, Tooltip, Typography, App } from 'antd';
 import {
   DashboardOutlined,
   SunOutlined,
@@ -13,12 +13,14 @@ import {
   BellOutlined,
   TranslationOutlined,
   DisconnectOutlined,
+  FolderOpenOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '../store/authStore';
 import { alertsApi } from '../api/alerts';
 import { usePolling } from '../hooks/usePolling';
+import { UnsavedChangesContext } from '../contexts/UnsavedChangesContext';
 
 const { Header, Sider, Content } = AntLayout;
 const { Text } = Typography;
@@ -34,6 +36,12 @@ export default function AppLayout({ darkMode, onToggleTheme }: Props) {
   const { user, logout } = useAuthStore();
   const { t, i18n } = useTranslation();
   const [activeAlerts, setActiveAlerts] = useState(0);
+  const [navigationBlocked, setNavigationBlocked] = useState(false);
+  const { modal } = App.useApp();
+  const guardNavigation = (action: () => void) => {
+    if (!navigationBlocked) { action(); return; }
+    modal.confirm({ title: t('files.discardTitle'), content: t('files.discardPrompt'), okText: t('files.discard'), okType: 'danger', onOk: () => { setNavigationBlocked(false); action(); } });
+  };
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
 
   useEffect(() => {
@@ -76,6 +84,7 @@ export default function AppLayout({ darkMode, onToggleTheme }: Props) {
       ),
     },
     { key: '/docker', icon: <DockerOutlined />, label: t('nav.docker') },
+    { key: '/files', icon: <FolderOpenOutlined />, label: t('nav.files') },
     { key: '/credentials', icon: <KeyOutlined />, label: t('nav.credentials') },
     { key: '/login-history', icon: <HistoryOutlined />, label: t('nav.loginHistory') },
     { key: '/settings', icon: <SettingOutlined />, label: t('nav.settings') },
@@ -87,10 +96,10 @@ export default function AppLayout({ darkMode, onToggleTheme }: Props) {
     localStorage.setItem('lang', next);
   };
 
-  const handleLogout = () => {
+  const handleLogout = () => guardNavigation(() => {
     logout();
     navigate('/login');
-  };
+  });
 
   const selectedKey = location.pathname.startsWith('/servers/') ? '/dashboard' : location.pathname;
   const currentItem = menuItems.find((item) => item.key === selectedKey);
@@ -113,7 +122,7 @@ export default function AppLayout({ darkMode, onToggleTheme }: Props) {
           mode="inline"
           selectedKeys={[selectedKey]}
           items={menuItems}
-          onClick={({ key }) => navigate(key)}
+          onClick={({ key }) => guardNavigation(() => navigate(key))}
         />
         <div className="sidebar-footer">
           <span className={`sidebar-status-dot${activeAlerts > 0 ? ' alerting' : ''}`} />
@@ -134,7 +143,7 @@ export default function AppLayout({ darkMode, onToggleTheme }: Props) {
                   type="text"
                   aria-label={t('nav.alerts')}
                   icon={<BellOutlined />}
-                  onClick={() => navigate('/alerts')}
+                  onClick={() => guardNavigation(() => navigate('/alerts'))}
                 />
               </Badge>
             </Tooltip>
@@ -164,7 +173,7 @@ export default function AppLayout({ darkMode, onToggleTheme }: Props) {
                 <span>{t('nav.networkOffline')}</span>
               </div>
             )}
-            <Outlet />
+            <UnsavedChangesContext.Provider value={setNavigationBlocked}><Outlet /></UnsavedChangesContext.Provider>
           </div>
         </Content>
       </AntLayout>

@@ -1,0 +1,22 @@
+.file-manager .ant-alert { margin-bottom: 16px; }
+.file-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+.file-toolbar > .ant-input-search { flex: 1 1 280px; }
+.file-location { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.file-location .ant-breadcrumb { overflow-wrap: anywhere; }
+.file-location > .ant-input-search { width: 220px; flex-shrink: 0; }
+.file-name.ant-btn { max-width: 100%; height: auto; padding-inline: 0; text-align: left; white-space: normal; }
+.file-name > span { overflow-wrap: anywhere; }
+.file-name .anticon-folder-open { color: #d4a23b; }
+.file-editor.ant-input { margin: 12px 0; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px; line-height: 1.65; tab-size: 2; }
+.file-editor-name { overflow-wrap: anywhere; }
+.file-transfer { display: flex; gap: 16px; align-items: center; margin-bottom: 16px; }
+.file-transfer .ant-progress { flex: 1; }
+.file-transfer .ant-typography { flex: 0 0 auto; }
+.file-targets { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+.file-target-field { display: flex; flex-direction: column; gap: 6px; flex: 1 1 280px; max-width: 480px; }
+.file-target-field .ant-select { width: 100%; }
+@media (max-width: 640px) {
+  .file-location { flex-direction: column; align-items: stretch; }
+  .file-location > .ant-input-search { width: 100%; }
+  .file-target-field { max-width: none; }
+}

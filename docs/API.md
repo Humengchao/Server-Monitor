@@ -1116,3 +1116,7 @@ Token 本身是无状态的 JWT（HS256，有效期 72 小时），但 `users.to
 - 主机停止上报超过 10 分钟时，阈值类告警视为恢复，避免消失的主机留下永久告警。
 - `offline` 规则以最后一次采样距今的时长判定，下限 2 分钟。
 - 进行中的事件以数据库中 `resolved_at IS NULL` 表示，因此重启不会重复通知，也不会漏掉恢复通知。
+
+## 文件管理（Web）
+
+新增受登录及服务器归属校验保护的 `/api/servers/:id/files` 接口：目录列表、`GET/PUT /text` 文本读取/保存、`GET /download` 下载及 `POST /upload` 上传。可通过 `container` 查询参数选择运行中的 Linux 容器，省略则使用主机 SFTP。保存文本需提交读取时的 `revision`；同名上传默认返回 409，确认覆盖需 `overwrite=1`。完整字段、大小限制和前置条件见 [文件管理说明](web-files.md)。

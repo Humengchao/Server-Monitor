@@ -48,6 +48,10 @@ The public probe refreshes every 15 seconds and exposes only anonymous node alia
 | Account security | Change your password and sign every other device out at once |
 | Public status page | Anonymized probe page whose API excludes identity and connection details at the query level |
 
+### File Management and Automatic Docker Loading
+
+The web client now loads container information automatically when opening Docker. The Files page provides host/SFTP and running Linux-container directory browsing, UTF-8 text editing, and uploads/downloads. See [file management setup and limits (Chinese)](docs/web-files.md) for supported environments, size limits, API details and reverse-proxy configuration.
+
 ### Alerting
 
 Rules are evaluated by a dedicated backend loop (every 30s by default, `ALERT_INTERVAL`) that reads only the latest samples already in the database -- it never opens extra connections to monitored hosts.

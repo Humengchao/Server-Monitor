@@ -8,7 +8,7 @@ import {
   ArrowLeftOutlined, EditOutlined, DeleteOutlined, DockerOutlined, KeyOutlined, SaveOutlined,
   WindowsOutlined, DesktopOutlined, CopyOutlined, DownloadOutlined, CloudServerOutlined,
   ClockCircleOutlined, ThunderboltOutlined, ArrowDownOutlined, ArrowUpOutlined, DashboardOutlined,
-  DatabaseOutlined, HddOutlined, LineChartOutlined,
+  DatabaseOutlined, HddOutlined, LineChartOutlined, FolderOpenOutlined,
 } from '@ant-design/icons';
 import { DatePicker } from 'antd';
 import dayjs, { Dayjs } from 'dayjs';
@@ -417,6 +417,7 @@ export default function ServerDetail() {
           </div>
         </div>
         <Space wrap className="detail-actions">
+          <Button icon={<FolderOpenOutlined />} onClick={() => navigate('/files?server=' + id)}>{t('nav.files')}</Button>
           <Tooltip title={dockerInstalled === true ? '' : t('docker.noServers')}>
             <Button
               icon={<DockerOutlined />}

@@ -3,7 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Collapse, Table, Tag, Button, Space, Typography, Spin, Empty, Drawer, App, Card, Tooltip, Result, Progress } from 'antd';
 import {
   ReloadOutlined, CaretRightOutlined, PauseOutlined, SyncOutlined, ArrowRightOutlined, FileTextOutlined, CodeOutlined,
-  ContainerOutlined, CloudServerOutlined, CheckCircleOutlined, QuestionCircleOutlined, SearchOutlined,
+ContainerOutlined, CloudServerOutlined, CheckCircleOutlined, QuestionCircleOutlined, SearchOutlined, FolderOpenOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useTranslation } from 'react-i18next';
@@ -22,6 +22,7 @@ interface ServerDocker {
   containers: DockerContainer[];
   loading: boolean;
   loaded: boolean;
+  error: boolean;
 }
 
 const stateColor: Record<string, string> = {
@@ -304,6 +305,7 @@ function ExecDrawer({ serverId, containerId, containerName, open, onClose }: {
 }
 
 export function ServerDockerPanel({ serverId, version }: { serverId: string; version?: string }) {
+  const navigate = useNavigate();
   const { t } = useTranslation();
   const { message, modal } = App.useApp();
   const [containers, setContainers] = useState<DockerContainer[]>([]);
@@ -420,6 +422,7 @@ export function ServerDockerPanel({ serverId, version }: { serverId: string; ver
           )}
           <Button size="small" icon={<FileTextOutlined />} onClick={() => setLogsTarget({ containerId: record.id, containerName: record.name })}>{t('docker.logs')}</Button>
           <Button size="small" icon={<CodeOutlined />} onClick={() => setExecTarget({ containerId: record.id, containerName: record.name })}>{t('docker.exec')}</Button>
+          <Button size="small" icon={<FolderOpenOutlined />} disabled={record.state !== 'running'} onClick={() => navigate('/files?server=' + serverId + '&container=' + record.id)}>{t('nav.files')}</Button>
         </Space>
       ),
     },
@@ -490,72 +493,64 @@ export default function Docker() {
 
   const expandServerId = searchParams.get('server');
 
-  // Each request costs an SSH round trip on the backend; the ref guards
-  // against duplicates when a panel is expanded while its initial load is
-  // still in flight (state in handleCollapseChange can be a render behind).
-  const inFlightRef = useRef<Set<string>>(new Set());
+  const requestsRef = useRef(new Map<string, AbortController>());
+  const loadGenerationRef = useRef(0);
 
   const loadContainers = useCallback(async (serverId: string, showLoading = true) => {
-    if (inFlightRef.current.has(serverId)) return;
-    inFlightRef.current.add(serverId);
+    if (requestsRef.current.has(serverId)) return;
+    const controller = new AbortController();
+    requestsRef.current.set(serverId, controller);
+    const generation = loadGenerationRef.current;
     if (showLoading) {
-      setServers((prev) => prev.map((s) => (s.server.id === serverId ? { ...s, loading: true } : s)));
+      setServers((previous) => previous.map((item) => item.server.id === serverId ? { ...item, loading: true, error: false } : item));
     }
     try {
-      const res = await serversApi.getContainers(serverId);
-      setServers((prev) => prev.map((s) => (s.server.id === serverId ? { ...s, containers: res.data || [], loading: false, loaded: true } : s)));
+      const response = await serversApi.getContainers(serverId, controller.signal);
+      if (generation !== loadGenerationRef.current || controller.signal.aborted) return;
+      setServers((previous) => previous.map((item) => item.server.id === serverId ? { ...item, containers: response.data || [], loading: false, loaded: true, error: false } : item));
     } catch {
-      if (showLoading) message.error(t('docker.loadFailed'));
-      setServers((prev) => prev.map((s) => (s.server.id === serverId ? { ...s, loading: false } : s)));
+      if (generation !== loadGenerationRef.current || controller.signal.aborted) return;
+      setServers((previous) => previous.map((item) => item.server.id === serverId ? { ...item, loading: false, error: true } : item));
     } finally {
-      inFlightRef.current.delete(serverId);
+      if (requestsRef.current.get(serverId) === controller) requestsRef.current.delete(serverId);
     }
-  }, [message, t]);
+  }, []);
 
   const loadServers = useCallback(async () => {
+    const generation = ++loadGenerationRef.current;
+    for (const controller of requestsRef.current.values()) controller.abort();
+    requestsRef.current.clear();
     setInitialLoading(true);
     setLoadError(false);
     try {
-      const res = await serversApi.list();
-      const allServers = res.data || [];
-
-      const withDocker: ServerDocker[] = allServers
-        .filter((s) => s.has_docker)
-        .map((s) => ({
-          server: s,
-          version: s.docker_version || '',
-          containers: [],
-          loading: false,
-          loaded: false,
-        }));
-
+      const response = await serversApi.list();
+      if (generation !== loadGenerationRef.current) return;
+      const allServers = response.data || [];
+      const withDocker: ServerDocker[] = allServers.filter((server) => server.has_docker).map((server) => ({
+        server, version: server.docker_version || '', containers: [], loading: true, loaded: false, error: false,
+      }));
       setServers(withDocker);
-      setUndetected(allServers.filter((s) => !s.has_docker));
-
-      const keysToLoad = expandServerId
-        ? [expandServerId]
-        : activeKeysRef.current;
-      if (expandServerId) {
-        activeKeysRef.current = [expandServerId];
-        setActiveKeys([expandServerId]);
-      }
-
-      // Container rows are loaded lazily when a host is expanded. This keeps a
-      // large fleet from opening an SSH request for every collapsed panel.
-      // Re-fetch hosts that were already expanded after a manual host-list
-      // refresh; otherwise their freshly reset rows would remain empty until
-      // the user collapses and expands them again.
+      setUndetected(allServers.filter((server) => !server.has_docker));
       const validIDs = new Set(withDocker.map((item) => item.server.id));
-      window.setTimeout(() => {
-        for (const key of keysToLoad) {
-          if (validIDs.has(key)) void loadContainers(key);
+      const keys = (expandServerId ? [expandServerId] : activeKeysRef.current).filter((key) => validIDs.has(key));
+      activeKeysRef.current = keys;
+      setActiveKeys(keys);
+      const scheduled = [...withDocker].sort((first, second) => Number(keys.includes(second.server.id)) - Number(keys.includes(first.server.id)));
+      let nextIndex = 0;
+      void Promise.all(Array.from({ length: Math.min(4, withDocker.length) }, async () => {
+        while (generation === loadGenerationRef.current && nextIndex < withDocker.length) {
+          const server = scheduled[nextIndex++].server;
+          await loadContainers(server.id);
         }
-      }, 0);
+      }));
     } catch {
-      setLoadError(true);
-      message.error(t('docker.loadFailed'));
+      if (generation === loadGenerationRef.current) {
+        setLoadError(true);
+        message.error(t('docker.loadFailed'));
+      }
+    } finally {
+      if (generation === loadGenerationRef.current) setInitialLoading(false);
     }
-    setInitialLoading(false);
   }, [expandServerId, loadContainers, message, t]);
 
   const runAction = async (serverId: string, containerId: string, action: 'start' | 'stop' | 'restart') => {
@@ -587,17 +582,23 @@ export default function Docker() {
     });
   };
 
+  const cancelLoads = useCallback(() => {
+    loadGenerationRef.current++;
+    for (const controller of requestsRef.current.values()) controller.abort();
+    requestsRef.current.clear();
+  }, []);
+
   useEffect(() => {
     const timer = window.setTimeout(() => { void loadServers(); }, 0);
-    return () => window.clearTimeout(timer);
-  }, [loadServers]);
+    return () => { window.clearTimeout(timer); cancelLoads(); };
+  }, [loadServers, cancelLoads]);
 
   // Refresh resource readings only for expanded hosts. The request guard in
   // loadContainers prevents a slow SSH call from overlapping the next tick.
   usePolling(
     () => Promise.all(activeKeys.map((key) => loadContainers(key, false))).then(() => undefined),
     15000,
-    { leading: false, enabled: activeKeys.length > 0 },
+    { leading: false, enabled: activeKeys.length > 0 && !servers.some((item) => item.loading) },
   );
 
   const getColumns = (serverId: string): ColumnsType<DockerContainer> => [
@@ -650,6 +651,7 @@ export default function Docker() {
           )}
           <Button size="small" icon={<FileTextOutlined />} onClick={() => setLogsTarget({ serverId, containerId: record.id, containerName: record.name })}>{t('docker.logs')}</Button>
           <Button size="small" icon={<CodeOutlined />} onClick={() => setExecTarget({ serverId, containerId: record.id, containerName: record.name })}>{t('docker.exec')}</Button>
+          <Button size="small" icon={<FolderOpenOutlined />} disabled={record.state !== 'running'} onClick={() => navigate('/files?server=' + serverId + '&container=' + record.id)}>{t('nav.files')}</Button>
         </Space>
       ),
     },
@@ -695,6 +697,7 @@ export default function Docker() {
           <span>{sd.server.host}{sd.version ? ` · Docker ${sd.version}` : ''}</span>
         </div>
         <div className="docker-host-counts">
+          {sd.error && <Tag color="error">{t('docker.loadFailed')}</Tag>}
           {sd.loaded ? (
             <>
               <span className="docker-count running">
@@ -723,6 +726,8 @@ export default function Docker() {
       </Button>
     ),
     children: (
+      <>
+      {sd.error && <Result status="warning" title={t('docker.loadFailed')} extra={<Button onClick={() => { void loadContainers(sd.server.id); }}>{t('common.refresh')}</Button>} />}
       <Table
         className="server-table"
         rowKey="id"
@@ -734,6 +739,7 @@ export default function Docker() {
         scroll={{ x: 1500 }}
         locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('docker.noContainers')} /> }}
       />
+      </>
     ),
   }));
 

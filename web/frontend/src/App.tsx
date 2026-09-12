@@ -17,6 +17,7 @@ const ServerDetail = lazy(() => import('./pages/ServerDetail'));
 const Settings = lazy(() => import('./pages/Settings'));
 const LoginHistory = lazy(() => import('./pages/LoginHistory'));
 const Docker = lazy(() => import('./pages/Docker'));
+const Files = lazy(() => import('./pages/Files'));
 const Credentials = lazy(() => import('./pages/Credentials'));
 const Alerts = lazy(() => import('./pages/Alerts'));
 const PublicStatus = lazy(() => import('./pages/PublicStatus'));
@@ -104,6 +105,7 @@ export default function App() {
               <Route path="settings" element={<Settings />} />
               <Route path="login-history" element={<LoginHistory />} />
               <Route path="docker" element={<Docker />} />
+              <Route path="files" element={<Files />} />
               <Route path="credentials" element={<Credentials />} />
               <Route path="alerts" element={<Alerts />} />
             </Route>
