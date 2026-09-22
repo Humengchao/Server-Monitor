@@ -17,7 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, notifier *services.WebhookNotifier) (*gin.Engine, error) {
+func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, notifier *services.WebhookNotifier, collectors ...*services.Collector) (*gin.Engine, error) {
 	r := gin.New()
 	// Only honor X-Forwarded-For from the configured reverse proxies; gin's
 	// default trusts every client, which would let direct requests spoof their
@@ -69,7 +69,11 @@ func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, noti
 	})
 
 	authH := handlers.NewAuthHandler(cfg)
-	serverH := handlers.NewServerHandler(sshCache)
+	var collector *services.Collector
+	if len(collectors) > 0 {
+		collector = collectors[0]
+	}
+	serverH := handlers.NewServerHandler(sshCache, collector)
 	tagH := handlers.NewTagHandler()
 	metricsH := handlers.NewMetricsHandler()
 	sshH := handlers.NewSSHHandler()
@@ -136,6 +140,7 @@ func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, noti
 			servers.PUT("/:id", serverH.Update)
 			servers.DELETE("/:id", serverH.Delete)
 			servers.PUT("/:id/tags", serverH.SetTags)
+			servers.POST("/:id/poll", middleware.RateLimit(20, 1*time.Minute), serverH.PollRetry)
 			servers.GET("/:id/metrics/latest", metricsH.GetLatest)
 			servers.GET("/:id/metrics", metricsH.GetHistory)
 			servers.GET("/:id/processes", processH.List)

@@ -9,7 +9,7 @@ import {
   PlusOutlined, ReloadOutlined, FilterOutlined, SafetyOutlined, WindowsOutlined, DesktopOutlined,
   CloudServerOutlined, CheckCircleOutlined, DisconnectOutlined, SearchOutlined, AppstoreOutlined,
   BarsOutlined, DashboardOutlined, DatabaseOutlined, WalletOutlined, SortAscendingOutlined,
-  CheckSquareOutlined, RiseOutlined, ClockCircleOutlined, AlertOutlined, CalendarOutlined,
+  CheckSquareOutlined, RiseOutlined, ClockCircleOutlined, AlertOutlined, CalendarOutlined, WarningOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import ServerCard from '../components/ServerCard';
@@ -26,6 +26,7 @@ import { availabilityColor } from '../api/uptime';
 import { formatDateTime, formatTime, monthlyCost } from '../utils/format';
 import { compareServers, highResourceUsage, needsRenewal, serverStatus, summarizeFleet, RESOURCE_WARNING_PERCENT, RENEWAL_WINDOW_DAYS } from '../utils/fleet';
 import type { FleetSort, ServerStatus } from '../utils/fleet';
+import { hasPollError } from '../utils/pollError';
 import { usePolling } from '../hooks/usePolling';
 
 const { Title, Text } = Typography;
@@ -36,7 +37,7 @@ const POLL_INTERVAL_MS = 3000;
 const POLL_STALE_AFTER_MS = 3 * POLL_INTERVAL_MS;
 
 type StatusFilter = 'all' | ServerStatus;
-type FocusFilter = 'all' | 'alerts' | 'resource' | 'expiry';
+type FocusFilter = 'all' | 'alerts' | 'resource' | 'expiry' | 'issues';
 type SortKey = FleetSort;
 type ViewMode = 'grid' | 'list';
 
@@ -295,6 +296,7 @@ export default function Dashboard() {
     alerts: scopedServers.filter(server => !!firing.byServer.get(server.id)?.length),
     resource: scopedServers.filter(server => highResourceUsage(server, refreshTimestamp)),
     expiry: scopedServers.filter(server => needsRenewal(server, refreshTimestamp)),
+    issues: scopedServers.filter(server => hasPollError(server)),
   }), [scopedServers, firing.byServer, refreshTimestamp]);
 
   const filteredServers = useMemo(() => [...focusGroups[focusFilter]]
@@ -399,6 +401,7 @@ export default function Dashboard() {
     { value: 'alerts', label: t('dashboard.focusAlerts'), icon: <AlertOutlined aria-hidden /> },
     { value: 'resource', label: t('dashboard.focusResource', { percent: RESOURCE_WARNING_PERCENT }), icon: <DashboardOutlined aria-hidden /> },
     { value: 'expiry', label: t('dashboard.focusExpiry', { days: RENEWAL_WINDOW_DAYS }), icon: <CalendarOutlined aria-hidden /> },
+    { value: 'issues', label: t('dashboard.focusIssues'), icon: <WarningOutlined aria-hidden /> },
   ] as const;
 
   // Selection survives filtering, but a server that was deleted elsewhere must

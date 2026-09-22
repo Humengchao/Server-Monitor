@@ -24,9 +24,14 @@ export interface Server {
   public_location: string;
   notes?: string;
   created_at: string;
+  last_error_kind?: PollErrorKind | '';
+  last_error?: string;
+  last_error_at?: string;
   tags: Tag[];
   latest_metrics: LatestMetrics | null;
 }
+
+export type PollErrorKind = 'auth' | 'host_key' | 'unreachable' | 'timeout' | 'command' | 'storage' | 'other';
 
 export interface LatestMetrics {
   cpu_percent: number;
@@ -186,6 +191,8 @@ export const serversApi = {
   }) => client.put<Server>(`/servers/${id}`, data),
 
   delete: (id: string) => client.delete(`/servers/${id}`),
+
+  pollNow: (id: string) => client.post<{ ok: boolean; kind?: PollErrorKind; error?: string }>(`/servers/${id}/poll`),
 
   setTags: (id: string, tag_ids: string[]) =>
     client.put(`/servers/${id}/tags`, { tag_ids }),

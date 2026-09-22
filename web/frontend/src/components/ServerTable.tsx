@@ -10,6 +10,7 @@ import { AlertEvent } from '../api/alerts';
 import { availabilityColor } from '../api/uptime';
 import { formatBytes, formatUptime, formatDateTime, getExpirationInfo, severityColor } from '../utils/format';
 import { resourcePercent, serverStatus } from '../utils/fleet';
+import { PollErrorBadge } from './PollErrorNotice';
 
 const { Text } = Typography;
 
@@ -98,6 +99,7 @@ export default function ServerTable({
           {status === 'offline' && server.latest_metrics && <Tooltip title={t('dashboard.lastSample', { time: formatDateTime(server.latest_metrics.recorded_at, i18n.language) })}>
             <Text type="secondary" className="sample-history">{t('dashboard.historicalMetrics')}</Text>
           </Tooltip>}
+          <PollErrorBadge server={server} />
         </div>;
       },
     },

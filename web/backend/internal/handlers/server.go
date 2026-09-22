@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -18,11 +19,42 @@ import (
 )
 
 type ServerHandler struct {
-	sshCache *services.SSHConnCache
+	sshCache  *services.SSHConnCache
+	collector *services.Collector
 }
 
-func NewServerHandler(sshCache *services.SSHConnCache) *ServerHandler {
-	return &ServerHandler{sshCache: sshCache}
+func NewServerHandler(sshCache *services.SSHConnCache, collector *services.Collector) *ServerHandler {
+	return &ServerHandler{sshCache: sshCache, collector: collector}
+}
+
+// PollRetry lets the operator retry a failed host immediately instead of
+// waiting for the collector's exponential backoff.
+func (h *ServerHandler) PollRetry(c *gin.Context) {
+	userID := c.MustGet("user_id").(uuid.UUID)
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	db := c.MustGet("db").(*models.DB)
+	server, err := models.GetServerByIDAndUser(db, id, userID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
+		return
+	}
+	if h.collector == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "collector unavailable"})
+		return
+	}
+	if err := h.collector.PollNow(server); err != nil {
+		if errors.Is(err, services.ErrPollInFlight) {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": false, "kind": string(services.ClassifyPollError(err)), "error": services.TrimPollErrorDetail(err)})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 type CreateServerRequest struct {

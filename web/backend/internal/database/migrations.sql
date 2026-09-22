@@ -261,6 +261,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_alert_events_open ON alert_events(rule_id,
 -- server_latest_metrics.recorded_at instead.
 ALTER TABLE servers DROP COLUMN IF EXISTS last_seen_at;
 
+-- Preserve the last sustained collector failure so the panel can explain why
+-- a host has no current sample instead of reducing every cause to "offline".
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS last_error_kind VARCHAR(16) NOT NULL DEFAULT '';
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS last_error TEXT NOT NULL DEFAULT '';
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS last_error_at TIMESTAMPTZ;
+
 CREATE TABLE IF NOT EXISTS file_operations (
  id UUID PRIMARY KEY,
  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,

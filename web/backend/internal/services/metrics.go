@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -267,15 +268,70 @@ func (c *Collector) pollAll() {
 			if err != nil {
 				delay := c.recordPollFailure(s.ID, fingerprint, err, time.Now())
 				log.Printf("collector: poll %s failed: %v; retry in %s", s.Name, err, delay)
+				if c.failureAttempts(s.ID) >= 2 {
+					c.persistPollError(s.ID, err)
+				}
 				return
 			}
 			if err := models.SaveMetric(c.db.Raw, s.ID, m); err != nil {
 				delay := c.recordPollFailure(s.ID, fingerprint, err, time.Now())
 				log.Printf("collector: save metric for %s failed: %v; retry in %s", s.Name, err, delay)
+				if c.failureAttempts(s.ID) >= 2 {
+					c.persistPollError(s.ID, fmt.Errorf("save metric: %w", err))
+				}
 				return
 			}
 			c.clearPollFailure(s.ID)
+			c.clearPersistedPollError(s.ID)
 		}()
+	}
+}
+
+// PollNow bypasses a host's retry backoff for an operator who has just fixed
+// credentials or reachability. It still serializes against the scheduled loop.
+func (c *Collector) PollNow(s *models.Server) error {
+	fingerprint := serverPollFingerprint(s)
+	c.clearPollFailure(s.ID)
+	if !c.beginPoll(s.ID, fingerprint) {
+		return ErrPollInFlight
+	}
+	defer c.endPoll(s.ID)
+	m, err := c.collectOne(s, fingerprint)
+	if err == nil {
+		err = models.SaveMetric(c.db.Raw, s.ID, m)
+	}
+	if err != nil {
+		c.recordPollFailure(s.ID, fingerprint, err, time.Now())
+		c.persistPollError(s.ID, err)
+		return err
+	}
+	c.clearPersistedPollError(s.ID)
+	return nil
+}
+
+var ErrPollInFlight = errors.New("a poll for this server is already running")
+
+func (c *Collector) failureAttempts(serverID uuid.UUID) int {
+	c.pollMu.Lock()
+	defer c.pollMu.Unlock()
+	return c.failures[serverID].attempts
+}
+
+func (c *Collector) persistPollError(serverID uuid.UUID, pollErr error) {
+	if c.db == nil || c.db.Raw == nil {
+		return
+	}
+	if err := models.RecordServerPollError(c.db.Raw, serverID, string(ClassifyPollError(pollErr)), TrimPollErrorDetail(pollErr), time.Now()); err != nil {
+		log.Printf("collector: record poll error for %s: %v", serverID, err)
+	}
+}
+
+func (c *Collector) clearPersistedPollError(serverID uuid.UUID) {
+	if c.db == nil || c.db.Raw == nil {
+		return
+	}
+	if err := models.ClearServerPollError(c.db.Raw, serverID); err != nil {
+		log.Printf("collector: clear poll error for %s: %v", serverID, err)
 	}
 }
 

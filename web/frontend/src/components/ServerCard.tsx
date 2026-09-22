@@ -21,6 +21,7 @@ import { availabilityColor } from '../api/uptime';
 import { useNavigate } from 'react-router-dom';
 import { formatBytes, formatGB, formatUptime, formatDateTime, getExpirationInfo, severityColor } from '../utils/format';
 import { resourcePercent, serverStatus } from '../utils/fleet';
+import { PollErrorBadge } from './PollErrorNotice';
 
 const { Text } = Typography;
 
@@ -97,8 +98,9 @@ function ServerCard({
       {/* Rendered only when there is something to show: an empty tag row still
           took 24px plus 25px of margin, which is where the odd band of white
           under the header on an untagged card came from. */}
-      {(server.public_location || !!server.tags?.length) && (
+      {(server.public_location || !!server.tags?.length || !!server.last_error_kind) && (
         <div className="server-tags">
+          <PollErrorBadge server={server} />
           {server.public_location && (
             <Tag variant="filled" className="location-tag" icon={<EnvironmentOutlined />}>{server.public_location}</Tag>
           )}
@@ -194,6 +196,7 @@ export default React.memo(ServerCard, (prev, next) => {
     a.memory_total === b.memory_total &&
     a.disk_total === b.disk_total &&
     a.public_location === b.public_location &&
+    a.last_error_kind === b.last_error_kind && a.last_error === b.last_error && a.last_error_at === b.last_error_at &&
     prev.selectable === next.selectable &&
     prev.selected === next.selected &&
     prev.onToggleSelect === next.onToggleSelect &&

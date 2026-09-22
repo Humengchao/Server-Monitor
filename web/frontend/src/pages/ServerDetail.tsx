@@ -20,6 +20,7 @@ import MetricsChart from '../components/MetricsChart';
 import ProcessTable from '../components/ProcessTable';
 import ServiceTable from '../components/ServiceTable';
 import PortTable from '../components/PortTable';
+import PollErrorNotice from '../components/PollErrorNotice';
 import TagSelect from '../components/TagSelect';
 import CredentialSelect from '../components/CredentialSelect';
 import { formatBytes, formatDate, formatTime, formatUptime, getExpirationInfo, percentOf, severityColor } from '../utils/format';
@@ -384,7 +385,7 @@ export default function ServerDetail() {
   );
 
   return (
-    <div className={`server-detail-page${activeTab === 'terminal' ? ' server-detail-page--terminal' : ''}`}>
+      <div className={`server-detail-page${activeTab === 'terminal' ? ' server-detail-page--terminal' : ''}`}>
       <div className="detail-hero">
         <div className="detail-hero-main">
           <Button className="detail-back" icon={<ArrowLeftOutlined />} onClick={() => navigate('/dashboard')}>
@@ -432,6 +433,7 @@ export default function ServerDetail() {
         </Space>
       </div>
 
+      <PollErrorNotice server={server} onRetried={() => { void loadServer(); }} />
       <div className="stat-tile-grid">
         <StatTile
           icon={<DashboardOutlined />}
