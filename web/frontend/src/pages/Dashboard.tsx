@@ -583,6 +583,7 @@ export default function Dashboard() {
             return (
               <Tooltip key={option.value} title={option.value === 'expiry' ? t('dashboard.focusExpiryHint')
                 : option.value === 'resource' ? t('dashboard.focusResourceHint', { percent: RESOURCE_WARNING_PERCENT })
+                : option.value === 'issues' ? t('dashboard.focusIssuesHint')
                 : option.value === 'alerts' && firing.error ? t('dashboard.alertsUnavailable') : undefined}>
                 <button
                   type="button"

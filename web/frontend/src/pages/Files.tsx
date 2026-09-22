@@ -50,8 +50,8 @@ export default function Files() {
   }, [server?.id, server?.has_docker, message, t]);
 
   return <div>
-    <div className="page-heading"><div><Typography.Title level={2}>{t('nav.files')}</Typography.Title><Typography.Text type="secondary">{t('files.description')}</Typography.Text></div></div>
-    {loading ? <Spin size="large" /> : <>
+    <div className="page-heading"><div><Typography.Text className="eyebrow">{t('files.eyebrow')}</Typography.Text><Typography.Title level={2}>{t('nav.files')}</Typography.Title><Typography.Text type="secondary">{t('files.description')}</Typography.Text></div></div>
+    {loading ? <div style={{ display: 'flex', justifyContent: 'center', padding: 80 }}><Spin size="large" /></div> : <>
       <div className="file-targets">
         <label className="file-target-field"><Typography.Text><CloudServerOutlined /> {t('files.server')}</Typography.Text><Select showSearch optionFilterProp="label" aria-label={t('files.server')} placeholder={t('files.selectServer')} value={serverId || undefined} disabled={locked} options={servers.map((item) => ({ value: item.id, label: item.name + ' · ' + item.host }))} onChange={(value) => setSearchParams({ server: value })} /></label>
         <label className="file-target-field"><Typography.Text><ContainerOutlined /> {t('files.target')}</Typography.Text><Select aria-label={t('files.target')} value={containerId} disabled={locked || !server} loading={containersLoading} options={[{ value: '', label: t('files.host') }, ...containers.map((container) => ({ value: container.id, label: container.name + ' · ' + t('docker.stateValue.' + container.state, { defaultValue: container.state }), disabled: container.state !== 'running' }))]} onChange={(value) => setSearchParams(value ? { server: serverId, container: value } : { server: serverId })} /></label>

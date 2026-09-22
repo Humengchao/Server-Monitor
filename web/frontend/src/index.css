@@ -379,7 +379,10 @@ button, input, textarea, select { font: inherit; }
 .auth-showcase-copy { position: relative; z-index: 2; max-width: 590px; margin: auto 0; }
 .auth-showcase-copy .eyebrow { color: #91acff !important; }
 .auth-showcase-copy h1.ant-typography { max-width: 570px; margin: 18px 0 16px; color: #fff; font-size: clamp(38px, 4.2vw, 64px); line-height: 1.06; letter-spacing: -2.6px; }
-.auth-showcase-copy > .ant-typography:not(.eyebrow) { max-width: 540px; color: rgba(224, 230, 248, .7); font-size: 16px; line-height: 1.8; }
+/* span, not any Typography: the headline is also an .ant-typography child, and
+   this three-class selector outranks the h1 rule below, which left the hero title
+   at 16px with the headline's negative letter-spacing squeezing it illegible. */
+.auth-showcase-copy > span.ant-typography:not(.eyebrow) { max-width: 540px; color: rgba(224, 230, 248, .7); font-size: 16px; line-height: 1.8; }
 .auth-features { margin-top: 34px; display: flex; gap: 12px; flex-wrap: wrap; }
 .auth-features span { padding: 8px 12px; display: flex; align-items: center; gap: 7px; border: 1px solid rgba(255,255,255,.09); border-radius: 999px; color: rgba(236,240,255,.76); background: rgba(255,255,255,.045); font-size: 11px; }
 .auth-features .anticon { color: #8faaff; }
@@ -557,6 +560,8 @@ button, input, textarea, select { font: inherit; }
 .mini-bar .ant-progress-inner { height: 5px !important; }
 .mini-bar > span { min-width: 32px; color: var(--text); font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; }
 .table-throughput { font-size: 11px; font-variant-numeric: tabular-nums; }
+/* Wrap between the two rates, never inside one. */
+.table-throughput span { white-space: nowrap; }
 .table-throughput .anticon { margin-right: 4px; }
 .table-throughput .rx { color: #18b690; }
 .table-throughput .tx { color: #5d7df7; }
@@ -628,12 +633,14 @@ button, input, textarea, select { font: inherit; }
     var(--surface);
   box-shadow: var(--shadow-sm);
 }
-.detail-hero-main { min-width: 0; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.detail-hero-main { flex: 1 1 480px; min-width: 0; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.detail-actions { flex: 0 0 auto; }
 .detail-back.ant-btn { box-shadow: none; }
 .detail-avatar { width: 52px; height: 52px; flex: 0 0 52px; display: grid; place-items: center; border-radius: 16px; font-size: 23px; }
 .detail-avatar.linux { color: #526ff0; background: rgba(82, 111, 240, .12); }
 .detail-avatar.windows { color: #168bd2; background: rgba(22, 139, 210, .12); }
 .detail-identity { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+@media (min-width: 641px) { .detail-identity { flex: 1 1 260px; } }
 .detail-identity-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .detail-identity-line h3.ant-typography { margin: 0; overflow-wrap: anywhere; color: var(--text); letter-spacing: -.5px; }
 .detail-meta { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; color: var(--muted); font-size: 12px; }
@@ -643,6 +650,8 @@ button, input, textarea, select { font: inherit; }
 .detail-sample-state.online { color: #138663; }
 .detail-sample-state.offline { color: #d65261; }
 .detail-sample-state.pending { color: var(--muted); }
+/* Tiles rendered from a stale sample: still legible, visibly not live. */
+.stat-tile-grid.is-stale .stat-tile { opacity: .8; }
 .detail-tags { display: flex; gap: 5px; flex-wrap: wrap; }
 .detail-tags .ant-tag { margin: 0; border-radius: 6px; font-size: 10px; }
 .detail-actions .ant-btn { box-shadow: none; }
@@ -917,6 +926,14 @@ button, input, textarea, select { font: inherit; }
   .docker-undetected-list { grid-template-columns: 1fr; }
   .docker-undetected-row { align-items: flex-start; flex-wrap: wrap; }
   .docker-undetected-row > .ant-space { width: 100%; justify-content: flex-end; }
+  /* Host header: counts drop under the name instead of squeezing beside it, and
+     the detail button keeps only its arrow. */
+  .docker-hosts.ant-collapse > .ant-collapse-item > .ant-collapse-header { padding: 12px 12px; }
+  .docker-host-head { flex-wrap: wrap; row-gap: 4px; }
+  .docker-host-identity { flex: 1 1 120px; }
+  .docker-host-counts { width: 100%; margin-left: 50px; flex-wrap: wrap; gap: 4px 10px; }
+  .docker-count { white-space: nowrap; }
+  .docker-hosts .ant-collapse-extra .ant-btn > span:not(.ant-btn-icon) { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1074,6 +1091,7 @@ button, input, textarea, select { font: inherit; }
 .node-bottom-grid > div { min-width: 0; display: flex; align-items: center; gap: 6px; color: rgba(196,184,245,.68); font-size: 11px; }
 .node-bottom-grid span { min-width: 0; display: flex; flex-direction: column; color: rgba(220,225,246,.5); font-size: 9px; }
 .node-bottom-grid strong { margin-top: 3px; overflow: hidden; color: rgba(245,247,255,.86); font-size: 11px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.node-bottom-grid strong.is-expired { color: #ff8b98; }
 .node-tag-row { margin-top: 11px; display: flex; flex-wrap: wrap; gap: 5px; }
 .node-tag-row span { padding: 5px 9px; border: 1px solid rgba(169,154,235,.2); border-radius: 7px; color: rgba(203,193,243,.8); background: rgba(118,94,199,.11); font-size: 10px; font-weight: 600; }
 

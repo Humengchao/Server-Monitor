@@ -24,6 +24,7 @@ import PollErrorNotice from '../components/PollErrorNotice';
 import TagSelect from '../components/TagSelect';
 import CredentialSelect from '../components/CredentialSelect';
 import { formatBytes, formatDate, formatDateTime, formatTime, formatUptime, getExpirationInfo, percentOf, severityColor } from '../utils/format';
+import type { ServerStatus } from '../utils/fleet';
 import { downloadCSV, safeFilenamePart } from '../utils/csv';
 
 // xterm and the Docker panel are only reachable through their own tabs, so
@@ -376,23 +377,22 @@ export default function ServerDetail() {
 
   const lang = i18n.language?.startsWith('zh') ? 'zh' : 'en';
   const expInfo = useMemo(() => getExpirationInfo(server?.expires_at, lang), [server?.expires_at, lang]);
+  // Fall back to the sample embedded in the server payload, so a failed metrics
+  // request still leaves the header with the collector's last word.
   const latestSample = metrics ?? server?.latest_metrics ?? null;
   const sampleObservedAt = observedAt || serverObservedAt;
   const isOnline = isMetricFresh(latestSample, sampleObservedAt);
-  // Keep the detail header aligned with the dashboard's three-state census:
-  // while the first probe is in flight, an unresponsive host is unknown rather
-  // than offline. A host with no sample after the probe remains pending too.
-  const detailStatus = metricsLoading && !metrics
-    ? 'pending'
-    : !metrics && !server?.latest_metrics
-      ? 'pending'
-      : isOnline ? 'online' : 'offline';
-  const latestSampleTime = latestSample?.recorded_at
-    ? formatDateTime(latestSample.recorded_at, i18n.language)
-    : null;
-  const cpuPercent = Math.round(metrics?.cpu_percent || 0);
-  const memPercent = metrics ? percentOf(metrics.memory_used, metrics.memory_total) : 0;
-  const diskPercent = metrics && server ? percentOf(metrics.disk_used, server.disk_total) : 0;
+  // The same three states as the fleet list: never sampled is "pending", a stale
+  // last sample is "offline". Capacity figures still come from the last sample
+  // either way, but only a live host gets uptime, latency and rates.
+  const detailStatus: ServerStatus = !latestSample?.recorded_at ? 'pending' : isOnline ? 'online' : 'offline';
+  const live = detailStatus === 'online';
+  const latestSampleTime = latestSample?.recorded_at ? formatDateTime(latestSample.recorded_at, i18n.language) : null;
+  // Unknown capacity is not zero utilisation: a tile stays at an em dash until it
+  // has a real reading rather than printing 0%.
+  const cpuPercent = latestSample && Number.isFinite(latestSample.cpu_percent) ? Math.round(latestSample.cpu_percent) : null;
+  const memPercent = latestSample && latestSample.memory_total > 0 ? percentOf(latestSample.memory_used, latestSample.memory_total) : null;
+  const diskPercent = latestSample && server && server.disk_total > 0 ? percentOf(latestSample.disk_used, server.disk_total) : null;
 
   if (loading) return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}><Spin size="large" /></div>;
   if (loadError) return <Result status="error" title={t('server.loadFailed')} extra={<Button type="primary" onClick={() => { void loadServer(); }}>{t('common.refresh')}</Button>} />;
@@ -430,9 +430,10 @@ export default function ServerDetail() {
               {server.public_location && (<><span className="detail-meta-sep" /><span>{server.public_location}</span></>)}
               {expInfo && (<><span className="detail-meta-sep" /><span style={{ color: expInfo.color }}>{expInfo.text}</span></>)}
               <span className="detail-meta-sep" />
-              <span className={`detail-sample-state ${detailStatus}`} title={latestSampleTime || undefined}>
+              {/* A live host reads "latest sample"; a stale one is explicitly historical. */}
+              <span className={`detail-sample-state ${detailStatus}`} title={detailStatus === 'pending' ? t('dashboard.pendingHint') : latestSampleTime || undefined}>
                 <ClockCircleOutlined />
-                {latestSampleTime ? t('dashboard.lastSample', { time: latestSampleTime }) : t('dashboard.pending')}
+                {latestSampleTime ? t(live ? 'detail.liveSample' : 'dashboard.lastSample', { time: latestSampleTime }) : t('dashboard.pending')}
               </span>
             </div>
             {!!server.tags?.length && (
@@ -459,60 +460,66 @@ export default function ServerDetail() {
       </div>
 
       <PollErrorNotice server={server} onRetried={() => { void loadServer(); }} />
-      <div className="stat-tile-grid">
+      <div className={`stat-tile-grid${detailStatus === 'offline' ? ' is-stale' : ''}`}>
         <StatTile
           icon={<DashboardOutlined />}
           label={t('metrics.cpu')}
-          value={`${cpuPercent}%`}
-          accent={severityColor(cpuPercent, 'blue')}
-          percent={cpuPercent}
+          value={cpuPercent === null ? '—' : `${cpuPercent}%`}
+          accent={severityColor(cpuPercent ?? 0, 'blue')}
+          percent={cpuPercent ?? undefined}
         />
         <StatTile
           icon={<DatabaseOutlined />}
           label={t('metrics.memory')}
-          value={metrics ? `${formatBytes(metrics.memory_used)} / ${formatBytes(metrics.memory_total)}` : '—'}
-          accent={severityColor(memPercent, 'green')}
-          percent={memPercent}
+          value={latestSample && memPercent !== null ? `${formatBytes(latestSample.memory_used)} / ${formatBytes(latestSample.memory_total)}` : '—'}
+          accent={severityColor(memPercent ?? 0, 'green')}
+          percent={memPercent ?? undefined}
         />
         <StatTile
           icon={<HddOutlined />}
           label={t('metrics.disk')}
-          value={metrics ? `${formatBytes(metrics.disk_used)} / ${formatBytes(server.disk_total)}` : '—'}
-          accent={severityColor(diskPercent, 'violet')}
-          percent={diskPercent}
+          value={latestSample && diskPercent !== null ? `${formatBytes(latestSample.disk_used)} / ${formatBytes(server.disk_total)}` : '—'}
+          accent={severityColor(diskPercent ?? 0, 'violet')}
+          percent={diskPercent ?? undefined}
         />
+        {/* Uptime, latency and rates describe the present. A stale sample has
+            nothing to say about them, so they stay blank instead of borrowing
+            values from whenever the host was last seen. */}
         <StatTile
           icon={<ClockCircleOutlined />}
           label={t('metrics.uptime')}
-          value={formatUptime(metrics?.uptime_seconds || 0)}
-          hint={t('detail.cores', { count: server.cpu_cores || 0 })}
+          value={live && latestSample ? formatUptime(latestSample.uptime_seconds) : '—'}
+          hint={server.cpu_cores > 0 ? t('detail.cores', { count: server.cpu_cores }) : undefined}
           accent="#4bb3d6"
         />
+        {/* Windows reports no load average; three zeros would read as idle. */}
         <StatTile
           icon={<ThunderboltOutlined />}
           label={t('metrics.latency')}
-          value={metrics?.latency_ms ? `${metrics.latency_ms} ms` : '—'}
-          hint={metrics ? t('detail.load', { load: `${metrics.load_1.toFixed(2)} / ${metrics.load_5.toFixed(2)} / ${metrics.load_15.toFixed(2)}` }) : undefined}
+          value={live && latestSample?.latency_ms ? `${latestSample.latency_ms} ms` : '—'}
+          hint={live && latestSample && server.server_type !== 'windows' ? t('detail.load', { load: `${latestSample.load_1.toFixed(2)} / ${latestSample.load_5.toFixed(2)} / ${latestSample.load_15.toFixed(2)}` }) : undefined}
           accent="#e8944a"
         />
         <StatTile
           icon={<ArrowDownOutlined />}
           label={t('metrics.totalDownload')}
-          value={formatBytes(metrics?.network_rx_total_bytes || 0)}
-          hint={`${formatBytes(metrics?.network_rx_bytes || 0)}/s`}
+          value={latestSample ? formatBytes(latestSample.network_rx_total_bytes || 0) : '—'}
+          hint={live && latestSample ? `${formatBytes(latestSample.network_rx_bytes || 0)}/s` : undefined}
           accent="#39b8a4"
         />
         <StatTile
           icon={<ArrowUpOutlined />}
           label={t('metrics.totalUpload')}
-          value={formatBytes(metrics?.network_tx_total_bytes || 0)}
-          hint={`${formatBytes(metrics?.network_tx_bytes || 0)}/s`}
+          value={latestSample ? formatBytes(latestSample.network_tx_total_bytes || 0) : '—'}
+          hint={live && latestSample ? `${formatBytes(latestSample.network_tx_bytes || 0)}/s` : undefined}
           accent="#8d6dd7"
         />
+        {/* A live host only needs the clock; a stale sample may be days old, so
+            it carries its date. */}
         <StatTile
           icon={<LineChartOutlined />}
           label={t('detail.sampledAt')}
-          value={latestSample?.recorded_at ? formatTime(latestSample.recorded_at, i18n.language) : '—'}
+          value={latestSample?.recorded_at ? (live ? formatTime(latestSample.recorded_at, i18n.language) : formatDateTime(latestSample.recorded_at, i18n.language)) : '—'}
           hint={t('detail.addedOn', { date: formatDate(server.created_at, i18n.language) })}
           accent="#6f8cf5"
         />

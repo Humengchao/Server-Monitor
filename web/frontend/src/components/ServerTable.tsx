@@ -144,12 +144,12 @@ export default function ServerTable({
     {
       title: t('card.network'),
       key: 'network',
-      width: 160,
+      width: 180,
       render: (_: unknown, server: Server) => {
         const m = server.latest_metrics;
         if (!m || serverStatus(server, observedAt) !== 'online') return <Text type="secondary">—</Text>;
         return (
-          <Space size={10} className="table-throughput">
+          <Space size={[10, 2]} wrap className="table-throughput">
             <span><ArrowDownOutlined className="rx" />{formatBytes(m.network_rx_bytes, 1)}/s</span>
             <span><ArrowUpOutlined className="tx" />{formatBytes(m.network_tx_bytes, 1)}/s</span>
           </Space>
@@ -219,7 +219,7 @@ export default function ServerTable({
       rowKey="id"
       loading={loading}
       pagination={false}
-      scroll={{ x: selecting ? 1240 : 1180 }}
+      scroll={{ x: selecting ? 1260 : 1200 }}
       rowSelection={selecting ? {
         selectedRowKeys: selectedIds,
         onChange: (keys) => onSelectionChange?.(keys as string[]),

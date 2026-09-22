@@ -286,7 +286,7 @@ export default function PublicStatus() {
             className="glass-stale-banner"
             type="warning"
             showIcon
-            message={t('probe.stale')}
+            title={t('probe.stale')}
             description={t('probe.staleHint')}
             action={<Button size="small" onClick={() => loadStatus(true)}>{t('probe.retry')}</Button>}
           />
@@ -305,6 +305,7 @@ export default function PublicStatus() {
                 zh={zh}
                 displayCurrency={displayCurrency}
                 ratesPerEUR={ratesPerEUR}
+                now={generatedDate?.getTime()}
               />
             ))}
           </div>
@@ -333,11 +334,14 @@ function ProbeNodeCard({
   zh,
   displayCurrency,
   ratesPerEUR,
+  now,
 }: {
   node: PublicNode;
   zh: boolean;
   displayCurrency: string;
   ratesPerEUR: Record<string, number>;
+  /** The snapshot's own clock (generated_at), so expiry is judged against the server's time and render stays pure. */
+  now?: number;
 }) {
   const { t, i18n } = useTranslation();
   const cycleLabel = t(`probe.cycle.${node.billing_cycle || 'year'}`);
@@ -351,6 +355,7 @@ function ProbeNodeCard({
   );
   const totalTraffic = node.network_rx_total_bytes + node.network_tx_total_bytes;
   const expiryText = node.expires_at ? formatDate(node.expires_at, i18n.language) : t('probe.notConfigured');
+  const expired = !!node.expires_at && typeof now === 'number' && Number.isFinite(now) && Date.parse(node.expires_at) < now;
 
   return (
     <article className={`glass-node-card ${node.status}`}>
@@ -361,7 +366,8 @@ function ProbeNodeCard({
       </header>
 
       <div className="node-plan-row">
-        <span><DashboardOutlined /> {t('probe.uptime')} <strong>{formatUptimeLong(node.uptime_seconds, zh)}</strong></span>
+        {/* An offline node has no current uptime; "0d 0h" would claim it just rebooted. */}
+        <span><DashboardOutlined /> {t('probe.uptime')} <strong>{node.status === 'offline' || node.uptime_seconds <= 0 ? '—' : formatUptimeLong(node.uptime_seconds, zh)}</strong></span>
         {node.billing_price > 0 && <span><DollarOutlined /> <strong>{symbol}{node.billing_price.toFixed(2)}</strong> / {cycleLabel}</span>}
       </div>
 
@@ -380,7 +386,7 @@ function ProbeNodeCard({
       </div>
 
       <div className="node-bottom-grid">
-        <div><CalendarOutlined /><span>{t('probe.expiry')}<strong>{expiryText}{node.remaining_days > 0 ? ` · ${node.remaining_days} ${t('probe.days')}` : ''}</strong></span></div>
+        <div><CalendarOutlined /><span>{t('probe.expiry')}<strong className={expired ? 'is-expired' : undefined}>{expiryText}{expired ? ` · ${t('probe.expired')}` : node.remaining_days > 0 ? ` · ${node.remaining_days} ${t('probe.days')}` : ''}</strong></span></div>
         {node.billing_price > 0 && <div><DollarOutlined /><span>{t('probe.remainingValue')}<strong>{node.remaining_value > 0 ? `≈ ${displaySymbol}${convertedRemainingValue.toFixed(2)}` : '—'}</strong></span></div>}
         <div><WifiOutlined /><span>{t('probe.latency')}<strong>{node.status === 'offline' || node.latency_ms <= 0 ? '—' : `${node.latency_ms} ms`}</strong></span></div>
         <div><SwapOutlined /><span>{t('probe.packetLoss')}<strong>{node.packet_loss_percent}%</strong></span></div>

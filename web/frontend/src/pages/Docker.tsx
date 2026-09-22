@@ -467,7 +467,7 @@ export function ServerDockerPanel({ serverId, version }: { serverId: string; ver
           <Text type="secondary">{t('docker.containers', { count: containers.length })}</Text>
         </Space>
       )}
-      extra={<Space>{statsLoading && <Tag>{t('docker.statsLoading')}</Tag>}{statsError && <Tag color="warning">{t('docker.statsError')}</Tag>}<Button icon={<ReloadOutlined />} onClick={() => { void loadContainers(); }}>{t('common.refresh')}</Button></Space>}
+      extra={<Space>{statsLoading && <Tag>{t('docker.statsLoading')}</Tag>}{statsError && <Tag color="warning">{t('docker.statsFailed')}</Tag>}<Button icon={<ReloadOutlined />} onClick={() => { void loadContainers(); }}>{t('common.refresh')}</Button></Space>}
     >
       <Table
         className="server-table"
@@ -763,6 +763,8 @@ export default function Docker() {
       <Button
         size="small"
         icon={<ArrowRightOutlined />}
+        // Narrow screens keep only the arrow, so the name cannot live in the label alone.
+        aria-label={t('docker.serverDetail')}
         onClick={(e) => {
           e.stopPropagation();
           navigate(`/servers/${sd.server.id}`);
