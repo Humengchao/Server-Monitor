@@ -36,8 +36,8 @@ The public probe refreshes every 15 seconds and exposes only anonymous node alia
 
 | Area | Capabilities |
 |---|---|
-| Server dashboard | Card / list views (choice remembered), search, filter by tag and online state, sort by CPU / memory / disk / uptime / expiry |
-| Overview stats | Total, online / offline, average CPU and memory, monthly-normalized and currency-converted spend |
+| Server dashboard | Remembered card / list views, search, tag and online / offline / awaiting-data filters; shortcuts for alerts, high resource usage and expiry within 30 days; CPU / memory / disk / uptime / expiry sorting |
+| Overview stats | Collection states, average CPU and memory, online memory / disk capacity and combined network rates, valid sample coverage, monthly-normalized and currency-converted spend |
 | Server detail | Resource stat tiles; six charts (CPU / memory / network / disk I/O / load / latency) with adaptive units and theme-aware styling; range presets plus custom windows; CSV export of the charted window |
 | Alert center | Threshold rules and an alert timeline, with webhook delivery and a built-in connectivity test |
 | Batch operations | Multi-select servers to add/remove tags, delete, export an inventory CSV, or run one command across up to 50 hosts with per-host results |
@@ -51,6 +51,13 @@ The public probe refreshes every 15 seconds and exposes only anonymous node alia
 ### File Management and Automatic Docker Loading
 
 The web client now loads container information automatically when opening Docker. The Files page provides host/SFTP and running Linux-container directory browsing, UTF-8 text editing, and uploads/downloads. See [file management setup and limits (Chinese)](docs/web-files.md) for supported environments, size limits, API details and reverse-proxy configuration.
+
+### Web overview data
+
+- **Awaiting data** means no valid sample timestamp exists; **offline** means a historical sample exists but is at least two minutes old. Awaiting data does not imply reachability; existing alert rules still determine offline alerts.
+- CPU / memory averages use valid online readings. Capacity totals use summed usage divided by summed capacity, with sample coverage shown for each resource. Unknown capacity displays “—”.
+- Offline hosts retain resource percentages labeled with the historical sample time; live network / disk rates display “—”. Resource sorting prioritizes valid current readings.
+- Resource shortcuts select online CPU, memory or disk usage ≥ 90%; expiry includes already expired hosts. These shortcuts combine with search, tags and collection status, with a clear-all action.
 
 ### Alerting
 

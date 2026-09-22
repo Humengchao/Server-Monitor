@@ -9,11 +9,12 @@ import {
   PlusOutlined, ReloadOutlined, FilterOutlined, SafetyOutlined, WindowsOutlined, DesktopOutlined,
   CloudServerOutlined, CheckCircleOutlined, DisconnectOutlined, SearchOutlined, AppstoreOutlined,
   BarsOutlined, DashboardOutlined, DatabaseOutlined, WalletOutlined, SortAscendingOutlined,
-  CheckSquareOutlined, RiseOutlined,
+  CheckSquareOutlined, RiseOutlined, ClockCircleOutlined, AlertOutlined, CalendarOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import ServerCard from '../components/ServerCard';
 import ServerTable from '../components/ServerTable';
+import FleetResources from '../components/FleetResources';
 import BatchActionBar from '../components/BatchActionBar';
 import TagSelect from '../components/TagSelect';
 import CredentialSelect from '../components/CredentialSelect';
@@ -22,19 +23,21 @@ import { convertCurrency, currencySymbol, useExchangeRates } from '../hooks/useE
 import { useFleetUptime, windowPercent } from '../hooks/useFleetUptime';
 import { useFiringAlerts } from '../hooks/useFiringAlerts';
 import { availabilityColor } from '../api/uptime';
-import { formatDateTime, monthlyCost, percentOf } from '../utils/format';
+import { formatDateTime, formatTime, monthlyCost } from '../utils/format';
+import { compareServers, highResourceUsage, needsRenewal, serverStatus, summarizeFleet, RESOURCE_WARNING_PERCENT, RENEWAL_WINDOW_DAYS } from '../utils/fleet';
+import type { FleetSort, ServerStatus } from '../utils/fleet';
 import { usePolling } from '../hooks/usePolling';
 
 const { Title, Text } = Typography;
 
-const ONLINE_WINDOW_MS = 120000;
 const POLL_INTERVAL_MS = 3000;
 // Show the stale banner only after several consecutive failed background
 // polls, so a single dropped request does not flash an alarm.
 const POLL_STALE_AFTER_MS = 3 * POLL_INTERVAL_MS;
 
-type StatusFilter = 'all' | 'online' | 'offline';
-type SortKey = 'default' | 'name' | 'cpu' | 'memory' | 'disk' | 'uptime' | 'expiry';
+type StatusFilter = 'all' | ServerStatus;
+type FocusFilter = 'all' | 'alerts' | 'resource' | 'expiry';
+type SortKey = FleetSort;
 type ViewMode = 'grid' | 'list';
 
 interface ServerFormValues {
@@ -79,11 +82,6 @@ async function lookupIP(ip: string): Promise<string> {
   return '';
 }
 
-function isOnline(server: Server, observedAt: number): boolean {
-  const at = server.latest_metrics?.recorded_at;
-  return observedAt > 0 && !!at && observedAt - new Date(at).getTime() < ONLINE_WINDOW_MS;
-}
-
 export default function Dashboard() {
   const { t, i18n } = useTranslation();
   // modal (not the static Modal.*) so confirm dialogs inherit the dark theme.
@@ -107,6 +105,7 @@ export default function Dashboard() {
   const [pollStale, setPollStale] = useState(false);
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [focusFilter, setFocusFilter] = useState<FocusFilter>('all');
   const [sortKey, setSortKey] = useState<SortKey>(() => (localStorage.getItem('dashboard_sort') as SortKey) || 'default');
   const [view, setView] = useState<ViewMode>(() => (localStorage.getItem('dashboard_view') as ViewMode) || 'grid');
   const [selecting, setSelecting] = useState(false);
@@ -276,56 +275,43 @@ export default function Dashboard() {
     return Array.from(map.values());
   }, [servers]);
 
-  const filteredServers = useMemo(() => {
+  const scopedServers = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    const matched = servers.filter((s) => {
+    return servers.filter((s) => {
       if (filterTagIds.length > 0 && !filterTagIds.some((id) => s.tags?.some((tag) => tag.id === id))) return false;
-      if (statusFilter !== 'all' && isOnline(s, refreshTimestamp) !== (statusFilter === 'online')) return false;
+      if (statusFilter !== 'all' && serverStatus(s, refreshTimestamp) !== statusFilter) return false;
       if (!needle) return true;
       const haystack = [s.name, s.host, s.public_location, s.notes, ...(s.tags || []).map((tag) => tag.name)]
         .filter(Boolean).join(' ').toLowerCase();
       return haystack.includes(needle);
     });
 
-    if (sortKey === 'default') return matched;
-    const sorted = [...matched];
-    sorted.sort((a, b) => {
-      switch (sortKey) {
-        case 'name':
-          return a.name.localeCompare(b.name);
-        case 'cpu':
-          return (b.latest_metrics?.cpu_percent || 0) - (a.latest_metrics?.cpu_percent || 0);
-        case 'memory':
-          return percentOf(b.latest_metrics?.memory_used || 0, b.latest_metrics?.memory_total || 0)
-            - percentOf(a.latest_metrics?.memory_used || 0, a.latest_metrics?.memory_total || 0);
-        case 'disk':
-          return percentOf(b.latest_metrics?.disk_used || 0, b.disk_total)
-            - percentOf(a.latest_metrics?.disk_used || 0, a.disk_total);
-        case 'uptime':
-          return (b.latest_metrics?.uptime_seconds || 0) - (a.latest_metrics?.uptime_seconds || 0);
-        case 'expiry': {
-          // Hosts without an expiry date sort last rather than first.
-          const av = a.expires_at ? new Date(a.expires_at).getTime() : Number.POSITIVE_INFINITY;
-          const bv = b.expires_at ? new Date(b.expires_at).getTime() : Number.POSITIVE_INFINITY;
-          return av - bv;
-        }
-        default:
-          return 0;
-      }
-    });
-    return sorted;
-  }, [servers, filterTagIds, statusFilter, query, sortKey, refreshTimestamp]);
+  }, [servers, filterTagIds, statusFilter, query, refreshTimestamp]);
+
+  // Counts follow search / tag / status, so each shortcut describes exactly
+  // the set it will show. A host can belong to more than one attention group.
+  const focusGroups = useMemo(() => ({
+    all: scopedServers,
+    alerts: scopedServers.filter(server => !!firing.byServer.get(server.id)?.length),
+    resource: scopedServers.filter(server => highResourceUsage(server, refreshTimestamp)),
+    expiry: scopedServers.filter(server => needsRenewal(server, refreshTimestamp)),
+  }), [scopedServers, firing.byServer, refreshTimestamp]);
+
+  const filteredServers = useMemo(() => [...focusGroups[focusFilter]]
+    .sort((a, b) => compareServers(a, b, sortKey, refreshTimestamp)),
+  [focusGroups, focusFilter, sortKey, refreshTimestamp]);
+
+  const hasFilters = !!query.trim() || filterTagIds.length > 0 || statusFilter !== 'all' || focusFilter !== 'all';
+  const clearFilters = () => {
+    setQuery('');
+    setFilterTagIds([]);
+    setStatusFilter('all');
+    setFocusFilter('all');
+  };
+
+  const fleet = useMemo(() => summarizeFleet(servers, refreshTimestamp), [servers, refreshTimestamp]);
 
   const stats = useMemo(() => {
-    const online = servers.filter((s) => isOnline(s, refreshTimestamp));
-    const cpuValues = online.map((s) => s.latest_metrics?.cpu_percent || 0);
-    const memValues = online
-      .map((s) => percentOf(s.latest_metrics?.memory_used || 0, s.latest_metrics?.memory_total || 0));
-    // With nothing online there is no average to report; "0%" would read as
-    // "everything is idle" rather than "no data".
-    const average = (values: number[]) =>
-      (values.length ? `${Math.round(values.reduce((sum, v) => sum + v, 0) / values.length)}%` : '—');
-
     const displayCurrency = i18n.language?.startsWith('zh') ? 'CNY' : 'USD';
     const spend = servers.reduce((sum, s) => sum + convertCurrency(
       monthlyCost(s.billing_price || 0, s.billing_cycle || 'year'),
@@ -335,15 +321,13 @@ export default function Dashboard() {
     ), 0);
 
     return {
-      total: servers.length,
-      online: online.length,
-      offline: Math.max(servers.length - online.length, 0),
-      avgCPU: average(cpuValues),
-      avgMemory: average(memValues),
+      ...fleet,
+      avgCPU: fleet.avgCPU === null ? '—' : `${Math.round(fleet.avgCPU)}%`,
+      avgMemory: fleet.avgMemory === null ? '—' : `${Math.round(fleet.avgMemory)}%`,
       spend,
       displayCurrency,
     };
-  }, [servers, refreshTimestamp, ratesPerEUR, i18n.language]);
+  }, [servers, fleet, ratesPerEUR, i18n.language]);
 
   // 24h availability per server, plus the fleet mean for the overview tile.
   const availability = useMemo(() => {
@@ -407,7 +391,15 @@ export default function Dashboard() {
     { label: t('dashboard.filterAll'), value: 'all' as const },
     { label: `${t('dashboard.online')} ${stats.online}`, value: 'online' as const },
     { label: `${t('dashboard.offline')} ${stats.offline}`, value: 'offline' as const },
+    { label: `${t('dashboard.pending')} ${stats.pending}`, value: 'pending' as const },
   ];
+
+  const focusOptions = [
+    { value: 'all', label: t('dashboard.focusAll'), icon: <CloudServerOutlined aria-hidden /> },
+    { value: 'alerts', label: t('dashboard.focusAlerts'), icon: <AlertOutlined aria-hidden /> },
+    { value: 'resource', label: t('dashboard.focusResource', { percent: RESOURCE_WARNING_PERCENT }), icon: <DashboardOutlined aria-hidden /> },
+    { value: 'expiry', label: t('dashboard.focusExpiry', { days: RENEWAL_WINDOW_DAYS }), icon: <CalendarOutlined aria-hidden /> },
+  ] as const;
 
   // Selection survives filtering, but a server that was deleted elsewhere must
   // not linger in it, so reconcile against the live list.
@@ -459,23 +451,35 @@ export default function Dashboard() {
         </Space>
       </div>
 
-      {/* A CSS grid rather than antd columns: seven tiles never divide 24
-          evenly, and antd's xl={3} left a 12.5% hole plus tiles too narrow for
-          "100.00%". auto-fit gives every tile the same width and the row
-          reflows to 4/3/2 columns as the viewport shrinks. */}
-      <div className="overview-grid overview-grid-7">
+      {(pollStale || (loadError && refreshTimestamp > 0)) && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+          title={t('dashboard.pollStale')}
+          description={t('dashboard.pollStaleHint')}
+        />
+      )}
+
+      <div className="overview-grid overview-grid-8">
         <Card className="overview-card overview-card-primary" variant="borderless">
           <div className="overview-icon"><CloudServerOutlined /></div>
-          <div><Text type="secondary">{t('dashboard.totalServers')}</Text><strong>{stats.total}</strong></div>
+          <div><Text type="secondary">{t('dashboard.totalServers')}</Text><strong>{refreshTimestamp ? stats.total : '—'}</strong></div>
         </Card>
         <Card className="overview-card overview-card-success" variant="borderless">
           <div className="overview-icon"><CheckCircleOutlined /></div>
-          <div><Text type="secondary">{t('dashboard.online')}</Text><strong>{stats.online}</strong></div>
+          <div><Text type="secondary">{t('dashboard.online')}</Text><strong>{refreshTimestamp ? stats.online : '—'}</strong></div>
         </Card>
         <Card className={`overview-card ${stats.offline > 0 ? 'overview-card-danger' : 'overview-card-muted'}`} variant="borderless">
           <div className="overview-icon"><DisconnectOutlined /></div>
-          <div><Text type="secondary">{t('dashboard.offline')}</Text><strong>{stats.offline}</strong></div>
+          <div><Text type="secondary">{t('dashboard.offline')}</Text><strong>{refreshTimestamp ? stats.offline : '—'}</strong></div>
         </Card>
+        <Tooltip title={t('dashboard.pendingHint')}>
+          <Card className="overview-card overview-card-muted" variant="borderless">
+            <div className="overview-icon"><ClockCircleOutlined /></div>
+            <div><Text type="secondary">{t('dashboard.pending')}</Text><strong>{refreshTimestamp ? stats.pending : '—'}</strong></div>
+          </Card>
+        </Tooltip>
         <Card className="overview-card overview-card-accent" variant="borderless">
           <div className="overview-icon"><DashboardOutlined /></div>
           <div><Text type="secondary">{t('dashboard.avgCpu')}</Text><strong>{stats.avgCPU}</strong></div>
@@ -500,14 +504,17 @@ export default function Dashboard() {
             <div className="overview-icon"><WalletOutlined /></div>
             <div>
               <Text type="secondary">{t('dashboard.monthlySpend')}</Text>
-              <strong>{currencySymbol(stats.displayCurrency)}{stats.spend.toFixed(stats.spend >= 100 ? 0 : 1)}</strong>
+              <strong>{refreshTimestamp ? `${currencySymbol(stats.displayCurrency)}${stats.spend.toFixed(stats.spend >= 100 ? 0 : 1)}` : '—'}</strong>
             </div>
           </Card>
         </Tooltip>
       </div>
 
+      {servers.length > 0 && <FleetResources fleet={fleet} />}
+
       <div className="fleet-toolbar">
         <Segmented
+          aria-label={t('dashboard.statusFilter')}
           value={statusFilter}
           onChange={(value) => setStatusFilter(value as StatusFilter)}
           options={statusOptions}
@@ -518,6 +525,7 @@ export default function Dashboard() {
             className="fleet-search"
             prefix={<SearchOutlined />}
             placeholder={t('dashboard.searchPlaceholder')}
+            aria-label={t('dashboard.searchPlaceholder')}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
@@ -540,6 +548,7 @@ export default function Dashboard() {
           )}
           <Select
             className="sort-select"
+            aria-label={t('dashboard.sortLabel')}
             value={sortKey}
             onChange={setSortKey}
             options={sortOptions}
@@ -557,27 +566,49 @@ export default function Dashboard() {
             value={view}
             onChange={(value) => setView(value as ViewMode)}
             options={[
-              { value: 'grid', icon: <Tooltip title={t('dashboard.gridView')}><AppstoreOutlined /></Tooltip> },
-              { value: 'list', icon: <Tooltip title={t('dashboard.listView')}><BarsOutlined /></Tooltip> },
+              { value: 'grid', icon: <Tooltip title={t('dashboard.gridView')}><AppstoreOutlined aria-label={t('dashboard.gridView')} /></Tooltip> },
+              { value: 'list', icon: <Tooltip title={t('dashboard.listView')}><BarsOutlined aria-label={t('dashboard.listView')} /></Tooltip> },
             ]}
           />
         </div>
       </div>
 
-      <div className="section-heading">
-        <div><Title level={4}>{t('dashboard.infrastructure')}</Title><Text type="secondary">{t('dashboard.realtime')}</Text></div>
-        <Text type="secondary">{filteredServers.length} / {servers.length}</Text>
-      </div>
-
-      {pollStale && (
-        <Alert
-          type="warning"
-          showIcon
-          style={{ marginBottom: 16 }}
-          message={t('dashboard.pollStale')}
-          description={t('dashboard.pollStaleHint')}
-        />
+      {servers.length > 0 && (
+        <div className="fleet-focus" role="group" aria-label={t('dashboard.focusLabel')}>
+          {focusOptions.map(option => {
+            const unavailable = option.value === 'alerts' && (firing.loading || firing.error);
+            return (
+              <Tooltip key={option.value} title={option.value === 'expiry' ? t('dashboard.focusExpiryHint')
+                : option.value === 'resource' ? t('dashboard.focusResourceHint', { percent: RESOURCE_WARNING_PERCENT })
+                : option.value === 'alerts' && firing.error ? t('dashboard.alertsUnavailable') : undefined}>
+                <button
+                  type="button"
+                  className={`fleet-focus-button${focusFilter === option.value ? ' is-active' : ''}`}
+                  aria-pressed={focusFilter === option.value}
+                  disabled={unavailable}
+                  onClick={() => setFocusFilter(option.value)}
+                >
+                  {option.icon}<span>{option.label}</span>
+                  <strong>{unavailable ? '—' : focusGroups[option.value].length}</strong>
+                </button>
+              </Tooltip>
+            );
+          })}
+        </div>
       )}
+      {focusFilter === 'alerts' && firing.error && <Text type="warning">{t('dashboard.alertsUnavailable')}</Text>}
+
+      <div className="section-heading">
+        <div><Title level={4}>{t('dashboard.infrastructure')}</Title>
+          <Text type="secondary" title={refreshTimestamp ? formatDateTime(refreshTimestamp, i18n.language) : undefined}>
+            {refreshTimestamp ? t('dashboard.updatedAt', { time: formatTime(refreshTimestamp, i18n.language) }) : t('common.loading')}
+          </Text>
+        </div>
+        <Space>
+          <Text type="secondary">{t('dashboard.resultCount', { count: filteredServers.length, total: servers.length })}</Text>
+          {hasFilters && <Button size="small" type="link" onClick={clearFilters}>{t('dashboard.clearFilters')}</Button>}
+        </Space>
+      </div>
 
       {loading ? (
         <Row gutter={[18, 18]}>{[1, 2, 3, 4].map((item) => <Col key={item} xs={24} sm={12} xl={6}><Card className="server-card"><Skeleton active /></Card></Col>)}</Row>
@@ -593,6 +624,7 @@ export default function Dashboard() {
             image={Empty.PRESENTED_IMAGE_SIMPLE}
             description={servers.length === 0 ? t('server.empty') : t('dashboard.noMatches')}
           >
+            {servers.length > 0 && <Button onClick={clearFilters}>{t('dashboard.clearFilters')}</Button>}
             {servers.length === 0 && (
               <Button
                 type="primary"

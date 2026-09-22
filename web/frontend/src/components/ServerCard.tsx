@@ -19,7 +19,8 @@ import { Server } from '../api/servers';
 import { AlertEvent } from '../api/alerts';
 import { availabilityColor } from '../api/uptime';
 import { useNavigate } from 'react-router-dom';
-import { formatBytes, formatGB, formatUptime, getExpirationInfo, percentOf, severityColor } from '../utils/format';
+import { formatBytes, formatGB, formatUptime, formatDateTime, getExpirationInfo, severityColor } from '../utils/format';
+import { resourcePercent, serverStatus } from '../utils/fleet';
 
 const { Text } = Typography;
 
@@ -41,14 +42,11 @@ function ServerCard({
 }: Props) {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
-  const m = server.latest_metrics;
-  const cpuPercent = m ? Math.round(m.cpu_percent) : 0;
-  const memPercent = m ? percentOf(m.memory_used, m.memory_total) : 0;
-  const diskPercent = m ? percentOf(m.disk_used, server.disk_total) : 0;
-
-  const isOnline = observedAt > 0 && !!m?.recorded_at && observedAt - new Date(m.recorded_at).getTime() < 120000;
+  const status = serverStatus(server, observedAt);
+  const isOnline = status === 'online';
+  const m = status === 'pending' ? null : server.latest_metrics;
   const lang = i18n.language?.startsWith('zh') ? 'zh' : 'en';
-  const expInfo = getExpirationInfo(server.expires_at, lang);
+  const expInfo = getExpirationInfo(server.expires_at, lang, observedAt);
   const activate = () => {
     if (selectable) {
       onToggleSelect?.(server);
@@ -60,7 +58,7 @@ function ServerCard({
   return (
     <Card
       hoverable
-      className={`server-card${isOnline ? '' : ' is-offline'}${selectable ? ' is-selectable' : ''}${selected ? ' is-selected' : ''}`}
+      className={`server-card is-${status}${selectable ? ' is-selectable' : ''}${selected ? ' is-selected' : ''}`}
       onClick={activate}
       tabIndex={0}
       role={selectable ? 'checkbox' : 'link'}
@@ -91,8 +89,8 @@ function ServerCard({
           <Text strong ellipsis title={server.name}>{server.name}</Text>
           <Text type="secondary" ellipsis title={server.host}>{server.host}</Text>
         </div>
-        <div className={`status-pill ${isOnline ? 'online' : 'offline'}`}>
-          <span />{isOnline ? t('dashboard.online') : t('dashboard.offline')}
+        <div className={`status-pill ${status}`}>
+          <span />{t(`dashboard.${status}`)}
         </div>
       </div>
 
@@ -111,10 +109,10 @@ function ServerCard({
       )}
 
       <div className="server-specs">
-        <Space size={5}><DashboardOutlined /><Text type="secondary">{server.cpu_cores || 0} {t('card.core')}</Text></Space>
-        <Space size={5}><DatabaseOutlined /><Text type="secondary">{formatGB(server.memory_total)}</Text></Space>
-        <Space size={5}><HddOutlined /><Text type="secondary">{formatGB(server.disk_total)}</Text></Space>
-        <Space size={5}><ClockCircleOutlined /><Text type="secondary">{formatUptime(m?.uptime_seconds || 0)}</Text></Space>
+        {server.cpu_cores > 0 && <Space size={5}><DashboardOutlined /><Text type="secondary">{server.cpu_cores} {t('card.core')}</Text></Space>}
+        {server.memory_total > 0 && <Space size={5}><DatabaseOutlined /><Text type="secondary">{formatGB(server.memory_total)}</Text></Space>}
+        {server.disk_total > 0 && <Space size={5}><HddOutlined /><Text type="secondary">{formatGB(server.disk_total)}</Text></Space>}
+        {isOnline && m && <Space size={5}><ClockCircleOutlined /><Text type="secondary">{formatUptime(m.uptime_seconds)}</Text></Space>}
         {isOnline && !!m?.latency_ms && (
           <Tooltip title={t('card.latencyHint')}>
             <Space size={5}><ThunderboltOutlined /><Text type="secondary">{m.latency_ms} ms</Text></Space>
@@ -135,39 +133,37 @@ function ServerCard({
 
       {m ? (
         <div className="server-metrics">
-          <div className="metric-progress">
-            <div><Text type="secondary">{t('card.cpu')}</Text><strong>{cpuPercent}%</strong></div>
-            <Progress percent={cpuPercent} showInfo={false} strokeColor={severityColor(cpuPercent, 'blue')} railColor="rgba(128, 140, 170, .14)" />
-          </div>
-          <div className="metric-progress">
-            <div><Text type="secondary">{t('card.memory')}</Text><strong>{memPercent}%</strong></div>
-            <Progress percent={memPercent} showInfo={false} strokeColor={severityColor(memPercent, 'green')} railColor="rgba(128, 140, 170, .14)" />
-          </div>
-          <div className="metric-progress">
-            <div><Text type="secondary">{t('card.disk')}</Text><strong>{diskPercent}%</strong></div>
-            <Progress percent={diskPercent} showInfo={false} strokeColor={severityColor(diskPercent, 'violet')} railColor="rgba(128, 140, 170, .14)" />
-          </div>
+          {!isOnline && <div className="sample-history" title={formatDateTime(m.recorded_at, i18n.language)}>
+            <ClockCircleOutlined />{t('dashboard.lastSample', { time: formatDateTime(m.recorded_at, i18n.language) })}
+          </div>}
+          {(['cpu', 'memory', 'disk'] as const).map(metric => {
+            const value = resourcePercent(server, metric);
+            return <div className="metric-progress" key={metric}>
+              <div><Text type="secondary">{t(`card.${metric}`)}</Text><strong>{value === null ? '—' : `${Math.round(value)}%`}</strong></div>
+              <Progress percent={value ?? 0} showInfo={false} strokeColor={severityColor(value ?? 0, { cpu: 'blue', memory: 'green', disk: 'violet' }[metric] as 'blue' | 'green' | 'violet')} railColor="rgba(128, 140, 170, .14)" />
+            </div>;
+          })}
           <div className="throughput-grid">
             <div>
             <Text type="secondary">{t('card.network')}</Text>
             <Space size={4}>
               <ArrowDownOutlined className="rx" />
-              <Text>{formatBytes(m.network_rx_bytes)}/s</Text>
+              <Text>{isOnline ? `${formatBytes(m.network_rx_bytes)}/s` : '—'}</Text>
             </Space>
             <Space size={4}>
               <ArrowUpOutlined className="tx" />
-              <Text>{formatBytes(m.network_tx_bytes)}/s</Text>
+              <Text>{isOnline ? `${formatBytes(m.network_tx_bytes)}/s` : '—'}</Text>
             </Space>
             </div>
             <div>
             <Text type="secondary">{t('card.disk')}</Text>
             <Space size={4}>
               <ArrowDownOutlined className="rx" />
-              <Text>{formatBytes(m.disk_rx_bytes)}/s</Text>
+              <Text>{isOnline ? `${formatBytes(m.disk_rx_bytes)}/s` : '—'}</Text>
             </Space>
             <Space size={4}>
               <ArrowUpOutlined className="tx" />
-              <Text>{formatBytes(m.disk_tx_bytes)}/s</Text>
+              <Text>{isOnline ? `${formatBytes(m.disk_tx_bytes)}/s` : '—'}</Text>
             </Space>
             </div>
           </div>
@@ -175,16 +171,11 @@ function ServerCard({
       ) : (
         <div className="metrics-unavailable">
           <span className="metrics-unavailable-dot" />
-          <Text type="secondary">{t('metrics.noData')}</Text>
+          <div><Text type="secondary">{t('metrics.noData')}</Text><small>{t('dashboard.pendingHint')}</small></div>
         </div>
       )}
     </Card>
   );
-}
-
-function isOnlineAt(s: Server, observedAt: number): boolean {
-  const at = s.latest_metrics?.recorded_at;
-  return observedAt > 0 && !!at && observedAt - new Date(at).getTime() < 120000;
 }
 
 // Memoized: the dashboard replaces the whole servers array every poll, so we
@@ -198,15 +189,17 @@ export default React.memo(ServerCard, (prev, next) => {
     a.host === b.host &&
     a.server_type === b.server_type &&
     a.expires_at === b.expires_at &&
+    JSON.stringify(getExpirationInfo(a.expires_at, 'en', prev.observedAt)) === JSON.stringify(getExpirationInfo(b.expires_at, 'en', next.observedAt)) &&
     a.cpu_cores === b.cpu_cores &&
     a.memory_total === b.memory_total &&
     a.disk_total === b.disk_total &&
     a.public_location === b.public_location &&
     prev.selectable === next.selectable &&
     prev.selected === next.selected &&
+    prev.onToggleSelect === next.onToggleSelect &&
     prev.availability === next.availability &&
     JSON.stringify(prev.firing || []) === JSON.stringify(next.firing || []) &&
-    isOnlineAt(a, prev.observedAt) === isOnlineAt(b, next.observedAt) &&
+    serverStatus(a, prev.observedAt) === serverStatus(b, next.observedAt) &&
     JSON.stringify(a.tags || []) === JSON.stringify(b.tags || []) &&
     JSON.stringify(a.latest_metrics) === JSON.stringify(b.latest_metrics)
   );

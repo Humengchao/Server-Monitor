@@ -106,9 +106,9 @@ export interface ExpirationInfo {
 
 const MS_PER_DAY = 86400000;
 
-export function getExpirationInfo(expiresAt?: string | null, lang: 'zh' | 'en' = 'en'): ExpirationInfo | null {
+export function getExpirationInfo(expiresAt?: string | null, lang: 'zh' | 'en' = 'en', observedAt = Date.now()): ExpirationInfo | null {
   if (!expiresAt) return null;
-  const now = new Date();
+  const now = new Date(observedAt);
   const expires = new Date(expiresAt);
   if (Number.isNaN(expires.getTime())) return null;
   const expired = expires.getTime() < now.getTime();

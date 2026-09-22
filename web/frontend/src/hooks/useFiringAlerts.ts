@@ -10,6 +10,7 @@ export interface FiringAlerts {
   /** Currently-firing events keyed by server ID; a server may have several. */
   byServer: Map<string, AlertEvent[]>;
   loading: boolean;
+  error: boolean;
 }
 
 /**
@@ -23,6 +24,7 @@ export interface FiringAlerts {
 export function useFiringAlerts(): FiringAlerts {
   const [byServer, setByServer] = useState<Map<string, AlertEvent[]>>(new Map());
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -38,8 +40,10 @@ export function useFiringAlerts(): FiringAlerts {
         else next.set(event.server_id, [event]);
       }
       setByServer(next);
+      setError(false);
     } catch {
       // Alert state is supplementary here; a failure must not disturb the list.
+      setError(true);
     } finally {
       setLoading(false);
     }
@@ -47,5 +51,5 @@ export function useFiringAlerts(): FiringAlerts {
 
   usePolling(() => load(), REFRESH_MS);
 
-  return { byServer, loading };
+  return { byServer, loading, error };
 }

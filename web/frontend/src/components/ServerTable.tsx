@@ -8,7 +8,8 @@ import { useNavigate } from 'react-router-dom';
 import { Server } from '../api/servers';
 import { AlertEvent } from '../api/alerts';
 import { availabilityColor } from '../api/uptime';
-import { formatBytes, formatUptime, getExpirationInfo, percentOf, severityColor } from '../utils/format';
+import { formatBytes, formatUptime, formatDateTime, getExpirationInfo, severityColor } from '../utils/format';
+import { resourcePercent, serverStatus } from '../utils/fleet';
 
 const { Text } = Typography;
 
@@ -40,7 +41,7 @@ function MiniBar({ percent, hue, label }: { percent: number | null; hue: 'blue' 
               strokeColor={severityColor(percent, hue)}
               railColor="rgba(128, 140, 170, .16)"
             />
-            <span>{percent}%</span>
+            <span>{Math.round(percent)}%</span>
           </>
         )}
       </div>
@@ -58,11 +59,6 @@ export default function ServerTable({
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const lang = i18n.language?.startsWith('zh') ? 'zh' : 'en';
-
-  const isOnline = (server: Server) => {
-    const at = server.latest_metrics?.recorded_at;
-    return observedAt > 0 && !!at && observedAt - new Date(at).getTime() < 120000;
-  };
 
   const columns = [
     {
@@ -94,19 +90,23 @@ export default function ServerTable({
     {
       title: t('common.status'),
       key: 'status',
-      width: 104,
-      render: (_: unknown, server: Server) => (
-        <div className={`status-pill ${isOnline(server) ? 'online' : 'offline'}`}>
-          <span />{isOnline(server) ? t('dashboard.online') : t('dashboard.offline')}
-        </div>
-      ),
+      width: 140,
+      render: (_: unknown, server: Server) => {
+        const status = serverStatus(server, observedAt);
+        return <div className="table-observation">
+          <div className={`status-pill ${status}`}><span />{t(`dashboard.${status}`)}</div>
+          {status === 'offline' && server.latest_metrics && <Tooltip title={t('dashboard.lastSample', { time: formatDateTime(server.latest_metrics.recorded_at, i18n.language) })}>
+            <Text type="secondary" className="sample-history">{t('dashboard.historicalMetrics')}</Text>
+          </Tooltip>}
+        </div>;
+      },
     },
     {
       title: t('card.cpu'),
       key: 'cpu',
       width: 130,
       render: (_: unknown, server: Server) => (
-        <MiniBar percent={server.latest_metrics ? Math.round(server.latest_metrics.cpu_percent) : null} hue="blue" />
+        <MiniBar percent={serverStatus(server, observedAt) === 'pending' ? null : resourcePercent(server, 'cpu')} hue="blue" />
       ),
     },
     {
@@ -114,12 +114,12 @@ export default function ServerTable({
       key: 'memory',
       width: 130,
       render: (_: unknown, server: Server) => {
-        const m = server.latest_metrics;
+        const m = serverStatus(server, observedAt) === 'pending' ? null : server.latest_metrics;
         return (
           <MiniBar
-            percent={m ? percentOf(m.memory_used, m.memory_total) : null}
+            percent={m ? resourcePercent(server, 'memory') : null}
             hue="green"
-            label={m ? `${formatBytes(m.memory_used)} / ${formatBytes(m.memory_total)}` : undefined}
+            label={m && resourcePercent(server, 'memory') !== null ? `${formatBytes(m.memory_used)} / ${formatBytes(m.memory_total)}` : undefined}
           />
         );
       },
@@ -129,12 +129,12 @@ export default function ServerTable({
       key: 'disk',
       width: 130,
       render: (_: unknown, server: Server) => {
-        const m = server.latest_metrics;
+        const m = serverStatus(server, observedAt) === 'pending' ? null : server.latest_metrics;
         return (
           <MiniBar
-            percent={m ? percentOf(m.disk_used, server.disk_total) : null}
+            percent={m ? resourcePercent(server, 'disk') : null}
             hue="violet"
-            label={m ? `${formatBytes(m.disk_used)} / ${formatBytes(server.disk_total)}` : undefined}
+            label={m && resourcePercent(server, 'disk') !== null ? `${formatBytes(m.disk_used)} / ${formatBytes(server.disk_total)}` : undefined}
           />
         );
       },
@@ -145,7 +145,7 @@ export default function ServerTable({
       width: 160,
       render: (_: unknown, server: Server) => {
         const m = server.latest_metrics;
-        if (!m) return <Text type="secondary">—</Text>;
+        if (!m || serverStatus(server, observedAt) !== 'online') return <Text type="secondary">—</Text>;
         return (
           <Space size={10} className="table-throughput">
             <span><ArrowDownOutlined className="rx" />{formatBytes(m.network_rx_bytes, 1)}/s</span>
@@ -159,7 +159,7 @@ export default function ServerTable({
       key: 'uptime',
       width: 100,
       render: (_: unknown, server: Server) => (
-        <Text type="secondary">{formatUptime(server.latest_metrics?.uptime_seconds || 0)}</Text>
+        <Text type="secondary">{serverStatus(server, observedAt) === 'online' && server.latest_metrics ? formatUptime(server.latest_metrics.uptime_seconds) : '—'}</Text>
       ),
     },
     ...(availability ? [{
@@ -177,7 +177,7 @@ export default function ServerTable({
       key: 'expires',
       width: 130,
       render: (_: unknown, server: Server) => {
-        const info = getExpirationInfo(server.expires_at, lang);
+        const info = getExpirationInfo(server.expires_at, lang, observedAt);
         return info ? <Text style={{ color: info.color }}>{info.text}</Text> : <Text type="secondary">—</Text>;
       },
     },

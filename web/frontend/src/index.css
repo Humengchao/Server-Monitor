@@ -169,23 +169,19 @@ button, input, textarea, select { font: inherit; }
 .tag-filter { min-width: 190px; }
 .page-actions .ant-btn { box-shadow: none; }
 
-/* Stat tiles. One grid, equal columns, equal heights: a row of seven never
-   divides antd's 24 columns, and unequal tiles read as a mistake. */
+/* Equal-width overview tiles, with explicit counts to avoid orphan rows. */
 .overview-grid {
   margin-bottom: 26px;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 12px;
 }
-/* The dashboard has seven tiles. auto-fit lands them as 6 + 1 at common
-   desktop widths, and a single orphan on its own row looks like a bug. Pin
-   the column count to the tile count when there is room, and fall back to a
-   4 + 3 split rather than whatever the width happens to produce. */
-.overview-grid.overview-grid-7 { grid-template-columns: repeat(7, minmax(0, 1fr)); }
-@media (max-width: 1500px) { .overview-grid.overview-grid-7 { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+/* Eight tiles form 8 / 4 / 2 columns as the viewport narrows. */
+.overview-grid.overview-grid-8 { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+@media (max-width: 1800px) { .overview-grid.overview-grid-8 { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 /* Below tablet width the pinned counts must yield to the phone layout; the
    two-class selector above would otherwise outrank the generic mobile rule. */
-@media (max-width: 640px) { .overview-grid.overview-grid-7 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .overview-grid.overview-grid-8 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .overview-grid > .ant-tooltip-open, .overview-grid > .ant-card { min-width: 0; }
 /* Defensive: an antd Col dropped into this grid resolves its span percentage
    against the grid track rather than the row, collapsing the tile to a quarter
@@ -288,6 +284,11 @@ button, input, textarea, select { font: inherit; }
 .status-pill.online span { background: #24c894; box-shadow: 0 0 0 3px rgba(36, 200, 148, .12); }
 .status-pill.offline { color: #d65261; background: rgba(238, 87, 103, .1); }
 .status-pill.offline span { background: #ef6371; }
+.status-pill.pending { color: var(--muted); background: color-mix(in srgb, var(--muted) 12%, transparent); }
+.status-pill.pending span { background: var(--muted); }
+.table-observation { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.sample-history { display: flex; align-items: center; gap: 5px; margin-bottom: 9px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; line-height: 1.5; }
+.table-observation .sample-history { margin: 0; font-size: 11px; }
 
 .server-tags { min-height: 24px; margin: 15px 0 10px; display: flex; gap: 4px; flex-wrap: wrap; }
 .server-tags .ant-tag { max-width: 100%; margin: 0; overflow: hidden; border-radius: 6px; font-size: 10px; text-overflow: ellipsis; }
@@ -320,6 +321,48 @@ button, input, textarea, select { font: inherit; }
    character per line. */
 .metrics-unavailable-dot { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: #aab1c1; }
 .metrics-unavailable .ant-typography { font-size: 12px; white-space: nowrap; }
+.metrics-unavailable > div { min-width: 0; }
+.metrics-unavailable small { display: block; max-width: 230px; margin-top: 5px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+
+/* Fleet summaries use only current samples; counts expose partial coverage. */
+.fleet-resources { margin-bottom: 22px; padding: 17px 20px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+.fleet-resources-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; margin-bottom: 15px; }
+.fleet-resources-heading .ant-typography-secondary { font-size: 12px; }
+.fleet-resource-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+.fleet-resource { min-width: 0; }
+.fleet-resource + .fleet-resource { padding-left: 24px; border-left: 1px solid var(--border); }
+.fleet-resource-label { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; }
+.fleet-resource-label > span { display: flex; align-items: center; gap: 7px; color: var(--muted); }
+.fleet-resource-label strong { font-size: 14px; font-variant-numeric: tabular-nums; }
+.fleet-resource-value { margin-top: 7px; font-size: 17px; font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.fleet-resource .ant-progress { display: block; margin: 5px 0; line-height: 1; }
+.fleet-resource > .ant-typography { font-size: 11px; }
+.fleet-network-rates { display: flex; flex-direction: column; gap: 6px; margin: 9px 0 8px; }
+.fleet-network-rates > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 3px 8px; }
+.fleet-network-rates span { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); }
+.fleet-network-rates strong { font-size: 14px; font-variant-numeric: tabular-nums; }
+.fleet-network-rates > div:first-child .anticon { color: #18b690; }
+.fleet-network-rates > div:last-child .anticon { color: #5d7df7; }
+.fleet-focus { display: flex; flex-wrap: wrap; gap: 8px; margin: -4px 0 20px; }
+.fleet-focus-button { display: inline-flex; align-items: center; gap: 7px; padding: 7px 11px; border: 1px solid var(--border); border-radius: 8px; color: var(--muted); background: var(--surface); font-size: 12px; cursor: pointer; transition: background .15s, border-color .15s; }
+.fleet-focus-button strong { padding: 0 5px; border-radius: 4px; color: var(--text); background: var(--surface-soft); font-size: 11px; font-variant-numeric: tabular-nums; }
+.fleet-focus-button:hover, .fleet-focus-button.is-active { color: color-mix(in srgb, #5d7df7 85%, var(--text)); border-color: #5d7df7; background: color-mix(in srgb, #5d7df7 8%, var(--surface)); }
+.fleet-focus-button:focus-visible { outline: 2px solid #5d7df7; outline-offset: 3px; }
+.fleet-focus-button:disabled { cursor: default; opacity: .6; }
+@media (max-width: 760px) {
+  .fleet-resource-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .fleet-resource + .fleet-resource { padding-left: 14px; }
+  .fleet-resource-value { font-size: 14px; }
+  .fleet-resource:last-child { grid-column: 1 / -1; padding: 12px 0 0; border-left: 0; border-top: 1px solid var(--border); }
+  .fleet-network-rates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .fleet-network-rates > div { flex-direction: column; }
+  .fleet-resources { padding: 16px; }
+  .fleet-focus { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fleet-focus-button { min-width: 0; padding: 8px; gap: 5px; }
+  .fleet-focus-button > span:not(.anticon) { flex: 1; text-align: left; }
+  .server-card.is-pending { min-height: 220px; }
+  .server-card.is-pending .metrics-unavailable { min-height: 90px; }
+}
 
 /* Auth */
 .auth-page { position: relative; min-height: 100vh; display: grid; grid-template-columns: minmax(430px, 1.05fr) minmax(440px, .95fr); overflow: hidden; background: var(--surface); }
