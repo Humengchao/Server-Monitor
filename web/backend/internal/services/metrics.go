@@ -296,6 +296,23 @@ func (c *Collector) PollNow(s *models.Server) error {
 		return ErrPollInFlight
 	}
 	defer c.endPoll(s.ID)
+	// Manual retries must share the same bounded SSH concurrency as scheduled
+	// polls. Otherwise a burst of retry clicks can open an unbounded number of
+	// sessions and starve healthy hosts. Return a conflict immediately when all
+	// collector slots are occupied instead of holding an HTTP request open.
+	select {
+	case <-c.stopCh:
+		return ErrCollectorStopped
+	default:
+	}
+	select {
+	case c.pollSlots <- struct{}{}:
+		defer func() { <-c.pollSlots }()
+	case <-c.stopCh:
+		return ErrCollectorStopped
+	default:
+		return ErrPollBusy
+	}
 	m, err := c.collectOne(s, fingerprint)
 	if err == nil {
 		err = models.SaveMetric(c.db.Raw, s.ID, m)
@@ -310,6 +327,8 @@ func (c *Collector) PollNow(s *models.Server) error {
 }
 
 var ErrPollInFlight = errors.New("a poll for this server is already running")
+var ErrPollBusy = errors.New("collector is busy")
+var ErrCollectorStopped = errors.New("collector is stopped")
 
 func (c *Collector) failureAttempts(serverID uuid.UUID) int {
 	c.pollMu.Lock()
@@ -454,9 +473,14 @@ func isSSHAuthenticationFailure(err error) bool {
 	if err == nil {
 		return false
 	}
-	message := err.Error()
-	return strings.Contains(message, "ssh handshake:") &&
-		strings.Contains(message, "unable to authenticate")
+	message := strings.ToLower(err.Error())
+	// dialSSHClientConn wraps x/crypto/ssh errors with "ssh handshake:",
+	// while older callers/tests may pass the underlying message directly.
+	// Match the stable authentication phrases rather than one exact wrapper so
+	// all credential failures receive the conservative circuit-breaker delay.
+	return strings.Contains(message, "unable to authenticate") ||
+		strings.Contains(message, "no authentication methods") ||
+		strings.Contains(message, "authentication failed")
 }
 
 func (c *Collector) recordPollFailure(serverID uuid.UUID, fingerprint [32]byte, pollErr error, now time.Time) time.Duration {
@@ -733,7 +757,12 @@ func splitLinuxSections(out string, want int) []string {
 
 func (c *Collector) collectLinux(client *ssh.Client, s *models.Server) (*models.MetricPoint, error) {
 	out, err := RunCmd(client, linuxMetricsCommand)
-	if err != nil && strings.TrimSpace(out) == "" {
+	// A non-nil SSH command error means the batched sample is incomplete. The
+	// output may still contain a few sections, but treating those partial values
+	// as a healthy sample would overwrite the latest row with zeros and clear a
+	// real outage. Individual probe failures are already isolated by the shell
+	// command and do not make RunCmd return an error.
+	if err != nil {
 		return nil, fmt.Errorf("linux metrics: %w", err)
 	}
 	sections := splitLinuxSections(out, linuxSectionCount)
@@ -1084,7 +1113,10 @@ func encodePowerShell(script string) string {
 func (c *Collector) collectWindows(client *ssh.Client, s *models.Server) (*models.MetricPoint, error) {
 	cmd := "powershell -NoProfile -NonInteractive -EncodedCommand " + encodePowerShell(windowsMetricsScript)
 	out, err := RunCmd(client, cmd)
-	if err != nil && strings.TrimSpace(out) == "" {
+	// Do not promote a partial PowerShell response to a successful sample. A
+	// command failure can leave a handful of key/value lines in stdout; saving
+	// those would make the host appear online with fabricated zero metrics.
+	if err != nil {
 		return nil, fmt.Errorf("windows metrics: %w", err)
 	}
 

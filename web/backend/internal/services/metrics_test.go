@@ -197,6 +197,24 @@ func TestCollectorFirstAuthFailureResetsGenericAttempts(t *testing.T) {
 	}
 }
 
+func TestCollectorPollNowHonorsConcurrencySlot(t *testing.T) {
+	collector := NewCollector(nil, time.Second)
+	for i := 0; i < cap(collector.pollSlots); i++ {
+		collector.pollSlots <- struct{}{}
+	}
+	server := &models.Server{ID: uuid.New(), Host: "example.com", Port: 22, SSHUsername: "root", ServerType: "linux"}
+	if err := collector.PollNow(server); !errors.Is(err, ErrPollBusy) {
+		t.Fatalf("PollNow() = %v, want ErrPollBusy", err)
+	}
+	// A rejected retry must release its per-server in-flight marker so a later
+	// request can proceed once a slot becomes available.
+	fingerprint := serverPollFingerprint(server)
+	if !collector.beginPoll(server.ID, fingerprint) {
+		t.Fatal("PollNow() left server marked in flight after a busy response")
+	}
+	collector.endPoll(server.ID)
+}
+
 func TestSplitLinuxSectionsAndParse(t *testing.T) {
 	sep := linuxSectionSeparator + "\n"
 	out := "cpu  100 0 100 700 100 0 0 0\ncpu0 50 0 50 350 50 0 0 0\n" + sep +

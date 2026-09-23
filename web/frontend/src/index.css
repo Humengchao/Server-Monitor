@@ -639,6 +639,10 @@ button, input, textarea, select { font: inherit; }
 .detail-meta { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; color: var(--muted); font-size: 12px; }
 .detail-meta .anticon { margin-right: 5px; }
 .detail-meta-sep { width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: .45; }
+.detail-sample-state { display: inline-flex; align-items: center; }
+.detail-sample-state.online { color: #138663; }
+.detail-sample-state.offline { color: #d65261; }
+.detail-sample-state.pending { color: var(--muted); }
 .detail-tags { display: flex; gap: 5px; flex-wrap: wrap; }
 .detail-tags .ant-tag { margin: 0; border-radius: 6px; font-size: 10px; }
 .detail-actions .ant-btn { box-shadow: none; }

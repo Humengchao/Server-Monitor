@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { serversApi, MetricPoint } from '../api/servers';
 import { usePolling } from './usePolling';
+import { MAX_FUTURE_SAMPLE_SKEW_MS } from '../utils/fleet';
 
 export interface TimeRange {
   since: string;
@@ -47,7 +48,7 @@ export function isMetricFresh(metrics: MetricPoint | null, observedAt: number, w
   const age = observedAt - recordedAt;
   // A small amount of clock skew is fine, but a wildly future timestamp is
   // not evidence that a host is alive.
-  return age >= -30000 && age < windowMs;
+  return age >= -MAX_FUTURE_SAMPLE_SKEW_MS && age < windowMs;
 }
 
 export function useMetrics(serverId: string, timeRange: TimeRange, interval = 3000) {

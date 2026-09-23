@@ -23,7 +23,7 @@ import PortTable from '../components/PortTable';
 import PollErrorNotice from '../components/PollErrorNotice';
 import TagSelect from '../components/TagSelect';
 import CredentialSelect from '../components/CredentialSelect';
-import { formatBytes, formatDate, formatTime, formatUptime, getExpirationInfo, percentOf, severityColor } from '../utils/format';
+import { formatBytes, formatDate, formatDateTime, formatTime, formatUptime, getExpirationInfo, percentOf, severityColor } from '../utils/format';
 import { downloadCSV, safeFilenamePart } from '../utils/csv';
 
 // xterm and the Docker panel are only reachable through their own tabs, so
@@ -144,6 +144,9 @@ export default function ServerDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [server, setServer] = useState<Server | null>(null);
+  // The server payload includes the API Date header, which lets us still
+  // judge the embedded latest sample if the dedicated metrics request fails.
+  const [serverObservedAt, setServerObservedAt] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -187,11 +190,15 @@ export default function ServerDetail() {
     serverRequestRef.current = controller;
     setLoading(true);
     setLoadError(false);
+    setServerObservedAt(0);
     try {
       const res = await serversApi.get(id!, controller.signal);
       if (controller.signal.aborted || serverRequestRef.current !== controller) return;
       const found = res.data;
       setServer(found);
+      const dateHeader = res.headers?.date;
+      const apiNow = typeof dateHeader === 'string' ? Date.parse(dateHeader) : NaN;
+      setServerObservedAt(Number.isFinite(apiNow) ? apiNow : Date.now());
       setDockerInstalled(found.has_docker);
       setNotes(found.notes || '');
       setNotesChanged(false);
@@ -369,7 +376,20 @@ export default function ServerDetail() {
 
   const lang = i18n.language?.startsWith('zh') ? 'zh' : 'en';
   const expInfo = useMemo(() => getExpirationInfo(server?.expires_at, lang), [server?.expires_at, lang]);
-  const isOnline = isMetricFresh(metrics, observedAt);
+  const latestSample = metrics ?? server?.latest_metrics ?? null;
+  const sampleObservedAt = observedAt || serverObservedAt;
+  const isOnline = isMetricFresh(latestSample, sampleObservedAt);
+  // Keep the detail header aligned with the dashboard's three-state census:
+  // while the first probe is in flight, an unresponsive host is unknown rather
+  // than offline. A host with no sample after the probe remains pending too.
+  const detailStatus = metricsLoading && !metrics
+    ? 'pending'
+    : !metrics && !server?.latest_metrics
+      ? 'pending'
+      : isOnline ? 'online' : 'offline';
+  const latestSampleTime = latestSample?.recorded_at
+    ? formatDateTime(latestSample.recorded_at, i18n.language)
+    : null;
   const cpuPercent = Math.round(metrics?.cpu_percent || 0);
   const memPercent = metrics ? percentOf(metrics.memory_used, metrics.memory_total) : 0;
   const diskPercent = metrics && server ? percentOf(metrics.disk_used, server.disk_total) : 0;
@@ -397,8 +417,8 @@ export default function ServerDetail() {
           <div className="detail-identity">
             <div className="detail-identity-line">
               <Title level={3}>{server.name}</Title>
-              <span className={`status-pill ${isOnline ? 'online' : 'offline'}`}>
-                <span />{isOnline ? t('dashboard.online') : t('dashboard.offline')}
+              <span className={`status-pill ${detailStatus}`} aria-live="polite">
+                <span />{t(`dashboard.${detailStatus}`)}
               </span>
             </div>
             <div className="detail-meta">
@@ -409,6 +429,11 @@ export default function ServerDetail() {
               <span><KeyOutlined /> {server.credential_name || server.ssh_username}</span>
               {server.public_location && (<><span className="detail-meta-sep" /><span>{server.public_location}</span></>)}
               {expInfo && (<><span className="detail-meta-sep" /><span style={{ color: expInfo.color }}>{expInfo.text}</span></>)}
+              <span className="detail-meta-sep" />
+              <span className={`detail-sample-state ${detailStatus}`} title={latestSampleTime || undefined}>
+                <ClockCircleOutlined />
+                {latestSampleTime ? t('dashboard.lastSample', { time: latestSampleTime }) : t('dashboard.pending')}
+              </span>
             </div>
             {!!server.tags?.length && (
               <div className="detail-tags">
@@ -487,7 +512,7 @@ export default function ServerDetail() {
         <StatTile
           icon={<LineChartOutlined />}
           label={t('detail.sampledAt')}
-          value={metrics?.recorded_at ? formatTime(metrics.recorded_at, i18n.language) : '—'}
+          value={latestSample?.recorded_at ? formatTime(latestSample.recorded_at, i18n.language) : '—'}
           hint={t('detail.addedOn', { date: formatDate(server.created_at, i18n.language) })}
           accent="#6f8cf5"
         />

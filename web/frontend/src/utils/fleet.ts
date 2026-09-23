@@ -4,6 +4,10 @@ export type ServerStatus = 'online' | 'offline' | 'pending';
 export type ResourceMetric = 'cpu' | 'memory' | 'disk';
 export type FleetSort = 'default' | 'name' | ResourceMetric | 'uptime' | 'expiry';
 export const ONLINE_WINDOW_MS = 120000;
+// A host's clock can be slightly ahead of the API's response clock. Keep the
+// tolerance the same on the dashboard and detail page so a future-dated sample
+// is never shown as online in one view and offline in the other.
+export const MAX_FUTURE_SAMPLE_SKEW_MS = 30000;
 export const RESOURCE_WARNING_PERCENT = 90;
 export const RENEWAL_WINDOW_DAYS = 30;
 
@@ -11,7 +15,7 @@ export function serverStatus(server: Server, observedAt: number): ServerStatus {
   const recordedAt = Date.parse(server.latest_metrics?.recorded_at || '');
   if (!Number.isFinite(recordedAt)) return 'pending';
   const age = observedAt - recordedAt;
-  return observedAt > 0 && age >= -ONLINE_WINDOW_MS && age < ONLINE_WINDOW_MS ? 'online' : 'offline';
+  return observedAt > 0 && age >= -MAX_FUTURE_SAMPLE_SKEW_MS && age < ONLINE_WINDOW_MS ? 'online' : 'offline';
 }
 
 function nonnegative(value: unknown): value is number {

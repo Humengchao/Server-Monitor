@@ -6,6 +6,10 @@ import { GB, host, observedAt, sampleFleet } from './fixtures/fleet';
 test('collection status distinguishes missing samples and uses the response clock at the two-minute boundary', () => {
   const server = host('host');
   expect(serverStatus(server, observedAt)).toBe('online');
+  server.latest_metrics!.recorded_at = new Date(observedAt + 30000).toISOString();
+  expect(serverStatus(server, observedAt)).toBe('online');
+  server.latest_metrics!.recorded_at = new Date(observedAt + 30001).toISOString();
+  expect(serverStatus(server, observedAt)).toBe('offline');
   server.latest_metrics!.recorded_at = new Date(observedAt - 119999).toISOString();
   expect(serverStatus(server, observedAt)).toBe('online');
   server.latest_metrics!.recorded_at = new Date(observedAt - 120000).toISOString();

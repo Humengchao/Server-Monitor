@@ -266,6 +266,15 @@ ALTER TABLE servers DROP COLUMN IF EXISTS last_seen_at;
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS last_error_kind VARCHAR(16) NOT NULL DEFAULT '';
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS last_error TEXT NOT NULL DEFAULT '';
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS last_error_at TIMESTAMPTZ;
+-- If a deployment created these columns before the NOT NULL constraint was
+-- introduced, normalize those rows before enforcing the invariant. The
+-- collector and summary queries can then treat an empty value consistently.
+UPDATE servers SET last_error_kind = '' WHERE last_error_kind IS NULL;
+UPDATE servers SET last_error = '' WHERE last_error IS NULL;
+ALTER TABLE servers ALTER COLUMN last_error_kind SET DEFAULT '';
+ALTER TABLE servers ALTER COLUMN last_error_kind SET NOT NULL;
+ALTER TABLE servers ALTER COLUMN last_error SET DEFAULT '';
+ALTER TABLE servers ALTER COLUMN last_error SET NOT NULL;
 
 CREATE TABLE IF NOT EXISTS file_operations (
  id UUID PRIMARY KEY,

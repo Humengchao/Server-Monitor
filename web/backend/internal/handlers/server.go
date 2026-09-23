@@ -36,19 +36,31 @@ func (h *ServerHandler) PollRetry(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
-	db := c.MustGet("db").(*models.DB)
-	server, err := models.GetServerByIDAndUser(db, id, userID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
-		return
-	}
 	if h.collector == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "collector unavailable"})
 		return
 	}
+	db := c.MustGet("db").(*models.DB)
+	server, err := models.GetServerByIDAndUser(db, id, userID)
+	if err != nil {
+		// A missing/foreign ID is a 404, but decryption and database failures
+		// are service errors. Returning 404 for those hides an outage and makes
+		// a retry look like a bad server ID to the operator.
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
+		} else {
+			log.Printf("PollRetry load server %s: %v", id, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load server"})
+		}
+		return
+	}
 	if err := h.collector.PollNow(server); err != nil {
-		if errors.Is(err, services.ErrPollInFlight) {
+		if errors.Is(err, services.ErrPollInFlight) || errors.Is(err, services.ErrPollBusy) {
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
+		if errors.Is(err, services.ErrCollectorStopped) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "collector unavailable"})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": false, "kind": string(services.ClassifyPollError(err)), "error": services.TrimPollErrorDetail(err)})

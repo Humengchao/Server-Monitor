@@ -57,7 +57,10 @@ for (const route of ['/login', '/dashboard', '/servers/' + serverID, '/docker', 
     await page.goto(route);
     if (route === '/login') await expect(page.getByRole('button', { name: en['login.submit'], exact: true })).toBeVisible();
     else if (route.startsWith('/files')) { await openEditor(page); await expect(page.locator('.cm-line span[class]').first()).toBeVisible(); }
-    else await expect(page.getByText('Smoke Host', { exact: true }).first()).toBeVisible();
+    else if (route.startsWith('/servers/')) {
+      await expect(page.getByText('Smoke Host', { exact: true }).first()).toBeVisible();
+      await expect(page.locator('.detail-sample-state.online')).toContainText(en['dashboard.lastSample'].split(' · ')[0]);
+    } else await expect(page.getByText('Smoke Host', { exact: true }).first()).toBeVisible();
     expect(state.errors).toEqual([]);
   });
 }
