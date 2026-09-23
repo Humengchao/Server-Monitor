@@ -41,17 +41,22 @@ func (h *ServerHandler) PollRetry(c *gin.Context) {
 		return
 	}
 	db := c.MustGet("db").(*models.DB)
+	owned, err := models.ServerOwnedByUser(db.Raw, id, userID)
+	if err != nil {
+		log.Printf("PollRetry check server %s: %v", id, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load server"})
+		return
+	}
+	if !owned {
+		c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
+		return
+	}
 	server, err := models.GetServerByIDAndUser(db, id, userID)
 	if err != nil {
-		// A missing/foreign ID is a 404, but decryption and database failures
-		// are service errors. Returning 404 for those hides an outage and makes
-		// a retry look like a bad server ID to the operator.
-		if errors.Is(err, sql.ErrNoRows) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
-		} else {
-			log.Printf("PollRetry load server %s: %v", id, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load server"})
-		}
+		// Ownership was established above, so an error here is a decryption,
+		// linked-credential, or database failure rather than a foreign ID.
+		log.Printf("PollRetry load server %s: %v", id, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load server"})
 		return
 	}
 	if err := h.collector.PollNow(server); err != nil {
