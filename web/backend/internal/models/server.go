@@ -156,7 +156,7 @@ func scanServerSummaries(rows *sql.Rows) ([]Server, error) {
 func RecordServerPollError(db *sql.DB, id uuid.UUID, kind, detail string, at time.Time) error {
 	_, err := db.Exec(
 		`UPDATE servers SET last_error_kind=$2, last_error=$3, last_error_at=$4
-		 WHERE id=$1 AND (last_error_kind IS DISTINCT FROM $2 OR last_error IS DISTINCT FROM $3)`,
+		 WHERE id=$1 AND (last_error_kind IS DISTINCT FROM $2 OR last_error IS DISTINCT FROM $3 OR last_error_at IS NULL)`,
 		id, kind, detail, at)
 	return err
 }
