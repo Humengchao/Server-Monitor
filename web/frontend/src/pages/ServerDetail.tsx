@@ -1,12 +1,12 @@
 import React, { useEffect, useState, useCallback, useMemo, Suspense, lazy, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-  Typography, Tag, Space, Button, Card, Tabs, Spin, Modal, Form, Input, InputNumber, Select,
-  App, Row, Col, Empty, Progress, Segmented, Tooltip, Result,
+  Typography, Tag, Space, Button, Card, Tabs, Spin, Modal, Form, Input,
+  App, Empty, Progress, Segmented, Tooltip, Result,
 } from 'antd';
 import {
   ArrowLeftOutlined, EditOutlined, DeleteOutlined, DockerOutlined, KeyOutlined, SaveOutlined,
-  WindowsOutlined, DesktopOutlined, CopyOutlined, DownloadOutlined, CloudServerOutlined,
+  WindowsOutlined, CopyOutlined, DownloadOutlined, CloudServerOutlined,
   ClockCircleOutlined, ThunderboltOutlined, ArrowDownOutlined, ArrowUpOutlined, DashboardOutlined,
   DatabaseOutlined, HddOutlined, LineChartOutlined, FolderOpenOutlined,
 } from '@ant-design/icons';
@@ -21,8 +21,10 @@ import ProcessTable from '../components/ProcessTable';
 import ServiceTable from '../components/ServiceTable';
 import PortTable from '../components/PortTable';
 import PollErrorNotice from '../components/PollErrorNotice';
-import TagSelect from '../components/TagSelect';
-import CredentialSelect from '../components/CredentialSelect';
+import ServerForm from '../components/ServerForm';
+import { buildServerPayload, serverFormValues } from '../utils/serverForm';
+import type { ServerFormValues } from '../utils/serverForm';
+import { copyToClipboard } from '../utils/clipboard';
 import { formatBytes, formatDate, formatDateTime, formatTime, formatUptime, getExpirationInfo, percentOf, severityColor } from '../utils/format';
 import type { ServerStatus } from '../utils/fleet';
 import { downloadCSV, safeFilenamePart } from '../utils/csv';
@@ -37,27 +39,10 @@ const tabFallback = (
 );
 import { usePolling } from '../hooks/usePolling';
 
-const { Title, Text } = Typography;
+const { Title } = Typography;
 const { RangePicker } = DatePicker;
 
 type PresetKey = '1h' | 'today' | 'yesterday' | '7d' | '30d';
-
-interface ServerFormValues {
-  name: string;
-  host: string;
-  port?: number;
-  ssh_username?: string;
-  ssh_password?: string;
-  ssh_key?: string;
-  ssh_host_key?: string;
-  server_type?: string;
-  expires_at?: Dayjs | null;
-  billing_price?: number;
-  billing_currency?: string;
-  billing_cycle?: string;
-  traffic_limit_gb?: number;
-  public_location?: string;
-}
 
 function apiError(err: unknown, fallback: string): string {
   const detail = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
@@ -80,33 +65,6 @@ function getPresetRange(key: PresetKey): TimeRange {
       return { since: now.subtract(7, 'day').startOf('day').toISOString(), until: now.toISOString() };
     case '30d':
       return { since: now.subtract(30, 'day').startOf('day').toISOString(), until: now.toISOString() };
-  }
-}
-
-async function copyToClipboard(text: string): Promise<void> {
-  if (navigator.clipboard && window.isSecureContext) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return;
-    } catch {
-      // Fall back for browsers that expose the API but deny clipboard access.
-    }
-  }
-
-  const textarea = document.createElement('textarea');
-  textarea.value = text;
-  textarea.setAttribute('readonly', '');
-  textarea.style.position = 'fixed';
-  textarea.style.opacity = '0';
-  document.body.appendChild(textarea);
-  try {
-    textarea.focus();
-    textarea.select();
-    if (!document.execCommand('copy')) {
-      throw new Error('Copy command failed');
-    }
-  } finally {
-    textarea.remove();
   }
 }
 
@@ -154,8 +112,6 @@ export default function ServerDetail() {
   const [savingServer, setSavingServer] = useState(false);
   const [savingNotes, setSavingNotes] = useState(false);
   const [form] = Form.useForm<ServerFormValues>();
-  const serverType = Form.useWatch('server_type', form) || 'linux';
-  const sshHostKey = Form.useWatch('ssh_host_key', form);
   const [tagValues, setTagValues] = useState<string[]>([]);
   const [selectedCredential, setSelectedCredential] = useState<string | undefined>(undefined);
   const [dockerInstalled, setDockerInstalled] = useState<boolean | null>(null);
@@ -249,20 +205,7 @@ export default function ServerDetail() {
     // Drop any password/key typed in a previously cancelled edit; empty
     // secret fields mean "keep current" on the backend.
     form.resetFields();
-    form.setFieldsValue({
-      name: server.name,
-      host: server.host,
-      port: server.port,
-      ssh_username: server.ssh_username,
-      ssh_host_key: server.ssh_host_key || '',
-      expires_at: server.expires_at ? dayjs(server.expires_at) : null,
-      server_type: server.server_type || 'linux',
-      billing_price: server.billing_price || 0,
-      billing_currency: server.billing_currency || 'CNY',
-      billing_cycle: server.billing_cycle || 'year',
-      traffic_limit_gb: Number(((server.traffic_limit_bytes || 0) / 1024 / 1024 / 1024).toFixed(2)),
-      public_location: server.public_location || '',
-    });
+    form.setFieldsValue(serverFormValues(server));
     setTagValues(server.tags?.map((tag) => tag.id) || []);
     setModalOpen(true);
   };
@@ -271,23 +214,7 @@ export default function ServerDetail() {
     if (!server) return;
     setSavingServer(true);
     try {
-      const payload = {
-        ...values,
-        name: typeof values.name === 'string' ? values.name.trim() : values.name,
-        host: typeof values.host === 'string' ? values.host.trim() : values.host,
-        ssh_username: typeof values.ssh_username === 'string' ? values.ssh_username.trim() : values.ssh_username,
-        // Do not send stale direct-auth values while a shared credential is
-        // selected; the fields are intentionally hidden in that mode.
-        ssh_password: selectedCredential ? undefined : values.ssh_password,
-        ssh_key: serverType === 'windows' || selectedCredential ? undefined : values.ssh_key,
-        ssh_host_key: serverType === 'windows' ? undefined : values.ssh_host_key,
-        port: serverType === 'windows' ? undefined : values.port,
-        credential_id: selectedCredential || null,
-        server_type: serverType,
-        expires_at: values.expires_at ? values.expires_at.toISOString() : null,
-        traffic_limit_bytes: Math.round((values.traffic_limit_gb || 0) * 1024 * 1024 * 1024),
-        notes: server.notes || '',
-      };
+      const payload = buildServerPayload(values, { credentialId: selectedCredential, notes: server.notes || '' });
       await serversApi.update(server.id, payload);
       await serversApi.setTags(server.id, tagValues);
       message.success(t('server.updated'));
@@ -648,92 +575,24 @@ export default function ServerDetail() {
       ]} />
 
       <Modal
+        className="server-form-modal"
         title={t('server.edit')}
         open={modalOpen}
         onCancel={() => { if (!savingServer) setModalOpen(false); }}
         onOk={() => form.submit()}
         confirmLoading={savingServer}
-        width={680}
+        width={720}
       >
-        <Form form={form} layout="vertical" onFinish={handleSubmit} disabled={savingServer}>
-          <Form.Item name="name" label={t('server.serverName')} rules={[{ required: true }]}>
-            <Input placeholder={t('server.serverNamePlaceholder')} maxLength={128} />
-          </Form.Item>
-          <Form.Item name="host" label={t('server.host')} rules={[{ required: true }]}>
-            <Input placeholder={t('server.hostPlaceholder')} />
-          </Form.Item>
-          {serverType !== 'windows' && <Form.Item name="port" label={t('server.sshPort')} initialValue={22}>
-            <InputNumber min={1} max={65535} style={{ width: '100%' }} />
-          </Form.Item>}
-          <Form.Item name="server_type" label={t('server.type')} initialValue="linux">
-            <Select onChange={(value) => {
-              setSelectedCredential(undefined);
-              form.setFieldsValue(value === 'windows'
-                ? { port: undefined, ssh_key: undefined, ssh_host_key: undefined }
-                : { port: form.getFieldValue('port') || 22 });
-            }}>
-              <Select.Option value="linux"><DesktopOutlined /> Linux</Select.Option>
-              <Select.Option value="windows"><WindowsOutlined /> Windows</Select.Option>
-            </Select>
-          </Form.Item>
-          <Form.Item label={t('server.credential')}>
-            <CredentialSelect value={selectedCredential} onChange={setSelectedCredential} serverType={serverType} />
-          </Form.Item>
-          {!selectedCredential && (
-            <>
-              <Form.Item name="ssh_username" label={t(serverType === 'windows' ? 'server.username' : 'server.sshUsername')} rules={[{ required: true }]}>
-                <Input placeholder={t(serverType === 'windows' ? 'server.usernamePlaceholder' : 'server.sshUsernamePlaceholder')} />
-              </Form.Item>
-              <Form.Item name="ssh_password" label={t(serverType === 'windows' ? 'server.password' : 'server.sshPassword')}>
-                <Input.Password placeholder={t('server.sshKeyEditPlaceholder')} />
-              </Form.Item>
-              {serverType !== 'windows' && <Form.Item name="ssh_key" label={t('server.sshKey')}>
-                <Input.TextArea rows={4} placeholder={t('server.sshKeyEditPlaceholder')} />
-              </Form.Item>}
-            </>
-          )}
-          {serverType !== 'windows' && <Form.Item
-            name="ssh_host_key"
-            label={t('server.sshHostKey')}
-            extra={sshHostKey?.trim() ? undefined : <Text type="warning">{t('server.sshHostKeyWarning')}</Text>}
-          >
-            <Input.TextArea rows={2} placeholder={t('server.sshHostKeyPlaceholder')} />
-          </Form.Item>}
-          <Form.Item name="expires_at" label={t('server.expiresAt')}>
-            <DatePicker showTime style={{ width: '100%' }} placeholder={t('server.expiresAtPlaceholder')} />
-          </Form.Item>
-          <Form.Item name="public_location" label={t('server.publicLocation')}>
-            <Input placeholder={t('server.publicLocationPlaceholder')} maxLength={128} />
-          </Form.Item>
-          <Row gutter={12}>
-            <Col xs={24} sm={8}>
-              <Form.Item name="billing_price" label={t('server.billingPrice')}>
-                <InputNumber min={0} precision={2} style={{ width: '100%' }} />
-              </Form.Item>
-            </Col>
-            <Col xs={24} sm={8}>
-              <Form.Item name="billing_currency" label={t('server.billingCurrency')}>
-                <Select options={[{ value: 'CNY', label: '¥ CNY' }, { value: 'USD', label: '$ USD' }, { value: 'EUR', label: '€ EUR' }]} />
-              </Form.Item>
-            </Col>
-            <Col xs={24} sm={8}>
-              <Form.Item name="billing_cycle" label={t('server.billingCycle')}>
-                <Select options={[
-                  { value: 'month', label: t('server.cycleMonth') },
-                  { value: 'quarter', label: t('server.cycleQuarter') },
-                  { value: 'half_year', label: t('server.cycleHalfYear') },
-                  { value: 'year', label: t('server.cycleYear') },
-                ]} />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Form.Item name="traffic_limit_gb" label={t('server.trafficLimit')}>
-            <InputNumber min={0} precision={2} suffix="GB" style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item label={t('server.tags')}>
-            <TagSelect value={tagValues} onChange={setTagValues} />
-          </Form.Item>
-        </Form>
+        <ServerForm
+          form={form}
+          editing
+          credentialId={selectedCredential}
+          onCredentialChange={setSelectedCredential}
+          tagIds={tagValues}
+          onTagsChange={setTagValues}
+          disabled={savingServer}
+          onFinish={handleSubmit}
+        />
       </Modal>
     </div>
   );

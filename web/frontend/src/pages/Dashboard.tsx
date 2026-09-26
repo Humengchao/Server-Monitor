@@ -1,12 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
-  Row, Col, Button, Modal, Form, Input, InputNumber, Select, Segmented, Tooltip,
+  Row, Col, Button, Modal, Form, Input, Select, Segmented, Tooltip,
   Typography, Space, App, Card, Skeleton, Empty, Result, Alert
 } from 'antd';
-import { DatePicker } from 'antd';
-import dayjs, { Dayjs } from 'dayjs';
 import {
-  PlusOutlined, ReloadOutlined, FilterOutlined, SafetyOutlined, WindowsOutlined, DesktopOutlined,
+  PlusOutlined, ReloadOutlined, FilterOutlined, SafetyOutlined,
   CloudServerOutlined, CheckCircleOutlined, DisconnectOutlined, SearchOutlined, AppstoreOutlined,
   BarsOutlined, DashboardOutlined, DatabaseOutlined, WalletOutlined, SortAscendingOutlined,
   CheckSquareOutlined, RiseOutlined, ClockCircleOutlined, AlertOutlined, CalendarOutlined, WarningOutlined,
@@ -16,8 +14,9 @@ import ServerCard from '../components/ServerCard';
 import ServerTable from '../components/ServerTable';
 import FleetResources from '../components/FleetResources';
 import BatchActionBar from '../components/BatchActionBar';
-import TagSelect from '../components/TagSelect';
-import CredentialSelect from '../components/CredentialSelect';
+import ServerForm from '../components/ServerForm';
+import { buildServerPayload, serverFormValues } from '../utils/serverForm';
+import type { ServerFormValues } from '../utils/serverForm';
 import { serversApi, Server, Tag } from '../api/servers';
 import { convertCurrency, currencySymbol, useExchangeRates } from '../hooks/useExchangeRates';
 import { useFleetUptime, windowPercent } from '../hooks/useFleetUptime';
@@ -40,23 +39,6 @@ type StatusFilter = 'all' | ServerStatus;
 type FocusFilter = 'all' | 'alerts' | 'resource' | 'expiry' | 'issues';
 type SortKey = FleetSort;
 type ViewMode = 'grid' | 'list';
-
-interface ServerFormValues {
-  name: string;
-  host: string;
-  port?: number;
-  ssh_username?: string;
-  ssh_password?: string;
-  ssh_key?: string;
-  ssh_host_key?: string;
-  server_type?: string;
-  expires_at?: Dayjs | null;
-  billing_price?: number;
-  billing_currency?: string;
-  billing_cycle?: string;
-  traffic_limit_gb?: number;
-  public_location?: string;
-}
 
 function apiError(err: unknown, fallback: string): string {
   const detail = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
@@ -95,8 +77,6 @@ export default function Dashboard() {
   const [savingServer, setSavingServer] = useState(false);
   const [editingServer, setEditingServer] = useState<Server | null>(null);
   const [form] = Form.useForm<ServerFormValues>();
-  const serverType = Form.useWatch('server_type', form) || 'linux';
-  const sshHostKey = Form.useWatch('ssh_host_key', form);
   const [tagValues, setTagValues] = useState<string[]>([]);
   const [filterTagIds, setFilterTagIds] = useState<string[]>([]);
   const [selectedCredential, setSelectedCredential] = useState<string | undefined>(undefined);
@@ -229,23 +209,7 @@ export default function Dashboard() {
   const handleSubmit = async (values: ServerFormValues) => {
     setSavingServer(true);
     try {
-      const payload = {
-        ...values,
-        name: typeof values.name === 'string' ? values.name.trim() : values.name,
-        host: typeof values.host === 'string' ? values.host.trim() : values.host,
-        ssh_username: typeof values.ssh_username === 'string' ? values.ssh_username.trim() : values.ssh_username,
-        // When a shared credential is selected, do not submit stale values
-        // from the unmounted direct-auth fields.
-        ssh_password: selectedCredential ? undefined : values.ssh_password,
-        ssh_key: serverType === 'windows' || selectedCredential ? undefined : values.ssh_key,
-        ssh_host_key: serverType === 'windows' ? undefined : values.ssh_host_key,
-        port: serverType === 'windows' ? undefined : values.port,
-        credential_id: selectedCredential || null,
-        server_type: serverType,
-        expires_at: values.expires_at ? values.expires_at.toISOString() : null,
-        traffic_limit_bytes: Math.round((values.traffic_limit_gb || 0) * 1024 * 1024 * 1024),
-        notes: editingServer?.notes || '',
-      };
+      const payload = buildServerPayload(values, { credentialId: selectedCredential, notes: editingServer?.notes || '' });
       if (editingServer) {
         await serversApi.update(editingServer.id, payload);
         await serversApi.setTags(editingServer.id, tagValues);
@@ -353,20 +317,7 @@ export default function Dashboard() {
     // unmounted fields, so a password typed for another server would otherwise
     // ride along on submit and silently overwrite this server's credentials.
     form.resetFields();
-    form.setFieldsValue({
-      name: server.name,
-      host: server.host,
-      port: server.port,
-      ssh_username: server.ssh_username,
-      ssh_host_key: server.ssh_host_key || '',
-      expires_at: server.expires_at ? dayjs(server.expires_at) : null,
-      server_type: server.server_type || 'linux',
-      billing_price: server.billing_price || 0,
-      billing_currency: server.billing_currency || 'CNY',
-      billing_cycle: server.billing_cycle || 'year',
-      traffic_limit_gb: Number(((server.traffic_limit_bytes || 0) / 1024 / 1024 / 1024).toFixed(2)),
-      public_location: server.public_location || '',
-    });
+    form.setFieldsValue(serverFormValues(server));
     setTagValues(server.tags?.map((tag) => tag.id) || []);
     setModalOpen(true);
   }, [form]);
@@ -686,92 +637,24 @@ export default function Dashboard() {
       )}
 
       <Modal
+        className="server-form-modal"
         title={editingServer ? t('server.edit') : t('server.add')}
         open={modalOpen}
         onCancel={() => { if (!savingServer) { setModalOpen(false); setEditingServer(null); } }}
         onOk={() => form.submit()}
         confirmLoading={savingServer}
-        width={680}
+        width={720}
       >
-        <Form form={form} layout="vertical" onFinish={handleSubmit} disabled={savingServer}>
-          <Form.Item name="name" label={t('server.serverName')} rules={[{ required: true }]}>
-            <Input placeholder={t('server.serverNamePlaceholder')} maxLength={128} />
-          </Form.Item>
-          <Form.Item name="host" label={t('server.host')} rules={[{ required: true }]}>
-            <Input placeholder={t('server.hostPlaceholder')} />
-          </Form.Item>
-          {serverType !== 'windows' && <Form.Item name="port" label={t('server.sshPort')} initialValue={22}>
-            <InputNumber min={1} max={65535} style={{ width: '100%' }} />
-          </Form.Item>}
-          <Form.Item name="server_type" label={t('server.type')} initialValue="linux">
-            <Select onChange={(value) => {
-              setSelectedCredential(undefined);
-              form.setFieldsValue(value === 'windows'
-                ? { port: undefined, ssh_key: undefined, ssh_host_key: undefined }
-                : { port: form.getFieldValue('port') || 22 });
-            }}>
-              <Select.Option value="linux"><DesktopOutlined /> Linux</Select.Option>
-              <Select.Option value="windows"><WindowsOutlined /> Windows</Select.Option>
-            </Select>
-          </Form.Item>
-          <Form.Item label={t('server.credential')}>
-            <CredentialSelect value={selectedCredential} onChange={setSelectedCredential} serverType={serverType} />
-          </Form.Item>
-          {!selectedCredential && (
-            <>
-              <Form.Item name="ssh_username" label={t(serverType === 'windows' ? 'server.username' : 'server.sshUsername')} rules={[{ required: true }]}>
-                <Input placeholder={t(serverType === 'windows' ? 'server.usernamePlaceholder' : 'server.sshUsernamePlaceholder')} />
-              </Form.Item>
-              <Form.Item name="ssh_password" label={t(serverType === 'windows' ? 'server.password' : 'server.sshPassword')} rules={serverType === 'windows' && !editingServer ? [{ required: true }] : undefined}>
-                <Input.Password placeholder={editingServer ? t('server.sshKeyEditPlaceholder') : t('server.sshPasswordPlaceholder')} />
-              </Form.Item>
-              {serverType !== 'windows' && <Form.Item name="ssh_key" label={t('server.sshKey')}>
-                <Input.TextArea rows={4} placeholder={editingServer ? t('server.sshKeyEditPlaceholder') : t('server.sshKeyPlaceholder')} />
-              </Form.Item>}
-            </>
-          )}
-          {serverType !== 'windows' && <Form.Item
-            name="ssh_host_key"
-            label={t('server.sshHostKey')}
-            extra={sshHostKey?.trim() ? undefined : <Text type="warning">{t('server.sshHostKeyWarning')}</Text>}
-          >
-            <Input.TextArea rows={2} placeholder={t('server.sshHostKeyPlaceholder')} />
-          </Form.Item>}
-          <Form.Item name="expires_at" label={t('server.expiresAt')}>
-            <DatePicker showTime style={{ width: '100%' }} placeholder={t('server.expiresAtPlaceholder')} />
-          </Form.Item>
-          <Form.Item name="public_location" label={t('server.publicLocation')}>
-            <Input placeholder={t('server.publicLocationPlaceholder')} maxLength={128} />
-          </Form.Item>
-          <Row gutter={12}>
-            <Col xs={24} sm={8}>
-              <Form.Item name="billing_price" label={t('server.billingPrice')} initialValue={0}>
-                <InputNumber min={0} precision={2} style={{ width: '100%' }} />
-              </Form.Item>
-            </Col>
-            <Col xs={24} sm={8}>
-              <Form.Item name="billing_currency" label={t('server.billingCurrency')} initialValue="CNY">
-                <Select options={[{ value: 'CNY', label: '¥ CNY' }, { value: 'USD', label: '$ USD' }, { value: 'EUR', label: '€ EUR' }]} />
-              </Form.Item>
-            </Col>
-            <Col xs={24} sm={8}>
-              <Form.Item name="billing_cycle" label={t('server.billingCycle')} initialValue="year">
-                <Select options={[
-                  { value: 'month', label: t('server.cycleMonth') },
-                  { value: 'quarter', label: t('server.cycleQuarter') },
-                  { value: 'half_year', label: t('server.cycleHalfYear') },
-                  { value: 'year', label: t('server.cycleYear') },
-                ]} />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Form.Item name="traffic_limit_gb" label={t('server.trafficLimit')} initialValue={0}>
-            <InputNumber min={0} precision={2} suffix="GB" style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item label={t('server.tags')}>
-            <TagSelect value={tagValues} onChange={setTagValues} />
-          </Form.Item>
-        </Form>
+        <ServerForm
+          form={form}
+          editing={!!editingServer}
+          credentialId={selectedCredential}
+          onCredentialChange={setSelectedCredential}
+          tagIds={tagValues}
+          onTagsChange={setTagValues}
+          disabled={savingServer}
+          onFinish={handleSubmit}
+        />
       </Modal>
     </div>
   );

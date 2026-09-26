@@ -617,6 +617,28 @@ button, input, textarea, select { font: inherit; }
 .docker-undetected-row .server-platform { width: 36px; height: 36px; flex-basis: 36px; font-size: 16px; border-radius: 10px; }
 .docker-undetected-row .docker-host-identity { flex: 1; }
 
+/* Add / edit server form */
+.server-form .form-section-title {
+  margin: 2px 0 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .6px;
+  text-transform: uppercase;
+}
+.server-form .form-section-title + .ant-row .ant-form-item, .server-form .form-section-title + .ant-form-item { margin-top: 0; }
+.server-form .form-section-title:not(:first-child) { margin-top: 6px; }
+/* The body scrolls, so OK and Cancel stay on screen however long the form is. */
+.server-form-modal .ant-modal-body { max-height: min(68vh, 760px); overflow-y: auto; padding-right: 6px; }
+
+/* Container logs */
+.docker-logs { margin: 0; padding: 16px; height: 100%; overflow: auto; color: #cdd6f4; font-family: Menlo, Monaco, 'Courier New', monospace; font-size: 13px; line-height: 1.5; }
+.docker-logs-tools .ant-select { min-width: 132px; }
+.container-actions .ant-btn-text { color: var(--muted); }
+.container-actions .ant-btn-text:hover { color: var(--text); }
+
 /* Server detail hero */
 .detail-hero {
   margin-bottom: 20px;

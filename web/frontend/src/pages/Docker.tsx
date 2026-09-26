@@ -1,10 +1,12 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { Collapse, Table, Tag, Button, Space, Typography, Spin, Empty, Drawer, App, Card, Tooltip, Result, Progress } from 'antd';
+import { Collapse, Table, Tag, Button, Space, Typography, Spin, Empty, Drawer, App, Card, Tooltip, Result, Progress, Select, Switch } from 'antd';
 import {
-  ReloadOutlined, CaretRightOutlined, PauseOutlined, SyncOutlined, ArrowRightOutlined, FileTextOutlined, CodeOutlined,
-ContainerOutlined, CloudServerOutlined, CheckCircleOutlined, QuestionCircleOutlined, SearchOutlined, FolderOpenOutlined,
+  ReloadOutlined, ArrowRightOutlined, CodeOutlined, CopyOutlined,
+  ContainerOutlined, CloudServerOutlined, CheckCircleOutlined, QuestionCircleOutlined, SearchOutlined,
 } from '@ant-design/icons';
+import ContainerActions from '../components/ContainerActions';
+import { copyToClipboard } from '../utils/clipboard';
 import type { ColumnsType } from 'antd/es/table';
 import { useTranslation } from 'react-i18next';
 import { serversApi, Server, DockerContainer } from '../api/servers';
@@ -141,6 +143,8 @@ function containerResourceColumns(t: Translate): ColumnsType<DockerContainer> {
   ];
 }
 
+const LOG_TAILS = [100, 500, 2000];
+
 function LogsModal({ serverId, containerId, containerName, onClose }: {
   serverId: string;
   containerId: string;
@@ -148,15 +152,20 @@ function LogsModal({ serverId, containerId, containerName, onClose }: {
   onClose: () => void;
 }) {
   const { t } = useTranslation();
+  const { message } = App.useApp();
   const [logs, setLogs] = useState('');
   const [loading, setLoading] = useState(true);
+  const [tail, setTail] = useState(500);
+  const [wrap, setWrap] = useState(true);
+  // Bumped by the refresh button; the effect below re-runs on it.
+  const [generation, setGeneration] = useState(0);
+  const bodyRef = useRef<HTMLPreElement>(null);
 
   useEffect(() => {
     const ac = new AbortController();
     const timer = window.setTimeout(() => {
       setLoading(true);
-      setLogs('');
-      void serversApi.getContainerLogs(serverId, containerId, 500, ac.signal)
+      void serversApi.getContainerLogs(serverId, containerId, tail, ac.signal)
         .then((r) => setLogs(r.data.logs || t('docker.empty')))
         .catch(() => {
           if (!ac.signal.aborted) setLogs(t('docker.loadLogsFailed'));
@@ -166,7 +175,21 @@ function LogsModal({ serverId, containerId, containerName, onClose }: {
         });
     }, 0);
     return () => { window.clearTimeout(timer); ac.abort(); };
-  }, [serverId, containerId, t]);
+  }, [serverId, containerId, tail, generation, t]);
+
+  // The newest lines are at the bottom, which is where a reader starts.
+  useEffect(() => {
+    if (!loading && bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
+  }, [loading, logs]);
+
+  const copy = async () => {
+    try {
+      await copyToClipboard(logs);
+      message.success(t('docker.logsCopied'));
+    } catch {
+      message.error(t('docker.logsCopyFailed'));
+    }
+  };
 
   return (
     <Drawer
@@ -177,21 +200,19 @@ function LogsModal({ serverId, containerId, containerName, onClose }: {
       placement="right"
       rootStyle={{ position: 'fixed' }}
       styles={{ body: { padding: 0, background: '#1e1e2e' }, wrapper: { width: '80vw' } }}
+      extra={(
+        <Space size={8} className="docker-logs-tools">
+          <Select size="small" value={tail} onChange={setTail} aria-label={t('docker.logsTail', { count: tail })} options={LOG_TAILS.map((count) => ({ value: count, label: t('docker.logsTail', { count }) }))} />
+          <Tooltip title={t('docker.logsWrap')}><Switch size="small" checked={wrap} onChange={setWrap} aria-label={t('docker.logsWrap')} /></Tooltip>
+          <Button size="small" icon={<CopyOutlined />} disabled={loading} onClick={() => { void copy(); }}>{t('docker.logsCopy')}</Button>
+          <Button size="small" icon={<ReloadOutlined />} aria-label={t('common.refresh')} loading={loading} onClick={() => setGeneration((value) => value + 1)} />
+        </Space>
+      )}
     >
       {loading ? (
         <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
       ) : (
-        <pre style={{
-          color: '#cdd6f4',
-          padding: 16,
-          height: '100%',
-          overflow: 'auto',
-          fontSize: 13,
-          fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-all',
-          margin: 0,
-        }}>
+        <pre ref={bodyRef} className="docker-logs" style={{ whiteSpace: wrap ? 'pre-wrap' : 'pre', wordBreak: wrap ? 'break-all' : 'normal' }}>
           {logs}
         </pre>
       )}
@@ -425,7 +446,7 @@ export function ServerDockerPanel({ serverId, version }: { serverId: string; ver
     },
     ...containerResourceColumns(t),
     {
-      title: t('common.status'),
+      title: t('docker.status'),
       dataIndex: 'status',
       key: 'status',
       ellipsis: true,
@@ -440,21 +461,17 @@ export function ServerDockerPanel({ serverId, version }: { serverId: string; ver
     {
       title: t('common.actions'),
       key: 'actions',
-      width: 320,
+      width: 176,
+      fixed: 'right' as const,
       render: (_, record) => (
-        <Space size="small" wrap>
-          {record.state !== 'running' ? (
-            <Button size="small" type="primary" icon={<CaretRightOutlined />} loading={actionBusy === `${record.id}:start`} onClick={() => handleAction(record.id, 'start')}>{t('docker.start')}</Button>
-          ) : (
-            <>
-              <Button size="small" icon={<PauseOutlined />} loading={actionBusy === `${record.id}:stop`} onClick={() => handleAction(record.id, 'stop')}>{t('docker.stop')}</Button>
-              <Button size="small" icon={<SyncOutlined />} loading={actionBusy === `${record.id}:restart`} onClick={() => handleAction(record.id, 'restart')}>{t('docker.restart')}</Button>
-            </>
-          )}
-          <Button size="small" icon={<FileTextOutlined />} onClick={() => setLogsTarget({ containerId: record.id, containerName: record.name })}>{t('docker.logs')}</Button>
-          <Button size="small" icon={<CodeOutlined />} onClick={() => setExecTarget({ containerId: record.id, containerName: record.name })}>{t('docker.exec')}</Button>
-          <Button size="small" icon={<FolderOpenOutlined />} disabled={record.state !== 'running'} onClick={() => navigate('/files?server=' + serverId + '&container=' + record.id)}>{t('nav.files')}</Button>
-        </Space>
+        <ContainerActions
+          container={record}
+          busy={actionBusy}
+          onAction={(action) => handleAction(record.id, action)}
+          onLogs={() => setLogsTarget({ containerId: record.id, containerName: record.name })}
+          onExec={() => setExecTarget({ containerId: record.id, containerName: record.name })}
+          onFiles={() => navigate('/files?server=' + serverId + '&container=' + record.id)}
+        />
       ),
     },
   ];
@@ -477,7 +494,7 @@ export function ServerDockerPanel({ serverId, version }: { serverId: string; ver
         loading={loading}
         pagination={false}
         size="small"
-        scroll={{ x: 1500 }}
+        scroll={{ x: 1360 }}
         locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('docker.noContainers')} /> }}
       />
 
@@ -667,7 +684,7 @@ export default function Docker() {
     },
     ...containerResourceColumns(t),
     {
-      title: t('common.status'),
+      title: t('docker.status'),
       dataIndex: 'status',
       key: 'status',
       ellipsis: true,
@@ -682,21 +699,17 @@ export default function Docker() {
     {
       title: t('common.actions'),
       key: 'actions',
-      width: 320,
+      width: 176,
+      fixed: 'right' as const,
       render: (_, record) => (
-        <Space size="small" wrap>
-          {record.state !== 'running' ? (
-            <Button size="small" type="primary" icon={<CaretRightOutlined />} loading={actionBusy === `${record.id}:start`} onClick={() => handleAction(serverId, record.id, 'start')}>{t('docker.start')}</Button>
-          ) : (
-            <>
-              <Button size="small" icon={<PauseOutlined />} loading={actionBusy === `${record.id}:stop`} onClick={() => handleAction(serverId, record.id, 'stop')}>{t('docker.stop')}</Button>
-              <Button size="small" icon={<SyncOutlined />} loading={actionBusy === `${record.id}:restart`} onClick={() => handleAction(serverId, record.id, 'restart')}>{t('docker.restart')}</Button>
-            </>
-          )}
-          <Button size="small" icon={<FileTextOutlined />} onClick={() => setLogsTarget({ serverId, containerId: record.id, containerName: record.name })}>{t('docker.logs')}</Button>
-          <Button size="small" icon={<CodeOutlined />} onClick={() => setExecTarget({ serverId, containerId: record.id, containerName: record.name })}>{t('docker.exec')}</Button>
-          <Button size="small" icon={<FolderOpenOutlined />} disabled={record.state !== 'running'} onClick={() => navigate('/files?server=' + serverId + '&container=' + record.id)}>{t('nav.files')}</Button>
-        </Space>
+        <ContainerActions
+          container={record}
+          busy={actionBusy}
+          onAction={(action) => handleAction(serverId, record.id, action)}
+          onLogs={() => setLogsTarget({ serverId, containerId: record.id, containerName: record.name })}
+          onExec={() => setExecTarget({ serverId, containerId: record.id, containerName: record.name })}
+          onFiles={() => navigate('/files?server=' + serverId + '&container=' + record.id)}
+        />
       ),
     },
   ];
@@ -784,7 +797,7 @@ export default function Docker() {
         loading={sd.loading}
         pagination={false}
         size="small"
-        scroll={{ x: 1500 }}
+        scroll={{ x: 1360 }}
         locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('docker.noContainers')} /> }}
       />
       </>

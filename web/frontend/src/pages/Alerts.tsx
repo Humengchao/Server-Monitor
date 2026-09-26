@@ -404,7 +404,11 @@ export default function Alerts() {
             rowKey="id"
             pagination={false}
             scroll={{ x: 720 }}
-            locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('alerts.noRules')} /> }}
+            locale={{ emptyText: (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('alerts.noRules')}>
+                <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>{t('alerts.addRule')}</Button>
+              </Empty>
+            ) }}
           />
         </Card>
       ) : shownEvents.length === 0 ? (

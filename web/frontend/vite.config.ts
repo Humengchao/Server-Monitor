@@ -5,6 +5,13 @@ import type { GetManualChunk } from 'rollup'
 const manualChunks: GetManualChunk = (id) => {
   if (!id.includes('node_modules')) return null
   if (id.includes('@xterm')) return 'xterm'
+  // Long-lived vendor chunks: a page change or a copy fix no longer invalidates
+  // the 600 kB of UI kit and chart code that every deploy used to re-download.
+  if (id.includes('/antd/') || id.includes('/@ant-design/') || id.includes('/rc-') || id.includes('/@rc-component/')) return 'antd'
+  if (id.includes('/recharts') || id.includes('/d3-') || id.includes('/victory-vendor/')) return 'charts'
+  // Core only: the language packs behind @codemirror/language-data are dynamic
+  // imports, and grouping them here would load every grammar for one file.
+  if (/\/(@codemirror\/(state|view|language|commands|search|autocomplete|lint|theme-one-dark|language-data)|codemirror|@lezer\/(common|highlight|lr))\//.test(id)) return 'codemirror'
   if (
     id.includes('/react/') ||
     id.includes('/react-dom/') ||

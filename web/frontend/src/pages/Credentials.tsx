@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  Table, Button, Modal, Form, Input, Select, Space, Typography, Popconfirm, App, Tag, Card,
+  Table, Button, Modal, Form, Input, Select, Space, Typography, Popconfirm, App, Tag, Card, Empty,
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, KeyOutlined, WindowsOutlined, DesktopOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
@@ -86,6 +86,12 @@ export default function Credentials() {
     }
   };
 
+  const openCreate = () => {
+    setEditing(null);
+    form.resetFields();
+    setModalOpen(true);
+  };
+
   const handleEdit = (cred: Credential) => {
     setEditing(cred);
     form.resetFields();
@@ -165,15 +171,7 @@ export default function Credentials() {
           <Text type="secondary">{t('credential.subtitle')}</Text>
         </div>
         <Space className="page-actions">
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => {
-            setEditing(null);
-            form.resetFields();
-            setModalOpen(true);
-          }}
-        >
+        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
           {t('credential.add')}
         </Button>
         </Space>
@@ -188,6 +186,11 @@ export default function Credentials() {
           loading={loading}
           pagination={false}
           scroll={{ x: 760 }}
+          locale={{ emptyText: (
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('credential.empty')}>
+              <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>{t('credential.add')}</Button>
+            </Empty>
+          ) }}
         />
       </Card>
 
