@@ -206,6 +206,12 @@ export default function Credentials() {
           <Form.Item name="name" label={t('credential.name')} rules={[{ required: true }]}>
             <Input placeholder={t(credentialType === 'windows' ? 'credential.nameWindowsPlaceholder' : 'credential.namePlaceholder')} />
           </Form.Item>
+          <Form.Item name="credential_type" label={t('common.type')} initialValue="linux">
+            <Select onChange={(value) => { if (value === 'windows') form.setFieldValue('ssh_key', undefined); }}>
+              <Select.Option value="linux"><DesktopOutlined /> Linux</Select.Option>
+              <Select.Option value="windows"><WindowsOutlined /> Windows</Select.Option>
+            </Select>
+          </Form.Item>
           <Form.Item name="ssh_username" label={t(credentialType === 'windows' ? 'credential.username' : 'credential.sshUsername')} rules={[{ required: true }]}>
             <Input placeholder={t(credentialType === 'windows' ? 'credential.usernamePlaceholder' : 'credential.sshUsernamePlaceholder')} />
           </Form.Item>
@@ -214,12 +220,6 @@ export default function Credentials() {
               autoComplete="new-password"
               placeholder={t(editing ? 'credential.sshPasswordKeepPlaceholder' : credentialType === 'windows' ? 'credential.passwordPlaceholder' : 'credential.sshPasswordPlaceholder')}
             />
-          </Form.Item>
-          <Form.Item name="credential_type" label={t('common.type')} initialValue="linux">
-            <Select onChange={(value) => { if (value === 'windows') form.setFieldValue('ssh_key', undefined); }}>
-              <Select.Option value="linux"><DesktopOutlined /> Linux</Select.Option>
-              <Select.Option value="windows"><WindowsOutlined /> Windows</Select.Option>
-            </Select>
           </Form.Item>
           {credentialType === 'linux' && <Form.Item name="ssh_key" label={t('credential.sshKey')}>
             <Input.TextArea

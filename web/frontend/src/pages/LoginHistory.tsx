@@ -5,11 +5,14 @@ import { ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { authApi, LoginHistoryItem } from '../api/auth';
 import { formatDateTime } from '../utils/format';
+import { describeUserAgent } from '../utils/userAgent';
+import { PHONE_QUERY, useMediaQuery } from '../hooks/useMediaQuery';
 
 const { Title, Text } = Typography;
 
 export default function LoginHistory() {
   const { t, i18n } = useTranslation();
+  const phone = useMediaQuery(PHONE_QUERY);
   const [records, setRecords] = useState<LoginHistoryItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -51,6 +54,17 @@ export default function LoginHistory() {
       dataIndex: 'user_agent',
       key: 'user_agent',
       ellipsis: true,
+      responsive: ['md'],
+      render: (v: string) => {
+        const summary = describeUserAgent(v);
+        if (!summary) return <Text className="login-agent-raw" title={v}>{v || '—'}</Text>;
+        return (
+          <span title={v}>
+            <Text>{summary.browser || summary.os}</Text>
+            {summary.browser && summary.os && <Text type="secondary"> · {summary.os}</Text>}
+          </span>
+        );
+      },
     },
     {
       title: t('common.status'),
@@ -82,10 +96,11 @@ export default function LoginHistory() {
       <Table
         className="server-table"
         rowKey="id"
+        rowClassName={(record) => (record.success ? '' : 'login-row-failed')}
         columns={columns}
         dataSource={records}
         loading={loading}
-        scroll={{ x: 640 }}
+        scroll={phone ? undefined : { x: 640 }}
         pagination={{
           current: page,
           total,

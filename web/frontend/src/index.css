@@ -1312,3 +1312,8 @@ button, input, textarea, select { font: inherit; }
 .outage-list li.ongoing .outage-dot { background: #e2545f; box-shadow: 0 0 0 3px rgba(226, 84, 95, .16); }
 .outage-when { color: var(--text); font-variant-numeric: tabular-nums; }
 .outage-length { margin-left: auto; color: var(--muted); font-size: 11px; white-space: nowrap; }
+
+/* Login history: scripted clients keep their raw agent string; failed attempts are tinted. */
+.login-agent-raw { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.server-table .ant-table-tbody > tr.login-row-failed > td { background: rgba(244, 63, 94, 0.05); }
+.server-table .ant-table-tbody > tr.login-row-failed:hover > td { background: rgba(244, 63, 94, 0.09); }

@@ -4,6 +4,7 @@ import {
   CloseCircleOutlined, ReloadOutlined, SearchOutlined, PauseCircleOutlined, PlayCircleOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import { PHONE_QUERY, useMediaQuery } from '../hooks/useMediaQuery';
 import { serversApi, ProcessInfo } from '../api/servers';
 import { formatBytes, severityColor } from '../utils/format';
 import { usePolling } from '../hooks/usePolling';
@@ -41,6 +42,7 @@ function UsageCell({ percent, hue }: { percent: number; hue: 'blue' | 'green' })
 
 export default function ProcessTable({ serverId, serverType }: Props) {
   const { t } = useTranslation();
+  const phone = useMediaQuery(PHONE_QUERY);
   const { message, modal } = App.useApp();
   const [processes, setProcesses] = useState<ProcessInfo[]>([]);
   const [total, setTotal] = useState(0);
@@ -195,7 +197,7 @@ export default function ProcessTable({ serverId, serverType }: Props) {
       title: t('common.actions'),
       key: 'actions',
       width: 96,
-      fixed: 'right' as const,
+      fixed: phone ? undefined : ('right' as const),
       render: (_: unknown, proc: ProcessInfo) => (
         <Space size={0}>
           <Tooltip title={t('process.terminate')}>

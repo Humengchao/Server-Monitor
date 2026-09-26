@@ -9,6 +9,7 @@ import ContainerActions from '../components/ContainerActions';
 import { copyToClipboard } from '../utils/clipboard';
 import type { ColumnsType } from 'antd/es/table';
 import { useTranslation } from 'react-i18next';
+import { PHONE_QUERY, useMediaQuery } from '../hooks/useMediaQuery';
 import { serversApi, Server, DockerContainer } from '../api/servers';
 import { formatBytes, severityColor } from '../utils/format';
 import { Terminal } from '@xterm/xterm';
@@ -336,6 +337,7 @@ function ExecDrawer({ serverId, containerId, containerName, open, onClose }: {
 export function ServerDockerPanel({ serverId, version }: { serverId: string; version?: string }) {
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const phone = useMediaQuery(PHONE_QUERY);
   const { message, modal } = App.useApp();
   const [containers, setContainers] = useState<DockerContainer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -462,7 +464,7 @@ export function ServerDockerPanel({ serverId, version }: { serverId: string; ver
       title: t('common.actions'),
       key: 'actions',
       width: 176,
-      fixed: 'right' as const,
+      fixed: phone ? undefined : ('right' as const),
       render: (_, record) => (
         <ContainerActions
           container={record}
@@ -520,6 +522,7 @@ export function ServerDockerPanel({ serverId, version }: { serverId: string; ver
 
 export default function Docker() {
   const { t } = useTranslation();
+  const phone = useMediaQuery(PHONE_QUERY);
   const { message, modal } = App.useApp();
   const [servers, setServers] = useState<ServerDocker[]>([]);
   // Servers whose stored flag says "no Docker". Kept rather than filtered out:
@@ -700,7 +703,7 @@ export default function Docker() {
       title: t('common.actions'),
       key: 'actions',
       width: 176,
-      fixed: 'right' as const,
+      fixed: phone ? undefined : ('right' as const),
       render: (_, record) => (
         <ContainerActions
           container={record}

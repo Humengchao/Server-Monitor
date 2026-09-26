@@ -4,6 +4,7 @@ import {
   CaretRightOutlined, PauseOutlined, ReloadOutlined, SearchOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import { PHONE_QUERY, useMediaQuery } from '../hooks/useMediaQuery';
 import {
   hostOpsApi, ServiceAction, ServiceManager, ServiceUnit, serviceStateColor,
 } from '../api/hostops';
@@ -24,6 +25,7 @@ type StateFilter = 'all' | 'failed' | 'active' | 'inactive';
 
 export default function ServiceTable({ serverId, serverType }: Props) {
   const { t } = useTranslation();
+  const phone = useMediaQuery(PHONE_QUERY);
   const { message, modal } = App.useApp();
   const [units, setUnits] = useState<ServiceUnit[]>([]);
   const [manager, setManager] = useState<ServiceManager | undefined>(undefined);
@@ -173,7 +175,7 @@ export default function ServiceTable({ serverId, serverType }: Props) {
       title: t('common.actions'),
       key: 'actions',
       width: serverType === 'windows' ? 176 : 240,
-      fixed: 'right' as const,
+      fixed: phone ? undefined : ('right' as const),
       // Spelled out rather than iconised. Restart and reload are both "circular
       // arrow" glyphs at this size, and picking the wrong one is not a harmless
       // mistake: a restart drops every connection the service is holding.

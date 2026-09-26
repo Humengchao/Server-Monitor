@@ -4,6 +4,7 @@ import {
   AlertOutlined, ArrowDownOutlined, ArrowUpOutlined, CloudServerOutlined, DeleteOutlined, EditOutlined, WindowsOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import { PHONE_QUERY, useMediaQuery } from '../hooks/useMediaQuery';
 import { useNavigate } from 'react-router-dom';
 import { Server } from '../api/servers';
 import { AlertEvent } from '../api/alerts';
@@ -58,6 +59,7 @@ export default function ServerTable({
   servers, observedAt, loading, onEdit, onDelete, selectedIds, onSelectionChange, availability, firing,
 }: Props) {
   const { t, i18n } = useTranslation();
+  const phone = useMediaQuery(PHONE_QUERY);
   const navigate = useNavigate();
   const lang = i18n.language?.startsWith('zh') ? 'zh' : 'en';
 
@@ -65,7 +67,7 @@ export default function ServerTable({
     {
       title: t('server.serverName'),
       key: 'name',
-      fixed: 'left' as const,
+      fixed: phone ? undefined : ('left' as const),
       width: 240,
       render: (_: unknown, server: Server) => (
         <div className="table-identity">
@@ -197,7 +199,7 @@ export default function ServerTable({
       title: t('common.actions'),
       key: 'actions',
       width: 92,
-      fixed: 'right' as const,
+      fixed: phone ? undefined : ('right' as const),
       // Row clicks navigate to the detail page, so the buttons must swallow
       // their own click.
       render: (_: unknown, server: Server) => (
