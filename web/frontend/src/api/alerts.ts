@@ -59,13 +59,33 @@ export const METRIC_UNITS: Record<AlertMetric, string> = {
   offline: '',
 };
 
+export interface AlertEventPage {
+  events: AlertEvent[];
+  /** Rows matching the current filters, before the page window. */
+  total: number;
+}
+
+export interface AlertEventQuery {
+  activeOnly?: boolean;
+  serverId?: string;
+  limit?: number;
+  offset?: number;
+}
+
 export const alertsApi = {
   listRules: () => client.get<AlertRule[]>('/alerts/rules'),
   createRule: (data: AlertRulePayload) => client.post<AlertRule>('/alerts/rules', data),
   updateRule: (id: string, data: AlertRulePayload) => client.put<AlertRule>(`/alerts/rules/${id}`, data),
   deleteRule: (id: string) => client.delete(`/alerts/rules/${id}`),
-  listEvents: (activeOnly = false, limit = 100) =>
-    client.get<AlertEvent[]>('/alerts/events', { params: { active: activeOnly ? 1 : undefined, limit } }),
+  listEvents: (query: AlertEventQuery = {}) =>
+    client.get<AlertEventPage>('/alerts/events', {
+      params: {
+        active: query.activeOnly ? 1 : undefined,
+        limit: query.limit,
+        offset: query.offset || undefined,
+        server_id: query.serverId || undefined,
+      },
+    }),
   summary: () => client.get<{ active: number }>('/alerts/summary'),
   testWebhook: (webhook_url: string) => client.post('/alerts/test', { webhook_url }),
 };

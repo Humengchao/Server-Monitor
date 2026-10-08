@@ -256,6 +256,10 @@ CREATE TABLE IF NOT EXISTS alert_events (
 
 CREATE INDEX IF NOT EXISTS idx_alert_events_user_time ON alert_events(user_id, started_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_alert_events_open ON alert_events(rule_id, server_id) WHERE resolved_at IS NULL;
+-- The timeline orders by "firing first, then newest"; without this index each
+-- paginated fetch re-sorts the whole history on a busy fleet.
+CREATE INDEX IF NOT EXISTS idx_alert_events_timeline
+    ON alert_events(user_id, (resolved_at IS NULL) DESC, started_at DESC);
 
 -- last_seen_at was never written; liveness comes from
 -- server_latest_metrics.recorded_at instead.

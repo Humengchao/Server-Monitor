@@ -31,9 +31,9 @@ export function useFiringAlerts(): FiringAlerts {
       // active=1 so the server does the filtering: on a fleet with a long
       // alert history, pulling everything just to discard the resolved ones
       // wastes the round trip.
-      const res = await alertsApi.listEvents(true, 200);
+      const res = await alertsApi.listEvents({ activeOnly: true, limit: 200 });
       const next = new Map<string, AlertEvent[]>();
-      for (const event of res.data || []) {
+      for (const event of res.data?.events || []) {
         if (event.resolved_at || !event.server_id) continue;
         const list = next.get(event.server_id);
         if (list) list.push(event);

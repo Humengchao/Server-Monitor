@@ -209,17 +209,30 @@ func (h *AlertHandler) DeleteRule(c *gin.Context) {
 func (h *AlertHandler) ListEvents(c *gin.Context) {
 	userID := c.MustGet("user_id").(uuid.UUID)
 	db := c.MustGet("db").(*models.DB)
-	activeOnly := c.Query("active") == "1" || c.Query("active") == "true"
-	limit, _ := strconv.Atoi(c.Query("limit"))
-	events, err := models.GetAlertEventsByUserID(db.Raw, userID, activeOnly, limit)
+	query := models.AlertEventQuery{
+		ActiveOnly: c.Query("active") == "1" || c.Query("active") == "true",
+	}
+	if raw := c.Query("server_id"); raw != "" {
+		serverID, err := uuid.Parse(raw)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid server_id"})
+			return
+		}
+		query.ServerID = &serverID
+	}
+	// Limit is always valid after strconv (0 means "use the model default");
+	// clamp the offset so a junk value can't produce an error SQL rounds can't.
+	query.Limit, _ = strconv.Atoi(c.Query("limit"))
+	query.Offset, _ = strconv.Atoi(c.Query("offset"))
+	if query.Offset < 0 {
+		query.Offset = 0
+	}
+	page, err := models.ListAlertEvents(db.Raw, userID, query)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load alert events"})
 		return
 	}
-	if events == nil {
-		events = []models.AlertEvent{}
-	}
-	c.JSON(http.StatusOK, events)
+	c.JSON(http.StatusOK, page)
 }
 
 // Summary powers the header badge without transferring the whole event list.

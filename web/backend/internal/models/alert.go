@@ -253,14 +253,62 @@ func GetOpenAlertKeys(db *sql.DB) (map[uuid.UUID]map[uuid.UUID]struct{}, error) 
 	return open, rows.Err()
 }
 
+// AlertEventQuery bounds a page of the alert timeline. Zero values are
+// accepted and clamped to safe defaults by ListAlertEvents.
+type AlertEventQuery struct {
+	ActiveOnly bool
+	ServerID   *uuid.UUID
+	Offset     int
+	Limit      int
+}
+
+// AlertEventPage is one window of the timeline plus the matching-row total,
+// so the UI can say "3 of 214" instead of silently truncating at the limit.
+type AlertEventPage struct {
+	Events []AlertEvent `json:"events"`
+	Total  int          `json:"total"`
+}
+
+const (
+	alertEventDefaultLimit = 100
+	alertEventMaxLimit     = 500
+)
+
+// GetAlertEventsByUserID is kept for callers that only need a bounded list
+// (e.g. the dashboard's firing map); the timeline uses ListAlertEvents.
 func GetAlertEventsByUserID(db *sql.DB, userID uuid.UUID, activeOnly bool, limit int) ([]AlertEvent, error) {
-	if limit < 1 || limit > 500 {
-		limit = 100
+	page, err := ListAlertEvents(db, userID, AlertEventQuery{ActiveOnly: activeOnly, Limit: limit})
+	if err != nil {
+		return nil, err
+	}
+	return page.Events, nil
+}
+
+// ListAlertEvents returns one page of the user's alert history together with
+// the count of all rows matching the same filters. The filters are joined
+// into a single WHERE clause, so the total and the page can never disagree.
+func ListAlertEvents(db *sql.DB, userID uuid.UUID, q AlertEventQuery) (*AlertEventPage, error) {
+	if q.Limit < 1 || q.Limit > alertEventMaxLimit {
+		q.Limit = alertEventDefaultLimit
+	}
+	if q.Offset < 0 {
+		q.Offset = 0
 	}
 	filter := ""
-	if activeOnly {
-		filter = " AND e.resolved_at IS NULL"
+	args := []any{userID}
+	if q.ActiveOnly {
+		filter += " AND e.resolved_at IS NULL"
 	}
+	if q.ServerID != nil {
+		args = append(args, *q.ServerID)
+		filter += fmt.Sprintf(" AND e.server_id = $%d", len(args))
+	}
+	var total int
+	if err := db.QueryRow(
+		fmt.Sprintf(`SELECT COUNT(*) FROM alert_events e WHERE e.user_id = $1%s`, filter), args...).Scan(&total); err != nil {
+		return nil, err
+	}
+	args = append(args, q.Limit, q.Offset)
 	rows, err := db.Query(fmt.Sprintf(
 		`SELECT e.id, e.rule_id, COALESCE(r.name, ''), COALESCE(r.metric, ''), e.server_id, COALESCE(s.name, ''),
 		 e.value, e.message, COALESCE(r.comparator, '>'), COALESCE(r.threshold, 0), COALESCE(r.duration_seconds, 0),
@@ -270,7 +318,7 @@ func GetAlertEventsByUserID(db *sql.DB, userID uuid.UUID, activeOnly bool, limit
 		 LEFT JOIN servers s ON s.id = e.server_id
 		 WHERE e.user_id = $1%s
 		 ORDER BY e.resolved_at IS NULL DESC, e.started_at DESC
-		 LIMIT $2`, filter), userID, limit)
+		 LIMIT $%d OFFSET $%d`, filter, len(args)-1, len(args)), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -289,7 +337,13 @@ func GetAlertEventsByUserID(db *sql.DB, userID uuid.UUID, activeOnly bool, limit
 		}
 		events = append(events, e)
 	}
-	return events, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if events == nil {
+		events = []AlertEvent{}
+	}
+	return &AlertEventPage{Events: events, Total: total}, nil
 }
 
 // CountActiveAlerts powers the header badge.

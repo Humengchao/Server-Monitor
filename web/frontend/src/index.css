@@ -734,6 +734,9 @@ button, input, textarea, select { font: inherit; }
 .alert-form-footer { width: 100%; justify-content: space-between; }
 
 .alert-timeline { display: flex; flex-direction: column; gap: 8px; }
+.alert-timeline-more { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 0 4px; }
+.alert-timeline-more .ant-typography { font-size: 12px; }
+.alert-server-filter { min-width: 220px; max-width: 320px; }
 .alert-entry {
   width: 100%;
   padding: 11px 15px;

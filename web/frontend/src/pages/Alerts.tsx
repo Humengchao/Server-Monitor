@@ -22,6 +22,9 @@ const DURATION_OPTIONS = [60, 180, 300, 600, 1800, 3600];
 
 type Translate = (key: string, opts?: Record<string, unknown>) => string;
 
+// Page size of the timeline; the "load more" button appends one window.
+const EVENT_PAGE_SIZE = 100;
+
 interface RuleFormValues {
   name: string;
   server_id?: string | null;
@@ -90,9 +93,12 @@ export default function Alerts() {
   const navigate = useNavigate();
   const [rules, setRules] = useState<AlertRule[]>([]);
   const [events, setEvents] = useState<AlertEvent[]>([]);
+  const [eventTotal, setEventTotal] = useState(0);
   const [servers, setServers] = useState<Server[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [view, setView] = useState<'events' | 'rules'>('events');
+  const [eventServerId, setEventServerId] = useState<string | undefined>(undefined);
   const [modalOpen, setModalOpen] = useState(false);
   const [savingRule, setSavingRule] = useState(false);
   const [editingRule, setEditingRule] = useState<AlertRule | null>(null);
@@ -103,14 +109,47 @@ export default function Alerts() {
   const load = useCallback(async (showLoading = true) => {
     if (showLoading) setLoading(true);
     try {
-      const [ruleRes, eventRes] = await Promise.all([alertsApi.listRules(), alertsApi.listEvents(false, 200)]);
+      const [ruleRes, eventRes] = await Promise.all([
+        alertsApi.listRules(),
+        alertsApi.listEvents({ limit: EVENT_PAGE_SIZE, serverId: eventServerId }),
+      ]);
       setRules(ruleRes.data || []);
-      setEvents(eventRes.data || []);
+      setEvents(eventRes.data?.events || []);
+      setEventTotal(eventRes.data?.total || 0);
     } catch {
       if (showLoading) message.error(t('alerts.loadFailed'));
     }
     if (showLoading) setLoading(false);
-  }, [message, t]);
+  }, [message, t, eventServerId]);
+
+  // Refetch the first page when the per-server filter changes. Deferred like
+  // the initial load below so the effect body does not set state synchronously.
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void load(false); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [eventServerId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Append the next window. Unfiltered concurrent polls never go past page 1,
+  // so offsets cannot collide with a poll that refreshed page 1.
+  const loadMore = useCallback(async () => {
+    if (loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const res = await alertsApi.listEvents({
+        limit: EVENT_PAGE_SIZE, offset: events.length, serverId: eventServerId,
+      });
+      const page = res.data?.events || [];
+      setEventTotal(res.data?.total ?? 0);
+      setEvents((prev) => {
+        const seen = new Set(prev.map((e) => e.id));
+        return [...prev, ...page.filter((e) => !seen.has(e.id))];
+      });
+    } catch {
+      message.error(t('alerts.loadFailed'));
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [events.length, eventServerId, loadingMore, message, t]);
 
   // Alerts change on the engine's cadence, not the collector's, so a slower
   // poll than the dashboard keeps this page current.
@@ -127,6 +166,17 @@ export default function Alerts() {
 
   const activeEvents = useMemo(() => events.filter((e) => !e.resolved_at), [events]);
   const [eventFilter, setEventFilter] = useState<'active' | 'resolved' | 'all'>('active');
+  // Global active count: every event page arrives with firing rows first, so the
+  // breakdown is valid as soon as the first page includes all firing rows —
+  // which it always does when the list is ordered `resolved_at IS NULL DESC`.
+  const shownEvents = useMemo(() => {
+    if (eventFilter === 'active') return events.filter((e) => !e.resolved_at);
+    if (eventFilter === 'resolved') return events.filter((e) => e.resolved_at);
+    return events;
+  }, [events, eventFilter]);
+  // True while the server holds pages beyond what has been fetched. The old
+  // flat-limit call made history below the cap simply vanish with no hint.
+  const hasMoreEvents = events.length < eventTotal;
   // Rules a reader needs to act on come first: currently firing, then armed,
   // then paused. Creation order buries a firing rule under paused ones.
   const sortedRules = useMemo(() => {
@@ -137,11 +187,6 @@ export default function Alerts() {
     const rank = (r: AlertRule) => (firingByRule.get(r.id) ? 0 : r.enabled ? 1 : 2);
     return [...rules].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
   }, [rules, events]);
-  const shownEvents = useMemo(() => {
-    if (eventFilter === 'active') return events.filter((e) => !e.resolved_at);
-    if (eventFilter === 'resolved') return events.filter((e) => e.resolved_at);
-    return events;
-  }, [events, eventFilter]);
   const enabledRules = useMemo(() => rules.filter((r) => r.enabled).length, [rules]);
   const coveredServers = useMemo(() => {
     if (rules.some((r) => r.enabled && !r.server_id)) return servers.length;
@@ -375,7 +420,7 @@ export default function Alerts() {
           ]}
         />
         {view === 'events' && events.length > 0 && (
-          <Space size={12}>
+          <Space size={12} wrap>
             {/* Defaults to "active": on a page whose job is to show what is
                 broken, resolved history is context, not the headline. */}
             <Segmented
@@ -388,7 +433,22 @@ export default function Alerts() {
                 { label: t('alerts.filterAll'), value: 'all' },
               ]}
             />
-            <Text type="secondary">{t('alerts.eventCount', { count: shownEvents.length })}</Text>
+            <Select
+              allowClear
+              size="small"
+              className="alert-server-filter"
+              showSearch
+              optionFilterProp="label"
+              placeholder={t('alerts.filterByServer')}
+              aria-label={t('alerts.filterByServer')}
+              value={eventServerId}
+              onChange={(value) => setEventServerId(value as string | undefined)}
+              options={servers.map((s) => ({ value: s.id, label: `${s.name} · ${s.host}` }))}
+            />
+            <Text type="secondary">
+              {t('alerts.eventCount', { count: shownEvents.length })}
+              {hasMoreEvents && <> · {t('alerts.truncated', { shown: events.length, total: eventTotal })}</>}
+            </Text>
           </Space>
         )}
       </div>
@@ -443,6 +503,14 @@ export default function Alerts() {
               </span>
             </button>
           ))}
+          {hasMoreEvents && (
+            <div className="alert-timeline-more">
+              <Button onClick={loadMore} loading={loadingMore}>
+                {t('alerts.loadMore')}
+              </Button>
+              <Text type="secondary">{t('alerts.truncated', { shown: events.length, total: eventTotal })}</Text>
+            </div>
+          )}
         </div>
       )}
 
