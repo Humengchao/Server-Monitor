@@ -1,6 +1,7 @@
 package services
 
 import (
+	"errors"
 	"net"
 	"sync"
 	"time"
@@ -10,6 +11,9 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/ssh"
 )
+
+// ErrSSHCacheClosed is returned when a Get overlaps or follows cache shutdown.
+var ErrSSHCacheClosed = errors.New("SSH connection cache is closed")
 
 const (
 	sshCacheIdleTimeout   = 5 * time.Minute
@@ -62,6 +66,10 @@ func (c *SSHConnCache) Get(s *models.Server) (*ssh.Client, error) {
 	fingerprint := serverPollFingerprint(s)
 	for {
 		c.mu.Lock()
+		if c.isClosed() {
+			c.mu.Unlock()
+			return nil, ErrSSHCacheClosed
+		}
 		e := c.entries[s.ID]
 		if e == nil {
 			e = &sshCacheEntry{}
@@ -70,6 +78,10 @@ func (c *SSHConnCache) Get(s *models.Server) (*ssh.Client, error) {
 		c.mu.Unlock()
 
 		e.mu.Lock()
+		if c.isClosed() {
+			e.mu.Unlock()
+			return nil, ErrSSHCacheClosed
+		}
 		if e.dropped {
 			// Lost a race with Drop: this entry is no longer in the map, so a
 			// dial stored here would leak. Start over with a fresh entry.
@@ -78,6 +90,11 @@ func (c *SSHConnCache) Get(s *models.Server) (*ssh.Client, error) {
 		}
 		client, err := c.ensureLive(e, s, fingerprint)
 		e.mu.Unlock()
+		if c.isClosed() {
+			// Close owns this entry and waits for its mutex before closing any
+			// connection that finished dialing during shutdown.
+			return nil, ErrSSHCacheClosed
+		}
 		return client, err
 	}
 }
@@ -140,23 +157,35 @@ func (c *SSHConnCache) Drop(serverID uuid.UUID) {
 	e.mu.Unlock()
 }
 
-// Close stops the sweeper and closes every cached connection.
-func (c *SSHConnCache) Close() {
-	c.stop.Do(func() { close(c.stopCh) })
-	c.mu.Lock()
-	entries := c.entries
-	c.entries = make(map[uuid.UUID]*sshCacheEntry)
-	c.mu.Unlock()
-	for _, e := range entries {
-		e.mu.Lock()
-		e.dropped = true
-		if e.client != nil {
-			e.client.Close()
-			e.client = nil
-			e.conn = nil
-		}
-		e.mu.Unlock()
+func (c *SSHConnCache) isClosed() bool {
+	select {
+	case <-c.stopCh:
+		return true
+	default:
+		return false
 	}
+}
+
+// Close prevents further Gets, stops the sweeper, and closes every cached
+// connection, including any dial already in progress. Repeated calls are safe.
+func (c *SSHConnCache) Close() {
+	c.stop.Do(func() {
+		c.mu.Lock()
+		close(c.stopCh)
+		entries := c.entries
+		c.entries = nil
+		c.mu.Unlock()
+		for _, e := range entries {
+			e.mu.Lock()
+			e.dropped = true
+			if e.client != nil {
+				e.client.Close()
+				e.client = nil
+				e.conn = nil
+			}
+			e.mu.Unlock()
+		}
+	})
 }
 
 func (c *SSHConnCache) sweepLoop() {

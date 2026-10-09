@@ -3,6 +3,7 @@ package services
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"net"
 	"strconv"
 	"sync"
@@ -22,6 +23,11 @@ const testSSHPassword = "cache-test-secret"
 // test password, answers global requests (keepalives), and counts accepted
 // connections so tests can assert how many dials actually happened.
 func startTestSSHServer(t *testing.T) (addr string, dials *atomic.Int32) {
+	t.Helper()
+	return startTestSSHServerWithHandshake(t, nil)
+}
+
+func startTestSSHServerWithHandshake(t *testing.T, beforeHandshake func()) (addr string, dials *atomic.Int32) {
 	t.Helper()
 
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -57,6 +63,10 @@ func startTestSSHServer(t *testing.T) (addr string, dials *atomic.Int32) {
 			}
 			count.Add(1)
 			go func() {
+				defer conn.Close()
+				if beforeHandshake != nil {
+					beforeHandshake()
+				}
 				_, chans, reqs, err := ssh.NewServerConn(conn, config)
 				if err != nil {
 					return
@@ -257,6 +267,90 @@ func TestSSHConnCacheConcurrentGetDialsOnce(t *testing.T) {
 		if clients[i] != clients[0] {
 			t.Fatal("concurrent Gets returned different clients")
 		}
+	}
+	if got := dials.Load(); got != 1 {
+		t.Fatalf("dial count = %d, want 1", got)
+	}
+}
+
+func TestSSHConnCacheRejectsGetAfterClose(t *testing.T) {
+	addr, dials := startTestSSHServer(t)
+	cache := newTestCache(t)
+	server := testCacheServer(t, addr)
+	client, err := cache.Get(server)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	cache.Close()
+	cache.Close()
+	if err := client.Wait(); err == nil {
+		t.Fatal("cached connection survived Close")
+	}
+	if client, err := cache.Get(server); client != nil || !errors.Is(err, ErrSSHCacheClosed) {
+		t.Fatalf("Get after Close = (%v, %v), want (nil, ErrSSHCacheClosed)", client, err)
+	}
+	if got := dials.Load(); got != 1 {
+		t.Fatalf("dial count after Close = %d, want 1", got)
+	}
+}
+
+func TestSSHConnCacheCloseDuringDial(t *testing.T) {
+	started, resume := make(chan struct{}), make(chan struct{})
+	var release sync.Once
+	unblock := func() { release.Do(func() { close(resume) }) }
+	addr, dials := startTestSSHServerWithHandshake(t, func() {
+		close(started)
+		<-resume
+	})
+	cache := newTestCache(t)
+	// Unblock the server before cache cleanup even if an assertion fails.
+	t.Cleanup(unblock)
+	server := testCacheServer(t, addr)
+	type getResult struct {
+		client *ssh.Client
+		err    error
+	}
+	got := make(chan getResult, 1)
+	go func() {
+		client, err := cache.Get(server)
+		got <- getResult{client: client, err: err}
+	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("SSH dial did not start")
+	}
+	cache.mu.Lock()
+	entry := cache.entries[server.ID]
+	cache.mu.Unlock()
+	closed := make(chan struct{})
+	go func() { cache.Close(); close(closed) }()
+	select {
+	case <-cache.stopCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close did not stop new requests")
+	}
+	if client, err := cache.Get(server); client != nil || !errors.Is(err, ErrSSHCacheClosed) {
+		t.Fatalf("Get during Close = (%v, %v), want (nil, ErrSSHCacheClosed)", client, err)
+	}
+	unblock()
+	select {
+	case result := <-got:
+		if result.client != nil || !errors.Is(result.err, ErrSSHCacheClosed) {
+			t.Fatalf("in-flight Get = (%v, %v), want (nil, ErrSSHCacheClosed)", result.client, result.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("in-flight Get did not return")
+	}
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close did not finish after the handshake")
+	}
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	if entry.client != nil || entry.conn != nil || !entry.dropped {
+		t.Fatal("Close retained the connection created by the in-flight dial")
 	}
 	if got := dials.Load(); got != 1 {
 		t.Fatalf("dial count = %d, want 1", got)

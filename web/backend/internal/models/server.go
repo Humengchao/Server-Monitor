@@ -540,7 +540,15 @@ func GetServerByID(db *sql.DB, id uuid.UUID) (*Server, error) {
 
 // GetAllServers returns all servers with decrypted credentials (for collector).
 func GetAllServers(db *DB) ([]Server, error) {
-	rows, err := db.Raw.Query(`SELECT id, user_id, name, host, port, ssh_username, ssh_password, ssh_key, COALESCE(ssh_host_key, ''), credential_id, COALESCE(server_type, 'linux') FROM servers`)
+	// Resolve linked credentials in the same query. Querying once per server
+	// both multiplied each collector tick's database work and could exhaust the
+	// pool while the server rows were still holding a connection.
+	rows, err := db.Raw.Query(`SELECT s.id, s.user_id, s.name, s.host, s.port,
+		s.ssh_username, COALESCE(s.ssh_password, ''), COALESCE(s.ssh_key, ''),
+		COALESCE(s.ssh_host_key, ''), s.credential_id, COALESCE(s.server_type, 'linux'),
+		c.ssh_username, COALESCE(c.ssh_password, ''), COALESCE(c.ssh_key, '')
+		FROM servers s
+		LEFT JOIN credentials c ON c.id = s.credential_id AND c.user_id = s.user_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -550,8 +558,11 @@ func GetAllServers(db *DB) ([]Server, error) {
 		var s Server
 		var encPassword, encKey string
 		var credID sql.NullString
+		var credentialUsername sql.NullString
+		var credentialPassword, credentialKey string
 		if err := rows.Scan(&s.ID, &s.UserID, &s.Name, &s.Host, &s.Port,
-			&s.SSHUsername, &encPassword, &encKey, &s.SSHHostKey, &credID, &s.ServerType); err != nil {
+			&s.SSHUsername, &encPassword, &encKey, &s.SSHHostKey, &credID, &s.ServerType,
+			&credentialUsername, &credentialPassword, &credentialKey); err != nil {
 			return nil, err
 		}
 		if credID.Valid {
@@ -559,6 +570,15 @@ func GetAllServers(db *DB) ([]Server, error) {
 			if err == nil {
 				s.CredentialID = &id
 			}
+			// A missing or cross-owner link must never fall back to the
+			// server's old inline credentials. Username is NOT NULL for an
+			// existing credential, so NULL means the scoped join found none.
+			if !credentialUsername.Valid {
+				log.Printf("collector: resolve credentials for %s: %v", s.Name, sql.ErrNoRows)
+				continue
+			}
+			s.SSHUsername = credentialUsername.String
+			encPassword, encKey = credentialPassword, credentialKey
 		}
 		var decErr error
 		s.SSHPassword, decErr = crypto.Decrypt(encPassword, db.EncryptionKey)
@@ -571,12 +591,7 @@ func GetAllServers(db *DB) ([]Server, error) {
 			log.Printf("collector: decrypt key for %s failed: %v", s.Name, decErr)
 			continue
 		}
-		// Override with credential if linked
-		if err := s.ResolveCredentials(db); err != nil {
-			log.Printf("collector: resolve credentials for %s: %v", s.Name, err)
-			continue
-		}
 		servers = append(servers, s)
 	}
-	return servers, nil
+	return servers, rows.Err()
 }

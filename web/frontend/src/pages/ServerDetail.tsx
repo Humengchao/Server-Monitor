@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo, Suspense, lazy, useRe
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Typography, Tag, Space, Button, Card, Tabs, Spin, Modal, Form, Input,
-  App, Empty, Progress, Segmented, Tooltip, Result,
+  App, Empty, Progress, Segmented, Tooltip, Result, Alert,
 } from 'antd';
 import {
   ArrowLeftOutlined, EditOutlined, DeleteOutlined, DockerOutlined, KeyOutlined, SaveOutlined,
@@ -15,6 +15,7 @@ import dayjs, { Dayjs } from 'dayjs';
 import { useTranslation } from 'react-i18next';
 import { serversApi, Server, MetricPoint } from '../api/servers';
 import { isMetricFresh, useMetrics, TimeRange } from '../hooks/useMetrics';
+import { responseClock, useResponseClock, ResponseClock } from '../hooks/useResponseClock';
 import AvailabilityPanel from '../components/AvailabilityPanel';
 import MetricsChart from '../components/MetricsChart';
 import ProcessTable from '../components/ProcessTable';
@@ -43,6 +44,12 @@ const { Title } = Typography;
 const { RangePicker } = DatePicker;
 
 type PresetKey = '1h' | 'today' | 'yesterday' | '7d' | '30d';
+
+interface NotesDraft {
+  serverId: string;
+  value: string;
+  savedValue: string;
+}
 
 function apiError(err: unknown, fallback: string): string {
   const detail = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
@@ -105,7 +112,7 @@ export default function ServerDetail() {
   const [server, setServer] = useState<Server | null>(null);
   // The server payload includes the API Date header, which lets us still
   // judge the embedded latest sample if the dedicated metrics request fails.
-  const [serverObservedAt, setServerObservedAt] = useState(0);
+  const [serverClock, setServerClock] = useState<ResponseClock | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -115,14 +122,16 @@ export default function ServerDetail() {
   const [tagValues, setTagValues] = useState<string[]>([]);
   const [selectedCredential, setSelectedCredential] = useState<string | undefined>(undefined);
   const [dockerInstalled, setDockerInstalled] = useState<boolean | null>(null);
-  const [notes, setNotes] = useState('');
-  const [notesChanged, setNotesChanged] = useState(false);
+  const [notesDraft, setNotesDraft] = useState<NotesDraft | null>(null);
+  const notes = notesDraft && notesDraft.serverId === id ? notesDraft.value : '';
+  const notesChanged = !!notesDraft && notesDraft.serverId === id && notesDraft.value !== notesDraft.savedValue;
   const [activeTab, setActiveTab] = useState('metrics');
   const [activePreset, setActivePreset] = useState<PresetKey | null>('1h');
   const [timeRange, setTimeRange] = useState<TimeRange>(() => getPresetRange('1h'));
   const serverRequestRef = useRef<AbortController | null>(null);
 
-  const { metrics, history, loading: metricsLoading, observedAt } = useMetrics(id!, timeRange);
+  const { metrics, clock: metricsClock, latestError, history, historyLoading, historyError, refetchHistory } = useMetrics(id!, timeRange);
+  const sampleObservedAt = useResponseClock(metricsClock ?? (server && server.id === id ? serverClock : null));
 
   // Presets whose window ends "now" keep sliding: recompute the range every
   // 30s so the chart stays live instead of freezing at the moment of the
@@ -147,18 +156,18 @@ export default function ServerDetail() {
     serverRequestRef.current = controller;
     setLoading(true);
     setLoadError(false);
-    setServerObservedAt(0);
+    setServerClock(null);
     try {
       const res = await serversApi.get(id!, controller.signal);
       if (controller.signal.aborted || serverRequestRef.current !== controller) return;
       const found = res.data;
       setServer(found);
-      const dateHeader = res.headers?.date;
-      const apiNow = typeof dateHeader === 'string' ? Date.parse(dateHeader) : NaN;
-      setServerObservedAt(Number.isFinite(apiNow) ? apiNow : Date.now());
+      setServerClock(responseClock(res.headers?.date));
       setDockerInstalled(found.has_docker);
-      setNotes(found.notes || '');
-      setNotesChanged(false);
+      const savedValue = found.notes || '';
+      setNotesDraft((current) => current?.serverId === found.id && current.value !== current.savedValue
+        ? { ...current, savedValue }
+        : { serverId: found.id, value: savedValue, savedValue });
     } catch (err: unknown) {
       if (controller.signal.aborted || serverRequestRef.current !== controller) return;
       const status = (err as { response?: { status?: number } })?.response?.status;
@@ -166,7 +175,6 @@ export default function ServerDetail() {
         setServer(null);
       } else {
         setLoadError(true);
-        message.error(t('server.loadFailed'));
       }
     } finally {
       if (serverRequestRef.current === controller) {
@@ -174,7 +182,7 @@ export default function ServerDetail() {
         setLoading(false);
       }
     }
-  }, [id, message, t]);
+  }, [id]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void loadServer(); }, 0);
@@ -248,6 +256,8 @@ export default function ServerDetail() {
 
   const handleSaveNotes = async () => {
     if (!server) return;
+    const savedServerId = server.id;
+    const submittedNotes = notes;
     setSavingNotes(true);
     try {
       await serversApi.update(server.id, {
@@ -264,11 +274,15 @@ export default function ServerDetail() {
         billing_cycle: server.billing_cycle || 'year',
         traffic_limit_bytes: server.traffic_limit_bytes || 0,
         public_location: server.public_location || '',
-        notes,
+        notes: submittedNotes,
       });
       message.success(t('server.notesSaved'));
-      setServer((current) => (current ? { ...current, notes } : current));
-      setNotesChanged(false);
+      setServer((current) => current?.id === savedServerId ? { ...current, notes: submittedNotes } : current);
+      // Only the submitted text is saved. Edits typed while awaiting this
+      // response remain dirty, and a response for another host changes nothing.
+      setNotesDraft((current) => current?.serverId === savedServerId
+        ? { ...current, savedValue: submittedNotes }
+        : current);
     } catch {
       message.error(t('server.notesSaveFailed'));
     } finally {
@@ -289,7 +303,7 @@ export default function ServerDetail() {
   // Exports exactly the window currently charted, so what you see is what you
   // get in the spreadsheet.
   const handleExportCSV = () => {
-    if (!server || history.length === 0) {
+    if (!server || historyLoading || historyError || history.length === 0) {
       message.warning(t('metrics.noData'));
       return;
     }
@@ -306,8 +320,7 @@ export default function ServerDetail() {
   const expInfo = useMemo(() => getExpirationInfo(server?.expires_at, lang), [server?.expires_at, lang]);
   // Fall back to the sample embedded in the server payload, so a failed metrics
   // request still leaves the header with the collector's last word.
-  const latestSample = metrics ?? server?.latest_metrics ?? null;
-  const sampleObservedAt = observedAt || serverObservedAt;
+  const latestSample = metrics ?? (server && server.id === id ? server.latest_metrics : null) ?? null;
   const isOnline = isMetricFresh(latestSample, sampleObservedAt);
   // The same three states as the fleet list: never sampled is "pending", a stale
   // last sample is "offline". Capacity figures still come from the last sample
@@ -321,7 +334,7 @@ export default function ServerDetail() {
   const memPercent = latestSample && latestSample.memory_total > 0 ? percentOf(latestSample.memory_used, latestSample.memory_total) : null;
   const diskPercent = latestSample && server && server.disk_total > 0 ? percentOf(latestSample.disk_used, server.disk_total) : null;
 
-  if (loading) return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}><Spin size="large" /></div>;
+  if (loading || (!loadError && server && server.id !== id)) return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}><Spin size="large" /></div>;
   if (loadError) return <Result status="error" title={t('server.loadFailed')} extra={<Button type="primary" onClick={() => { void loadServer(); }}>{t('common.refresh')}</Button>} />;
   if (!server) return (
     <Result
@@ -387,6 +400,7 @@ export default function ServerDetail() {
       </div>
 
       <PollErrorNotice server={server} onRetried={() => { void loadServer(); }} />
+      {latestError && <Alert type="warning" showIcon title={t('probe.staleHint')} />}
       <div className={`stat-tile-grid${detailStatus === 'offline' ? ' is-stale' : ''}`}>
         <StatTile
           icon={<DashboardOutlined />}
@@ -457,7 +471,7 @@ export default function ServerDetail() {
           key: 'metrics',
           label: t('metrics.title'),
           children: (
-            <Card className="panel-card" loading={metricsLoading}>
+            <Card className="panel-card">
               <div className="chart-toolbar">
                 <Segmented
                   value={activePreset ?? ''}
@@ -472,13 +486,18 @@ export default function ServerDetail() {
                     onChange={handleRangeChange}
                   />
                   <Tooltip title={t('metrics.exportHint')}>
-                    <Button icon={<DownloadOutlined />} onClick={handleExportCSV} disabled={history.length === 0}>
+                    <Button aria-label={t('metrics.export')} icon={<DownloadOutlined />} onClick={handleExportCSV} disabled={historyLoading || historyError || history.length === 0}>
                       {t('metrics.export')}
                     </Button>
                   </Tooltip>
                 </Space>
               </div>
-              <MetricsChart history={history} />
+              <div className="metrics-history" aria-busy={historyLoading}>
+                {historyLoading ? tabFallback : historyError ? (
+                  <Result status="warning" title={t('common.failed')}
+                    extra={<Button onClick={() => { void refetchHistory(); }}>{t('common.refresh')}</Button>} />
+                ) : <MetricsChart history={history} />}
+              </div>
             </Card>
           ),
         },
@@ -555,12 +574,18 @@ export default function ServerDetail() {
               <Input.TextArea
                 rows={12}
                 value={notes}
-                onChange={(e) => { setNotes(e.target.value); setNotesChanged(true); }}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setNotesDraft((current) => current && current.serverId === id
+                    ? { ...current, value }
+                    : { serverId: id!, value, savedValue: server.notes || '' });
+                }}
                 placeholder={t('server.notesPlaceholder')}
               />
               <div style={{ marginTop: 16, textAlign: 'right' }}>
                 <Button
                   type="primary"
+                  aria-label={t('common.save')}
                   icon={<SaveOutlined />}
                   disabled={!notesChanged}
                   loading={savingNotes}

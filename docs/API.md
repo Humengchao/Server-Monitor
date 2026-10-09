@@ -1061,20 +1061,25 @@ WS /api/ssh/:id
 
 **协议**: WebSocket
 
-**认证**: 通过 URL 查询参数传递 token: `ws://host/api/ssh/:id?token=<jwt>`
+**认证**: 通过 WebSocket 子协议传递 `['bearer', token]`，服务端选择 `bearer`。兼容旧的 `?token=<jwt>` 参数；前端使用子协议，避免 token 出现在访问日志中。
 
 **连接后**:
 - 服务端校验服务器归属权限后建立 SSH 连接
 - 客户端发送的文本消息 → 转发到 SSH stdin
-- SSH stdout/stderr → 转发为 WebSocket 文本消息给客户端
+- SSH stdout/stderr → 转发为 WebSocket 二进制消息，保留原始字节；UTF-8 字符可能跨消息边界，交给终端流式解码
+- 连接错误提示仍可能使用文本消息，客户端需兼容两种消息类型；Docker 容器终端使用相同格式
 - 连接断开时自动关闭
 
 **示例**:
 
 ```javascript
-const ws = new WebSocket(`ws://localhost:8080/api/ssh/${serverId}?token=${token}`);
-ws.onmessage = (e) => terminal.write(e.data);
-ws.send('ls -la\n');
+const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+const ws = new WebSocket(`${protocol}//${location.host}/api/ssh/${serverId}`, ['bearer', token]);
+ws.binaryType = 'arraybuffer';
+ws.onmessage = (e) => terminal.write(
+  e.data instanceof ArrayBuffer ? new Uint8Array(e.data) : e.data,
+);
+ws.onopen = () => ws.send('ls -la\n');
 ```
 
 ---

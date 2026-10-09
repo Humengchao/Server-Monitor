@@ -133,6 +133,7 @@
   "common.success": "Success",
   "common.failed": "Failed",
   "common.connected": "Connected",
+  "common.connecting": "Connecting",
   "common.disconnected": "Disconnected",
   "login.title": "Server Monitor",
   "login.username": "Username",

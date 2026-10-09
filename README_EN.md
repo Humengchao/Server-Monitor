@@ -129,7 +129,7 @@ Enter multi-select from the dashboard toolbar; both the card and list views beco
 
 - Stateless authentication based on **JWT (HS256)** with a 72-hour token expiry
 - **Changing a password immediately revokes every token issued to that account beforehand**: the user row carries a cutoff timestamp and authentication rejects any token with an earlier `iat`. The session that made the change receives a freshly issued token, so it is not cut off by its own action
-- All API requests are authenticated via Bearer Token; WebSocket connections use Query Token
+- All API requests are authenticated via Bearer Token; WebSocket connections carry the token in a subprotocol to keep it out of URLs and access logs
 - All protected management API queries are strictly filtered by `user_id` for tenant isolation; the public probe uses a separate minimal data model that returns anonymous health metrics only
 
 ### API Protection

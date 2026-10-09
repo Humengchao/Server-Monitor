@@ -2,18 +2,17 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Collapse, Table, Tag, Button, Space, Typography, Spin, Empty, Drawer, App, Card, Tooltip, Result, Progress, Select, Switch } from 'antd';
 import {
-  ReloadOutlined, ArrowRightOutlined, CodeOutlined, CopyOutlined,
+  ReloadOutlined, ArrowRightOutlined, CopyOutlined,
   ContainerOutlined, CloudServerOutlined, CheckCircleOutlined, QuestionCircleOutlined, SearchOutlined,
 } from '@ant-design/icons';
 import ContainerActions from '../components/ContainerActions';
+import ContainerExecDrawer from '../components/ContainerExecDrawer';
 import { copyToClipboard } from '../utils/clipboard';
 import type { ColumnsType } from 'antd/es/table';
 import { useTranslation } from 'react-i18next';
 import { PHONE_QUERY, useMediaQuery } from '../hooks/useMediaQuery';
 import { serversApi, Server, DockerContainer } from '../api/servers';
 import { formatBytes, severityColor } from '../utils/format';
-import { Terminal } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
 import { usePolling } from '../hooks/usePolling';
 import { createRequestQueue } from '../utils/requestQueue';
 const queueStats = createRequestQueue(4);
@@ -21,7 +20,6 @@ function mergeStats(containers: DockerContainer[], stats: DockerContainer[]) {
   const readings = new Map(stats.map(item => [item.id, item]));
   return containers.map(item => { const reading = readings.get(item.id); return reading && reading.state === item.state ? { ...reading, id: item.id, name: item.name, image: item.image, state: item.state, status: item.status, ports: item.ports, created: item.created } : item; });
 }
-import '@xterm/xterm/css/xterm.css';
 
 const { Title, Text } = Typography;
 
@@ -221,119 +219,6 @@ function LogsModal({ serverId, containerId, containerName, onClose }: {
   );
 }
 
-function ExecDrawer({ serverId, containerId, containerName, open, onClose }: {
-  serverId: string;
-  containerId: string;
-  containerName: string;
-  open: boolean;
-  onClose: () => void;
-}) {
-  const { t } = useTranslation();
-  const termRef = useRef<HTMLDivElement>(null);
-  const [connected, setConnected] = useState(false);
-  // Read t through a ref inside socket callbacks so a language switch doesn't
-  // tear down and restart the exec session just to retranslate messages.
-  const tRef = useRef(t);
-  useEffect(() => { tRef.current = t; }, [t]);
-
-  useEffect(() => {
-    if (!open || !containerId || !termRef.current) return;
-
-    const terminal = new Terminal({
-      cursorBlink: true,
-      fontSize: 14,
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      theme: { background: '#1e1e2e', foreground: '#cdd6f4' },
-      scrollback: 5000,
-    });
-
-    const fitAddon = new FitAddon();
-    terminal.loadAddon(fitAddon);
-    terminal.open(termRef.current);
-
-    // Use ResizeObserver for robust terminal sizing (replaces fragile 300ms timeout)
-    const ro = new ResizeObserver(() => {
-      try { fitAddon.fit(); } catch { /* terminal may be disposed during unmount */ }
-    });
-    ro.observe(termRef.current!);
-
-    const token = localStorage.getItem('token');
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${wsProtocol}//${window.location.host}/api/ws/servers/${serverId}/docker/containers/${containerId}/exec`;
-
-    // Token travels as a subprotocol ("bearer, <jwt>") to stay out of logs.
-    const ws = new WebSocket(wsUrl, token ? ['bearer', token] : undefined);
-
-    const sendResize = () => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send('\x01' + JSON.stringify({ type: 'resize', cols: terminal.cols, rows: terminal.rows }));
-      }
-    };
-
-    ws.onopen = () => {
-      setConnected(true);
-      sendResize(); // sync PTY size with the fitted terminal
-      terminal.focus();
-    };
-
-    ws.onmessage = (ev) => {
-      if (typeof ev.data === 'string') {
-        terminal.write(ev.data);
-      } else if (ev.data instanceof Blob) {
-        ev.data.text().then((text) => terminal.write(text));
-      }
-    };
-
-    ws.onclose = () => {
-      setConnected(false);
-      terminal.write(`\r\n\x1b[31m${tRef.current('docker.execDisconnected')}\x1b[0m\r\n`);
-    };
-
-    ws.onerror = () => {
-      terminal.write(`\r\n\x1b[31m${tRef.current('docker.execConnError')}\x1b[0m\r\n`);
-    };
-
-    terminal.onData((data) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(data);
-      }
-    });
-
-    // Whenever the fit addon changes the terminal dimensions, tell the backend
-    terminal.onResize(() => sendResize());
-
-    const handleResize = () => { try { fitAddon.fit(); } catch { /* terminal may be disposed during unmount */ } };
-    window.addEventListener('resize', handleResize);
-
-    return () => {
-      ro.disconnect();
-      window.removeEventListener('resize', handleResize);
-      ws.close();
-      terminal.dispose();
-    };
-  }, [open, serverId, containerId]);
-
-  return (
-    <Drawer
-      title={
-        <Space>
-          <CodeOutlined />
-          <span>{t('docker.execTitle', { name: containerName })}</span>
-          <Tag color={connected ? 'green' : 'red'}>{connected ? t('common.connected') : t('common.disconnected')}</Tag>
-        </Space>
-      }
-      open={open}
-      onClose={onClose}
-      maskClosable={false}
-      placement="right"
-      rootStyle={{ position: 'fixed' }}
-      styles={{ body: { padding: 0, background: '#1e1e2e' }, wrapper: { width: '80vw' } }}
-    >
-      <div ref={termRef} style={{ width: '100%', height: 'calc(100vh - 110px)' }} />
-    </Drawer>
-  );
-}
-
 export function ServerDockerPanel({ serverId, version }: { serverId: string; version?: string }) {
   const navigate = useNavigate();
   const { t } = useTranslation();
@@ -509,7 +394,7 @@ export function ServerDockerPanel({ serverId, version }: { serverId: string; ver
         />
       )}
 
-      <ExecDrawer
+      <ContainerExecDrawer
         serverId={serverId}
         containerId={execTarget?.containerId || ''}
         containerName={execTarget?.containerName || ''}
@@ -923,7 +808,7 @@ export default function Docker() {
         />
       )}
 
-      <ExecDrawer
+      <ContainerExecDrawer
         serverId={execTarget?.serverId || ''}
         containerId={execTarget?.containerId || ''}
         containerName={execTarget?.containerName || ''}

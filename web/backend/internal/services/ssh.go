@@ -90,11 +90,16 @@ func (ts *TerminalSession) closeDone() {
 	ts.closeOnce.Do(func() { close(ts.done) })
 }
 
-// Write sends SSH output to the websocket (io.Copy destination).
+// Write sends SSH output to the websocket (io.Copy destination). SSH reads may
+// split a UTF-8 character, so preserve their bytes in binary frames and let the
+// terminal's streaming decoder join characters across messages.
 func (ts *TerminalSession) Write(data []byte) (int, error) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
-	return len(data), ts.conn.WriteMessage(websocket.TextMessage, data)
+	if err := ts.conn.WriteMessage(websocket.BinaryMessage, data); err != nil {
+		return 0, err
+	}
+	return len(data), nil
 }
 
 // PumpStdin reads websocket messages and forwards them to the SSH session's
@@ -140,28 +145,28 @@ func (ts *TerminalSession) Close() {
 }
 
 func DialSSH(host string, port int, username, password, key, hostKey string) (*ssh.Client, error) {
-	config, err := buildSSHClientConfig(username, password, key, hostKey, 10*time.Second)
-	if err != nil {
-		return nil, err
-	}
-	return ssh.Dial("tcp", net.JoinHostPort(host, strconv.Itoa(port)), config)
+	client, _, err := dialSSHClientConn(host, port, username, password, key, hostKey, sshDialTimeout)
+	return client, err
 }
 
 // dialSSHClientConn dials an SSH connection and returns both the client and
 // the underlying TCP connection, so callers keeping the connection pooled can
 // arm per-operation deadlines on the transport. The dial deadline is cleared
-// once the handshake completes.
+// once the handshake completes. TCP connection establishment and the SSH
+// handshake share one timeout rather than each receiving a fresh budget.
 func dialSSHClientConn(host string, port int, username, password, key, hostKey string, timeout time.Duration) (*ssh.Client, net.Conn, error) {
 	config, err := buildSSHClientConfig(username, password, key, hostKey, timeout)
 	if err != nil {
 		return nil, nil, err
 	}
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
-	tcpConn, err := net.DialTimeout("tcp", addr, timeout)
+	deadline := time.Now().Add(timeout)
+	dialer := net.Dialer{Deadline: deadline}
+	tcpConn, err := dialer.Dial("tcp", addr)
 	if err != nil {
 		return nil, nil, fmt.Errorf("ssh dial: %w", err)
 	}
-	if err := tcpConn.SetDeadline(time.Now().Add(timeout)); err != nil {
+	if err := tcpConn.SetDeadline(deadline); err != nil {
 		tcpConn.Close()
 		return nil, nil, fmt.Errorf("ssh deadline: %w", err)
 	}

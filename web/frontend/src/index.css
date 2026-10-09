@@ -1235,9 +1235,13 @@ button, input, textarea, select { font: inherit; }
 
 .batch-results.ant-collapse { border-color: var(--border); border-radius: 11px; }
 .batch-results .ant-collapse-header { align-items: center !important; }
-.batch-result-head { min-width: 0; display: flex; align-items: center; gap: 9px; flex: 1; }
+.batch-result-head { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 9px; flex: 1; }
 .batch-result-head strong { color: var(--text); font-size: 13px; }
-.batch-result-head .ant-typography { min-width: 0; flex: 1; font-size: 11px; }
+/* The error wraps onto its own line instead of being clipped on a phone. */
+.batch-result-head .batch-result-error { flex: 1 1 100%; order: 1; font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
+@media (min-width: 641px) {
+  .batch-result-head .batch-result-error { flex: 1 1 0; order: 0; }
+}
 .batch-result-head .ok { color: #17a082; }
 .batch-result-head .bad { color: #e2545f; }
 .batch-result-duration { margin-left: auto; color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -1317,3 +1321,11 @@ button, input, textarea, select { font: inherit; }
 .login-agent-raw { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
 .server-table .ant-table-tbody > tr.login-row-failed > td { background: rgba(244, 63, 94, 0.05); }
 .server-table .ant-table-tbody > tr.login-row-failed:hover > td { background: rgba(244, 63, 94, 0.09); }
+
+/* Terminal connection state (SSH tab and container shell drawer). */
+.terminal-state { font-size: 13px; }
+.terminal-state.connecting { color: var(--muted); }
+.terminal-state.connected { color: #52c41a; }
+.terminal-state.disconnected { color: #ff4d4f; }
+.container-exec-host { flex: 1; min-height: 0; width: 100%; }
+.container-exec-host .xterm { padding: 8px 0 0 8px; }

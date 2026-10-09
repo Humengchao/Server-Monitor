@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { serversApi, MetricPoint } from '../api/servers';
 import { usePolling } from './usePolling';
+import { responseClock, ResponseClock } from './useResponseClock';
 import { MAX_FUTURE_SAMPLE_SKEW_MS } from '../utils/fleet';
 
 export interface TimeRange {
@@ -8,36 +9,10 @@ export interface TimeRange {
   until: string;
 }
 
-function metricsChanged(a: MetricPoint | null, b: MetricPoint | null): boolean {
-  if (!a && !b) return false;
-  if (!a || !b) return true;
-  return (
-    a.cpu_percent !== b.cpu_percent ||
-    a.load_1 !== b.load_1 ||
-    a.load_5 !== b.load_5 ||
-    a.load_15 !== b.load_15 ||
-    a.memory_used !== b.memory_used ||
-    a.memory_total !== b.memory_total ||
-    a.disk_used !== b.disk_used ||
-    a.network_rx_bytes !== b.network_rx_bytes ||
-    a.network_tx_bytes !== b.network_tx_bytes ||
-    a.network_rx_total_bytes !== b.network_rx_total_bytes ||
-    a.network_tx_total_bytes !== b.network_tx_total_bytes ||
-    a.disk_rx_bytes !== b.disk_rx_bytes ||
-    a.disk_tx_bytes !== b.disk_tx_bytes ||
-    a.uptime_seconds !== b.uptime_seconds ||
-    a.latency_ms !== b.latency_ms ||
-    // A host can legitimately report the same values for several samples.
-    // The timestamp still advances, and must replace the previous point so
-    // consumers do not eventually mark a healthy, idle host as stale/offline.
-    a.recorded_at !== b.recorded_at
-  );
-}
-
 export const METRIC_ONLINE_WINDOW_MS = 120000;
 
 /**
- * Judge freshness using the time at which the API response was observed.
+ * Judge freshness against the API clock rather than the browser's wall clock.
  * Keeping this in one place avoids subtly different online checks across
  * pages and treats malformed/future timestamps conservatively.
  */
@@ -51,32 +26,29 @@ export function isMetricFresh(metrics: MetricPoint | null, observedAt: number, w
   return age >= -MAX_FUTURE_SAMPLE_SKEW_MS && age < windowMs;
 }
 
+interface LatestResult {
+  serverId: string;
+  metrics: MetricPoint | null;
+  clock: ResponseClock | null;
+  error: boolean;
+}
+
+interface HistoryResult {
+  key: string;
+  data: MetricPoint[];
+  loading: boolean;
+  error: boolean;
+}
+
+const EMPTY_HISTORY: MetricPoint[] = [];
+
 export function useMetrics(serverId: string, timeRange: TimeRange, interval = 3000) {
-  const [metrics, setMetrics] = useState<MetricPoint | null>(null);
-  const [history, setHistory] = useState<MetricPoint[]>([]);
-  const [loading, setLoading] = useState(true);
-  // The API's Date header, used to judge liveness against the server's clock
-  // rather than the browser's: local skew beyond the online window would
-  // otherwise mislabel a healthy host.
-  const [observedAt, setObservedAt] = useState(0);
+  const [latest, setLatest] = useState<LatestResult | null>(null);
+  const [history, setHistory] = useState<HistoryResult | null>(null);
   const latestAbortRef = useRef<AbortController | null>(null);
   const historyAbortRef = useRef<AbortController | null>(null);
-  const timeRangeRef = useRef(timeRange);
-  useEffect(() => {
-    timeRangeRef.current = timeRange;
-  }, [timeRange]);
-
-  // Navigating between hosts reuses this hook instance; clear the previous
-  // host's data so it never renders under the new title. Deferred like the
-  // initial fetch below to avoid setState during the commit phase.
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setMetrics(null);
-      setHistory([]);
-      setLoading(true);
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [serverId]);
+  const { since, until } = timeRange;
+  const historyKey = JSON.stringify([serverId, since, until]);
 
   const fetchLatest = useCallback(async () => {
     latestAbortRef.current?.abort();
@@ -84,18 +56,16 @@ export function useMetrics(serverId: string, timeRange: TimeRange, interval = 30
     latestAbortRef.current = controller;
     try {
       const res = await serversApi.getLatestMetrics(serverId, controller.signal);
-      const newMetrics = res.data ?? null;
-      setMetrics((prev) => (metricsChanged(prev, newMetrics) ? newMetrics : prev));
-      const dateHeader = res.headers?.date;
-      const serverNow = typeof dateHeader === 'string' ? Date.parse(dateHeader) : NaN;
-      setObservedAt(Number.isNaN(serverNow) ? Date.now() : serverNow);
+      if (controller.signal.aborted || latestAbortRef.current !== controller) return;
+      setLatest({ serverId, metrics: res.data ?? null, clock: responseClock(res.headers?.date), error: false });
     } catch {
-      // ignore
+      if (controller.signal.aborted || latestAbortRef.current !== controller) return;
+      // A failed refresh must not reset the original sample's clock.
+      setLatest((current) => current?.serverId === serverId
+        ? { ...current, error: true }
+        : { serverId, metrics: null, clock: null, error: true });
     } finally {
-      if (latestAbortRef.current === controller) {
-        latestAbortRef.current = null;
-        setLoading(false);
-      }
+      if (latestAbortRef.current === controller) latestAbortRef.current = null;
     }
   }, [serverId]);
 
@@ -103,41 +73,49 @@ export function useMetrics(serverId: string, timeRange: TimeRange, interval = 30
     historyAbortRef.current?.abort();
     const controller = new AbortController();
     historyAbortRef.current = controller;
+    setHistory({ key: historyKey, data: EMPTY_HISTORY, loading: true, error: false });
     try {
-      const range = timeRangeRef.current;
-      const res = await serversApi.getMetricsHistory(serverId, range.since, range.until, controller.signal);
-      setHistory(res.data || []);
+      const res = await serversApi.getMetricsHistory(serverId, since, until, controller.signal);
+      if (controller.signal.aborted || historyAbortRef.current !== controller) return;
+      setHistory({ key: historyKey, data: res.data || EMPTY_HISTORY, loading: false, error: false });
     } catch {
-      // ignore
+      if (controller.signal.aborted || historyAbortRef.current !== controller) return;
+      setHistory({ key: historyKey, data: EMPTY_HISTORY, loading: false, error: true });
     } finally {
       if (historyAbortRef.current === controller) historyAbortRef.current = null;
     }
-  }, [serverId]);
+  }, [serverId, since, until, historyKey]);
 
   usePolling(fetchLatest, interval, { leading: false });
 
   useEffect(() => {
-    // Defer the initial request so the effect itself does not synchronously
-    // trigger state updates during the commit phase.
     const timer = window.setTimeout(() => { void fetchLatest(); }, 0);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      latestAbortRef.current?.abort();
+    };
   }, [fetchLatest]);
 
   useEffect(() => {
-    fetchHistory();
-  }, [fetchHistory, timeRange.since, timeRange.until]);
+    const timer = window.setTimeout(() => { void fetchHistory(); }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      historyAbortRef.current?.abort();
+    };
+  }, [fetchHistory]);
 
-  useEffect(() => () => {
-    latestAbortRef.current?.abort();
-    historyAbortRef.current?.abort();
-  }, [serverId]);
-
+  // Rendering can precede effect cleanup. Keying the results prevents a
+  // previous host/window from being displayed or exported during that render.
+  const currentLatest = latest?.serverId === serverId ? latest : null;
+  const currentHistory = history?.key === historyKey ? history : null;
   return {
-    metrics,
-    history,
-    loading,
-    observedAt,
-    isFresh: isMetricFresh(metrics, observedAt),
+    metrics: currentLatest?.metrics ?? null,
+    clock: currentLatest?.clock ?? null,
+    loading: currentLatest === null,
+    latestError: currentLatest?.error ?? false,
+    history: currentHistory?.data ?? EMPTY_HISTORY,
+    historyLoading: currentHistory?.loading ?? true,
+    historyError: currentHistory?.error ?? false,
     refetchLatest: fetchLatest,
     refetchHistory: fetchHistory,
   };

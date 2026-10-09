@@ -3,6 +3,13 @@ import react from '@vitejs/plugin-react'
 import type { GetManualChunk } from 'rollup'
 
 const manualChunks: GetManualChunk = (id) => {
+  // Rollup folds a chunk's unassigned static dependencies into the first
+  // manual chunk that needs them. Vite's lazy-import helper is needed by
+  // CodeMirror's language loader, so it landed in "codemirror" and the entry
+  // page downloaded the whole editor just to lazy-load the dashboard. Pin the
+  // helper, and React's small companion packages that recharts and
+  // react-i18next both pull in, to the chunk every page loads.
+  if (id.includes('vite/preload-helper')) return 'react'
   if (!id.includes('node_modules')) return null
   if (id.includes('@xterm')) return 'xterm'
   // Long-lived vendor chunks: a page change or a copy fix no longer invalidates
@@ -15,6 +22,8 @@ const manualChunks: GetManualChunk = (id) => {
   if (
     id.includes('/react/') ||
     id.includes('/react-dom/') ||
+    id.includes('/react-is/') ||
+    id.includes('/use-sync-external-store/') ||
     id.includes('/scheduler/') ||
     id.includes('/react-router') ||
     id.includes('/@remix-run/')

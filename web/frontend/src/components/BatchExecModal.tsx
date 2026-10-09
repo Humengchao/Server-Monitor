@@ -105,6 +105,9 @@ export default function BatchExecModal({ open, servers, onClose }: Props) {
     });
   };
 
+  // Sub-second runs read naturally in ms; a 60 000 ms timeout reads as 60.0 s.
+  const formatDuration = (ms: number) => (ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${ms} ms`);
+
   const items = (results || []).map((result) => ({
     key: result.server_id,
     label: (
@@ -113,8 +116,8 @@ export default function BatchExecModal({ open, servers, onClose }: Props) {
           ? <CheckCircleFilled className="ok" />
           : <CloseCircleFilled className="bad" />}
         <strong>{result.server_name}</strong>
-        {result.error && <Text type="danger" ellipsis>{result.error}</Text>}
-        <span className="batch-result-duration">{result.duration_ms} ms</span>
+        <span className="batch-result-duration">{formatDuration(result.duration_ms)}</span>
+        {result.error && <Text type="danger" className="batch-result-error">{result.error}</Text>}
       </div>
     ),
     children: (

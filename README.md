@@ -130,7 +130,7 @@ Web 新增主机/容器文件浏览、UTF-8 文本编辑及上传下载；Docker
 
 - 基于 **JWT（HS256）** 的无状态认证，Token 有效期 72 小时
 - **修改密码会立即吊销该账号此前签发的全部 Token**：用户表记录一个失效时间点，鉴权时拒绝 `iat` 更早的 Token。发起修改的那个会话会收到新签发的 Token，不会被自己的操作切断
-- 所有 API 请求通过 Bearer Token 认证，WebSocket 通过 Query Token 认证
+- 所有 API 请求通过 Bearer Token 认证，WebSocket 通过子协议传递 Token，避免令牌进入 URL 和访问日志
 - 所有受保护的管理 API 查询强制按 `user_id` 过滤，**用户之间数据完全隔离**；公开探针使用独立的最小化数据模型，只返回匿名健康指标
 
 ### 接口防护
