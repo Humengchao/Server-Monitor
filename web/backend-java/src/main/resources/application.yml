@@ -1,0 +1,30 @@
+spring:
+  application:
+    name: server-monitor-backend
+  datasource:
+    url: jdbc:postgresql://placeholder.invalid/db
+    hikari:
+      maximum-pool-size: ${DATABASE_POOL_MAX:25}
+      minimum-idle: 10
+      max-lifetime: 300000
+      connection-test-query: SELECT 1
+      connection-init-sql: SELECT 1
+      data-source-properties:
+        ApplicationName: server-monitor-java
+  web:
+    resources:
+      add-mappings: false
+  jackson:
+    default-property-inclusion: non_null
+
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+  forward-headers-strategy: framework
+
+logging:
+  level:
+    root: info
+
+# Let Hikari handscribe server-side prepared statement limits and default socket timeouts.
+spring.datasource.hikari.data-source-properties.socketTimeout: 30

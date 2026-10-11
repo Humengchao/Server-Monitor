@@ -34,3 +34,6 @@ windows/dist/
 # them for its handle-growth claim, so a clone needs them.
 windows/artifacts/*
 !windows/artifacts/*.csv
+
+# Java backend build output
+web/backend-java/target/
