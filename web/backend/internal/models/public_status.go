@@ -12,12 +12,11 @@ type PublicTag struct {
 	Color string `json:"color"`
 }
 
-// PublicServerMetric is deliberately separate from Server. Only the anonymous
-// alias the handler assigns is published — real server names never leave this
-// layer. Manually configured public locations and tags are intentionally
-// public; hosts, ports, credentials, user IDs, notes and database IDs are
-// still excluded.
+// PublicServerMetric is deliberately separate from Server. Display names,
+// manually configured locations and tags are public; connection settings,
+// credentials, ownership, notes and database IDs are excluded.
 type PublicServerMetric struct {
+	Name            string
 	PublicLocation  string
 	Tags            []PublicTag
 	ServerType      string
@@ -59,7 +58,7 @@ func GetPublicServerMetrics(db *sql.DB, since30d, until time.Time) ([]PublicServ
 
 func GetPublicServerMetricsContext(ctx context.Context, db *sql.DB, since30d, until time.Time) ([]PublicServerMetric, error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT COALESCE(s.public_location, ''),
+		SELECT s.name, COALESCE(s.public_location, ''),
 			COALESCE((
 				SELECT JSON_AGG(JSON_BUILD_OBJECT('name', t.name, 'color', t.color) ORDER BY t.name)::TEXT
 				FROM tags t JOIN server_tags st ON st.tag_id = t.id WHERE st.server_id = s.id
@@ -97,7 +96,7 @@ func GetPublicServerMetricsContext(ctx context.Context, db *sql.DB, since30d, un
 		var expiresAt, recordedAt sql.NullTime
 		var tagsJSON string
 		if err := rows.Scan(
-			&item.PublicLocation, &tagsJSON,
+			&item.Name, &item.PublicLocation, &tagsJSON,
 			&item.ServerType, &item.CPUCores, &item.DiskTotal, &expiresAt,
 			&item.BillingPrice, &item.BillingCurrency, &item.BillingCycle, &item.TrafficLimit,
 			&item.CPUPercent, &item.Load1, &item.Load5, &item.Load15,

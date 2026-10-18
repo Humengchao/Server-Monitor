@@ -104,7 +104,7 @@ func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, noti
 		c.JSON(http.StatusOK, gin.H{"status": "ready"})
 	})
 
-	// Public, anonymized status endpoint. It is rate-limited separately and its
+	// Public status endpoint. It is rate-limited separately and its
 	// model query never selects connection details or ownership information.
 	r.GET("/api/public/status", middleware.RateLimit(60, 1*time.Minute), publicStatusH.Get)
 

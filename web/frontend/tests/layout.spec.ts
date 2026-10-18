@@ -10,9 +10,9 @@ function entry(name: string, size: number) {
   return { name, path: '/home/deploy/' + name, size, modified_at: '2030-06-01T00:00:00Z', mode: '-rw-r--r--', is_file: true, is_dir: false, is_symlink: false };
 }
 
-function publicNode(alias: string, status: 'online' | 'offline', expires_at: string | null) {
+function publicNode(alias: string, name: string | undefined, status: 'online' | 'offline', expires_at: string | null) {
   return {
-    alias, location: 'Tokyo', tags: [], server_type: 'linux', status, cpu_cores: 2, cpu_percent: status === 'online' ? 20 : 0,
+    alias, name, location: 'Tokyo', tags: [], server_type: 'linux', status, cpu_cores: 2, cpu_percent: status === 'online' ? 20 : 0,
     load_1: 0.2, load_5: 0.2, load_15: 0.2, memory_used: 2 * GB, memory_total: 8 * GB, memory_percent: 25,
     disk_used: 20 * GB, disk_total: 100 * GB, disk_percent: 20, network_rx_bytes: 0, network_tx_bytes: 0,
     network_rx_total_bytes: 10 * GB, network_tx_total_bytes: 5 * GB, traffic_limit_bytes: 0, traffic_percent: 0,
@@ -29,7 +29,10 @@ async function fixture(page: Page) {
   hosts[1].latest_metrics!.network_tx_bytes = 22.1 * MB;
   hosts[0].has_docker = true;
   hosts[0].docker_version = '24.0.7';
-  const state = { hosts, errors: [] as string[] };
+  const state = { hosts, errors: [] as string[], publicNodes: [
+    publicNode('NODE 01', 'alpha', 'online', '2031-01-01T00:00:00Z'),
+    publicNode('NODE 02', 'beta', 'offline', '2020-01-01T00:00:00Z'),
+  ] };
   page.on('pageerror', error => state.errors.push(error.message));
   await page.addInitScript(() => {
     localStorage.setItem('lang', 'en');
@@ -45,8 +48,8 @@ async function fixture(page: Page) {
     if (path === '/api/servers/uptime') return route.fulfill({ json: { servers: [] } });
     if (path === '/api/public/status') return route.fulfill({ json: {
       overall: 'degraded', generated_at: new Date().toISOString(),
-      summary: { total: 2, online: 1, degraded: 0, offline: 1, memory_used: 4 * GB, memory_total: 16 * GB, disk_used: 40 * GB, disk_total: 200 * GB, traffic_total_bytes: 30 * GB, network_rx_bytes: 0, network_tx_bytes: 0, remaining_value: 0 },
-      nodes: [publicNode('alpha', 'online', '2031-01-01T00:00:00Z'), publicNode('beta', 'offline', '2020-01-01T00:00:00Z')],
+      summary: { total: state.publicNodes.length, online: state.publicNodes.filter(node => node.status === 'online').length, degraded: 0, offline: state.publicNodes.filter(node => node.status === 'offline').length, memory_used: 4 * GB, memory_total: 16 * GB, disk_used: 40 * GB, disk_total: 200 * GB, traffic_total_bytes: 30 * GB, network_rx_bytes: 0, network_tx_bytes: 0, remaining_value: 0 },
+      nodes: state.publicNodes,
       privacy: { anonymized: false, hidden_fields: [] },
     } });
     if (path.endsWith('/docker/containers')) return route.fulfill({ json: [{ id: 'c'.repeat(64), name: 'web', image: 'nginx:1.27', state: 'running', status: 'Up 2 days', ports: '', created: '2 days ago' }] });
@@ -90,6 +93,38 @@ test('public status page marks offline and expired nodes honestly', async ({ pag
   const online = page.locator('.glass-node-card.online');
   await expect(online.locator('.node-plan-row strong').first()).toHaveText('1d 1h');
   await expect(online.locator('.node-bottom-grid strong.is-expired')).toHaveCount(0);
+});
+
+test('public status displays and searches real names while keeping same-named nodes distinct', async ({ page }) => {
+  const state = await fixture(page);
+  state.publicNodes = [
+    publicNode('NODE 01', '东京网关', 'online', null),
+    publicNode('NODE 02', 'Shared database', 'online', null),
+    publicNode('NODE 03', 'Shared database', 'offline', null),
+    // A response from an older backend remains usable during deployment.
+    publicNode('NODE 04', undefined, 'online', null),
+  ];
+  await page.goto('/status');
+  const headings = page.locator('.node-title h2');
+  await expect(headings).toHaveText(['东京网关', 'Shared database', 'Shared database', 'NODE 04']);
+  const search = page.getByRole('textbox', { name: en['probe.searchPlaceholder'], exact: true });
+  await search.fill('sHaReD dAtAbAsE');
+  await expect(headings).toHaveText(['Shared database', 'Shared database']);
+  await expect(page.locator('.glass-node-card.online')).toHaveCount(1);
+  await expect(page.locator('.glass-node-card.offline')).toHaveCount(1);
+  await page.getByRole('button', { name: en['probe.listView'], exact: true }).click();
+  await expect(page.locator('.glass-node-grid.list .node-title h2')).toHaveText(['Shared database', 'Shared database']);
+  await search.fill('东京');
+  await expect(headings).toHaveText(['东京网关']);
+  await search.fill('NODE 02');
+  await expect(headings).toHaveCount(0);
+  await search.fill('NODE 04');
+  await expect(headings).toHaveText(['NODE 04']);
+  await search.fill('');
+  state.publicNodes[1].name = 'Reporting database';
+  await page.getByRole('button', { name: en['common.refresh'], exact: true }).click();
+  await expect(headings).toHaveText(['东京网关', 'Reporting database', 'Shared database', 'NODE 04']);
+  expect(state.errors).toEqual([]);
 });
 
 test('phone layouts keep file names and Docker host headers readable', async ({ page }) => {

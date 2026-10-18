@@ -32,6 +32,8 @@ func NewPublicStatusHandler() *PublicStatusHandler {
 }
 
 type publicNode struct {
+	Name string `json:"name"`
+	// Alias remains a compatibility identifier; clients display Name.
 	Alias             string             `json:"alias"`
 	Location          string             `json:"location"`
 	Tags              []models.PublicTag `json:"tags"`
@@ -150,6 +152,7 @@ func buildPublicStatus(ctx context.Context, db *sql.DB) (gin.H, error) {
 		}
 
 		nodes = append(nodes, publicNode{
+			Name:  metric.Name,
 			Alias: fmt.Sprintf("NODE %02d", index+1), Location: metric.PublicLocation, Tags: metric.Tags,
 			ServerType: metric.ServerType, Status: status,
 			CPUCores: metric.CPUCores, CPUPercent: cpuPercent,
@@ -186,8 +189,8 @@ func buildPublicStatus(ctx context.Context, db *sql.DB) (gin.H, error) {
 	response := gin.H{
 		"overall": overall, "generated_at": now, "summary": summary, "nodes": nodes,
 		"privacy": gin.H{
-			"anonymized":    true,
-			"hidden_fields": []string{"server_name", "hostname", "ip_address", "port", "ssh_user", "credentials", "notes", "database_id"},
+			"anonymized":    false,
+			"hidden_fields": []string{"hostname", "ip_address", "port", "ssh_user", "credentials", "notes", "database_id"},
 		},
 	}
 

@@ -38,6 +38,8 @@ type FilterKey = 'all' | `tag:${string}`;
 
 interface PublicNode {
   alias: string;
+  /** Older backends may omit this during a rolling deployment. */
+  name?: string;
   location: string;
   tags: Array<{ name: string; color: string }>;
   server_type: string;
@@ -102,6 +104,7 @@ const STATUS_REQUEST_TIMEOUT_MS = 15000;
 const formatBytes = (value: number, digits = 1) => formatBytesShared(value, digits);
 
 const formatRate = (value: number) => `${formatBytes(value)}/s`;
+const nodeName = (node: PublicNode) => node.name ?? node.alias;
 
 export default function PublicStatus() {
   const { t, i18n } = useTranslation();
@@ -206,7 +209,7 @@ export default function PublicStatus() {
   const visibleNodes = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return (data?.nodes || []).filter((node) => {
-      const matchesSearch = !normalized || `${node.alias} ${node.location} ${node.server_type} ${(node.tags || []).map((tag) => tag.name).join(' ')}`.toLowerCase().includes(normalized);
+      const matchesSearch = !normalized || `${nodeName(node)} ${node.location} ${node.server_type} ${(node.tags || []).map((tag) => tag.name).join(' ')}`.toLowerCase().includes(normalized);
       if (!matchesSearch) return false;
       if (filter.startsWith('tag:')) return (node.tags || []).some((tag) => tag.name === filter.slice(4));
       return true;
@@ -371,7 +374,7 @@ function ProbeNodeCard({
     <article className={`glass-node-card ${node.status}`}>
       <header className="glass-node-head">
         <span className="node-system-icon">{node.server_type === 'windows' ? <WindowsOutlined /> : <CloudServerOutlined />}</span>
-        <div className="node-title"><h2>{node.alias}</h2><small><EnvironmentOutlined /> {node.location || t('probe.locationUnset')}<b>·</b>{node.server_type === 'windows' ? 'Windows' : 'Linux'}</small></div>
+        <div className="node-title"><h2 title={nodeName(node)}>{nodeName(node)}</h2><small><EnvironmentOutlined /> {node.location || t('probe.locationUnset')}<b>·</b>{node.server_type === 'windows' ? 'Windows' : 'Linux'}</small></div>
         <span className={`node-online ${node.status}`}><i /> {t(`probe.nodeStatus.${node.status}`)}</span>
       </header>
 

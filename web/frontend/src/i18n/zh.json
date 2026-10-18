@@ -435,7 +435,7 @@
   "probe.filter.all": "全部节点",
   "probe.cardView": "卡片视图",
   "probe.listView": "列表视图",
-  "probe.searchPlaceholder": "搜索服务器、位置或标签",
+  "probe.searchPlaceholder": "搜索服务器名称、位置或标签",
   "probe.locationUnset": "位置未设置",
   "probe.noMatches": "没有匹配的节点",
   "probe.noMatchesHint": "换个筛选条件或搜索词试试。",

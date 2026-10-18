@@ -574,10 +574,19 @@ GET /api/servers/:id/uptime?days=30
 公开状态页（`GET /api/public/status`，无需认证）的每个节点会带上 `availability_30d`：
 
 ```json
-{ "alias": "NODE 01", "availability_30d": 99.86 }
+{ "alias": "NODE 01", "name": "东京网关", "availability_30d": 99.86 }
 ```
 
-节点只有匿名编号 `alias`，不返回真实服务器名称。
+`name` 为管理后台配置的真实服务器名称，公开状态页用它显示标题和搜索。`alias` 保留 `NODE 01` 形式的编号，供已有客户端兼容和列表标识使用；名称可以重复，不能作为节点的唯一标识。滚动发布期间，前端在旧响应缺少 `name` 时回退显示 `alias`。
+
+响应中的 `privacy.anonymized` 为 `false`，`hidden_fields` 不再包含 `server_name`。连接地址与端口、SSH 用户、凭据、备注和数据库 ID 仍被排除：
+
+```json
+{
+  "anonymized": false,
+  "hidden_fields": ["hostname", "ip_address", "port", "ssh_user", "credentials", "notes", "database_id"]
+}
+```
 
 口径与上面的 30 天窗口完全一致（15 分钟层、终点对齐、起点夹到创建时刻）。
 当该服务器的应采集桶数少于 16 个（即不足四小时）时，字段为 `null` 而不是一个百分比——

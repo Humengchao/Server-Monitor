@@ -435,7 +435,7 @@
   "probe.filter.all": "All nodes",
   "probe.cardView": "Card view",
   "probe.listView": "List view",
-  "probe.searchPlaceholder": "Search server, location, or tag",
+  "probe.searchPlaceholder": "Search server name, location, or tag",
   "probe.locationUnset": "Location not set",
   "probe.noMatches": "No matching nodes",
   "probe.noMatchesHint": "Try another filter or search term.",

@@ -12,9 +12,9 @@ Built with Claude Code & DeepSeek-v4-pro
 
 - 🌐 [Public Probe / Service Status](http://svr.hmchxd.com/status)
 
-The public probe refreshes every 15 seconds and exposes only anonymous node aliases, manually configured public locations, tags, availability, and rounded CPU, memory, and uptime health metrics. It does not return real server names, IP addresses / hostnames, ports, SSH users, credentials, notes, or database IDs.
+The public probe refreshes every 10 seconds and displays real server names, manually configured public locations, tags, availability, and rounded CPU, memory, and uptime health metrics. Servers can be searched by name. Connection fields (IP addresses / hostnames, ports, and SSH users), credentials, notes, and database IDs remain omitted.
 
-> **Security note:** Management features handle login tokens and SSH credentials. Use them only after the domain has a valid HTTPS certificate and HTTP is forcibly redirected to HTTPS. The link above points only to the anonymous public status page.
+> **Security note:** Management features handle login tokens and SSH credentials. Use them only after the domain has a valid HTTPS certificate and HTTP is forcibly redirected to HTTPS. The link above points only to the public status page.
 
 ---
 
@@ -46,7 +46,7 @@ The public probe refreshes every 15 seconds and exposes only anonymous node alia
 | Services & ports | systemd unit list (failures first) with start/stop/restart/reload, plus a listening-port table that classifies each bind by who can reach it |
 | Operations | Web SSH terminal, Docker container management (start / stop / logs / interactive shell, CPU / memory / disk usage), shared SSH credential store, per-server notes |
 | Account security | Change your password and sign every other device out at once |
-| Public status page | Anonymized probe page whose API excludes identity and connection details at the query level |
+| Public status page | Real server names and health metrics, with connection details, credentials, notes, and database IDs excluded from the API |
 
 ### File Management and Automatic Docker Loading
 
@@ -130,7 +130,7 @@ Enter multi-select from the dashboard toolbar; both the card and list views beco
 - Stateless authentication based on **JWT (HS256)** with a 72-hour token expiry
 - **Changing a password immediately revokes every token issued to that account beforehand**: the user row carries a cutoff timestamp and authentication rejects any token with an earlier `iat`. The session that made the change receives a freshly issued token, so it is not cut off by its own action
 - All API requests are authenticated via Bearer Token; WebSocket connections carry the token in a subprotocol to keep it out of URLs and access logs
-- All protected management API queries are strictly filtered by `user_id` for tenant isolation; the public probe uses a separate minimal data model that returns anonymous health metrics only
+- All protected management API queries are strictly filtered by `user_id` for tenant isolation; the public probe uses a separate minimal data model that publishes real server names and health metrics while omitting connection details, credentials, notes, and database IDs
 
 ### API Protection
 
@@ -245,4 +245,4 @@ Add the following secrets in **Settings -> Secrets and variables -> actions**:
 - [x] **Process List** -- Live process table on the detail page, sortable by CPU / memory / PID / uptime, with search and terminate
 - [x] **Disk Usage** -- Show current disk usage on detail page
 - [x] **Alert Notifications** -- Threshold rules (CPU / memory / disk / load / latency / offline) with webhook delivery, see below
-- [x] **Public Probe** -- Anonymous public status page and minimal status API with server identity and connection details removed
+- [x] **Public Probe** -- Public status page and minimal status API with real server names and health metrics; connection details, credentials, notes, and database IDs remain hidden
