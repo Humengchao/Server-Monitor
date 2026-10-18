@@ -2,6 +2,32 @@ package config
 
 import "testing"
 
+func TestExpiryRenewalConfiguration(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://example.invalid/test")
+	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef")
+	t.Setenv("POLL_INTERVAL", "3")
+	t.Setenv("ALERT_INTERVAL", "30")
+	t.Setenv("ALLOW_REGISTRATION", "true")
+	t.Setenv("TRUSTED_PROXIES", "none")
+	t.Setenv("AUTO_RENEW_EXPIRY", "")
+	t.Setenv("EXPIRY_TIMEZONE", "")
+	cfg, err := Load()
+	if err != nil || !cfg.AutoRenewExpiry || cfg.ExpiryTimezone.String() != "Asia/Shanghai" {
+		t.Fatalf("default renewal config: %#v %v", cfg, err)
+	}
+	t.Setenv("AUTO_RENEW_EXPIRY", "false")
+	t.Setenv("EXPIRY_TIMEZONE", "UTC")
+	cfg, err = Load()
+	if err != nil || cfg.AutoRenewExpiry || cfg.ExpiryTimezone.String() != "UTC" {
+		t.Fatalf("explicit renewal config: %#v %v", cfg, err)
+	}
+	t.Setenv("EXPIRY_TIMEZONE", "not/a/timezone")
+	if _, err = Load(); err == nil {
+		t.Fatal("invalid calendar timezone accepted")
+	}
+}
+
 func TestLoadBoolDefault(t *testing.T) {
 	tests := []struct {
 		name     string

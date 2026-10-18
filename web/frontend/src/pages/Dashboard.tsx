@@ -15,7 +15,7 @@ import ServerTable from '../components/ServerTable';
 import FleetResources from '../components/FleetResources';
 import BatchActionBar from '../components/BatchActionBar';
 import ServerForm from '../components/ServerForm';
-import { buildServerPayload, serverFormValues } from '../utils/serverForm';
+import { buildServerPayload, isExpiryConflict, serverFormValues } from '../utils/serverForm';
 import type { ServerFormValues } from '../utils/serverForm';
 import { serversApi, Server, Tag } from '../api/servers';
 import { convertCurrency, currencySymbol, useExchangeRates } from '../hooks/useExchangeRates';
@@ -81,6 +81,7 @@ export default function Dashboard() {
   const [modalOpen, setModalOpen] = useState(false);
   const [savingServer, setSavingServer] = useState(false);
   const [editingServer, setEditingServer] = useState<Server | null>(null);
+  const editingExpiryRef = useRef<string | null>(null);
   const [form] = Form.useForm<ServerFormValues>();
   const [tagValues, setTagValues] = useState<string[]>([]);
   const [filterTagIds, setFilterTagIds] = useState<string[]>([]);
@@ -229,7 +230,7 @@ export default function Dashboard() {
     try {
       const payload = buildServerPayload(values, { credentialId: selectedCredential, notes: editingServer?.notes || '' });
       if (editingServer) {
-        await serversApi.update(editingServer.id, payload);
+        await serversApi.update(editingServer.id, { ...payload, expected_expires_at: editingExpiryRef.current });
         await serversApi.setTags(editingServer.id, tagValues);
         message.success(t('server.updated'));
       } else {
@@ -246,7 +247,8 @@ export default function Dashboard() {
       setEditingServer(null);
       loadServers();
     } catch (err: unknown) {
-      message.error(apiError(err, t('server.operationFailed')));
+      if (isExpiryConflict(err)) message.warning(t('server.expiryChanged'), 8);
+      else message.error(apiError(err, t('server.operationFailed')));
     } finally {
       setSavingServer(false);
     }
@@ -330,6 +332,8 @@ export default function Dashboard() {
 
   const handleEdit = useCallback((server: Server) => {
     setEditingServer(server);
+    // A later inventory poll must not turn a stale form into an authorized overwrite.
+    editingExpiryRef.current = server.expires_at ?? null;
     setSelectedCredential(server.credential_id || undefined);
     // Clear leftovers from a previous add/edit first: antd preserves values of
     // unmounted fields, so a password typed for another server would otherwise

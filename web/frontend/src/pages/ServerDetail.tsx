@@ -23,7 +23,7 @@ import ServiceTable from '../components/ServiceTable';
 import PortTable from '../components/PortTable';
 import PollErrorNotice from '../components/PollErrorNotice';
 import ServerForm from '../components/ServerForm';
-import { buildServerPayload, serverFormValues } from '../utils/serverForm';
+import { buildServerPayload, isExpiryConflict, serverFormValues } from '../utils/serverForm';
 import type { ServerFormValues } from '../utils/serverForm';
 import { copyToClipboard } from '../utils/clipboard';
 import { formatBytes, formatDate, formatDateTime, formatTime, formatUptime, getExpirationInfo, percentOf, severityColor } from '../utils/format';
@@ -117,6 +117,7 @@ export default function ServerDetail() {
   const [loadError, setLoadError] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [savingServer, setSavingServer] = useState(false);
+  const editingExpiryRef = useRef<string | null>(null);
   const [savingNotes, setSavingNotes] = useState(false);
   const [form] = Form.useForm<ServerFormValues>();
   const [tagValues, setTagValues] = useState<string[]>([]);
@@ -209,6 +210,7 @@ export default function ServerDetail() {
 
   const handleEdit = () => {
     if (!server) return;
+    editingExpiryRef.current = server.expires_at ?? null;
     setSelectedCredential(server.credential_id || undefined);
     // Drop any password/key typed in a previously cancelled edit; empty
     // secret fields mean "keep current" on the backend.
@@ -223,13 +225,14 @@ export default function ServerDetail() {
     setSavingServer(true);
     try {
       const payload = buildServerPayload(values, { credentialId: selectedCredential, notes: server.notes || '' });
-      await serversApi.update(server.id, payload);
+      await serversApi.update(server.id, { ...payload, expected_expires_at: editingExpiryRef.current });
       await serversApi.setTags(server.id, tagValues);
       message.success(t('server.updated'));
       setModalOpen(false);
       loadServer();
     } catch (err: unknown) {
-      message.error(apiError(err, t('server.updateFailed')));
+      if (isExpiryConflict(err)) message.warning(t('server.expiryChanged'), 8);
+      else message.error(apiError(err, t('server.updateFailed')));
     } finally {
       setSavingServer(false);
     }

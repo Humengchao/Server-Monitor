@@ -59,6 +59,12 @@ The web client now loads container information automatically when opening Docker
 - Offline hosts retain resource percentages labeled with the historical sample time; live network / disk rates display “—”. Resource sorting prioritizes valid current readings.
 - Resource shortcuts select online CPU, memory or disk usage ≥ 90%; expiry includes already expired hosts. These shortcuts combine with search, tags and collection status, with a clear-all action.
 
+### Automatic expiry updates
+
+Every ten minutes the backend checks hosts whose expiry is **more than ten days** overdue. A host that is currently online and has **at least 99% observed availability over a complete 24-hour window** gets one calendar month added to its previous expiry date. Month arithmetic uses `Asia/Shanghai` by default and clamps month-end dates (January 31 becomes February 28/29). This updates the expiry tracked by the panel.
+
+Incomplete history, current collection failures, and offline hosts are excluded. Changes and evidence commit atomically, with persisted protection against duplicate renewals after restarts or across instances. If a very old date remains more than ten days overdue after one month, it is not repeatedly advanced; correct the base date manually. Set `AUTO_RENEW_EXPIRY=false` to disable or `EXPIRY_TIMEZONE` to select another calendar zone. Stale edit forms report an expiry conflict instead of overwriting an automatic update.
+
 ### Alerting
 
 Rules are evaluated by a dedicated backend loop (every 30s by default, `ALERT_INTERVAL`) that reads only the latest samples already in the database -- it never opens extra connections to monitored hosts.

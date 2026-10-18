@@ -208,6 +208,7 @@
   "pollError.other.short": "采集异常",
   "server.operationFailed": "操作失败",
   "server.updateFailed": "更新失败",
+  "server.expiryChanged": "到期日已更新。请刷新页面后重新打开编辑表单，确认最新到期日再保存。",
   "server.notFound": "服务器未找到",
   "server.empty": "暂无服务器，点击\"添加服务器\"开始使用。",
   "server.filterByTag": "按标签筛选",

@@ -3,6 +3,7 @@ package models
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -254,13 +255,32 @@ func GetServerByIDAndUser(db *DB, id, userID uuid.UUID) (*Server, error) {
 }
 
 func UpdateServer(db *DB, s *Server) error {
-	tx, err := db.Raw.Begin()
+	return UpdateServerWithExpiryExpectation(context.Background(), db, s, nil)
+}
+
+var ErrServerExpiryChanged = errors.New("server expiry changed")
+
+// A nil expectation preserves compatibility for API clients that explicitly
+// replace a server. A non-nil expectation also represents an expected NULL.
+type ExpiryExpectation struct{ ExpiresAt *time.Time }
+
+func UpdateServerWithExpiryExpectation(ctx context.Context, db *DB, s *Server, expected *ExpiryExpectation) error {
+	tx, err := db.Raw.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	if expected != nil {
+		var current sql.NullTime
+		if err := tx.QueryRowContext(ctx, `SELECT expires_at FROM servers WHERE id=$1 AND user_id=$2 FOR UPDATE`, s.ID, s.UserID).Scan(&current); err != nil {
+			return err
+		}
+		if current.Valid != (expected.ExpiresAt != nil) || (current.Valid && !current.Time.Equal(*expected.ExpiresAt)) {
+			return ErrServerExpiryChanged
+		}
+	}
 
-	result, err := tx.Exec(
+	result, err := tx.ExecContext(ctx,
 		`UPDATE servers SET name=$1, host=$2, port=$3, ssh_username=$4, ssh_host_key=$5, credential_id=$6,
 		 expires_at=$7, notes=$8, server_type=$9, billing_price=$10, billing_currency=$11, billing_cycle=$12, traffic_limit_bytes=$13, public_location=$14
 		 WHERE id=$15 AND user_id=$16`,
@@ -281,13 +301,13 @@ func UpdateServer(db *DB, s *Server) error {
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(`UPDATE servers SET ssh_password=$1 WHERE id=$2 AND user_id=$3`, enc, s.ID, s.UserID)
+		_, err = tx.ExecContext(ctx, `UPDATE servers SET ssh_password=$1 WHERE id=$2 AND user_id=$3`, enc, s.ID, s.UserID)
 		if err != nil {
 			return err
 		}
 	}
 	if s.ServerType == "windows" {
-		_, err = tx.Exec(`UPDATE servers SET ssh_key='', ssh_host_key='' WHERE id=$1 AND user_id=$2`, s.ID, s.UserID)
+		_, err = tx.ExecContext(ctx, `UPDATE servers SET ssh_key='', ssh_host_key='' WHERE id=$1 AND user_id=$2`, s.ID, s.UserID)
 		if err != nil {
 			return err
 		}
@@ -296,7 +316,7 @@ func UpdateServer(db *DB, s *Server) error {
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(`UPDATE servers SET ssh_key=$1 WHERE id=$2 AND user_id=$3`, enc, s.ID, s.UserID)
+		_, err = tx.ExecContext(ctx, `UPDATE servers SET ssh_key=$1 WHERE id=$2 AND user_id=$3`, enc, s.ID, s.UserID)
 		if err != nil {
 			return err
 		}

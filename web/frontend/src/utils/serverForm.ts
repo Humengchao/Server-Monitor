@@ -42,6 +42,11 @@ export interface ServerPayload {
 
 const trim = (value: unknown) => (typeof value === 'string' ? value.trim() : value);
 
+export function isExpiryConflict(error: unknown): boolean {
+  const response = (error as { response?: { status?: number; data?: { error_code?: string } } })?.response;
+  return response?.status === 409 && response.data?.error_code === 'expiry_changed';
+}
+
 /** Seeds the form from a saved server. Secrets are never echoed back; empty means "keep". */
 export function serverFormValues(server: Server): ServerFormValues {
   return {

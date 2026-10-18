@@ -113,6 +113,23 @@ WHERE credential_id IS NOT NULL
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT '';
 
+CREATE INDEX IF NOT EXISTS idx_servers_expiry ON servers(expires_at) WHERE expires_at IS NOT NULL;
+CREATE TABLE IF NOT EXISTS server_expiry_renewals (
+    id BIGSERIAL PRIMARY KEY,
+    server_id UUID NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    previous_expires_at TIMESTAMPTZ NOT NULL,
+    new_expires_at TIMESTAMPTZ NOT NULL,
+    renewed_at TIMESTAMPTZ NOT NULL,
+    window_start TIMESTAMPTZ NOT NULL,
+    window_end TIMESTAMPTZ NOT NULL,
+    observed_minutes INT NOT NULL,
+    expected_minutes INT NOT NULL,
+    calendar_timezone TEXT NOT NULL,
+    UNIQUE(server_id,previous_expires_at)
+);
+CREATE INDEX IF NOT EXISTS idx_expiry_renewals_new ON server_expiry_renewals(server_id,new_expires_at);
+
 
 -- Server type (linux / windows)
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS server_type VARCHAR(16) DEFAULT 'linux';

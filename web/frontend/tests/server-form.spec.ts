@@ -9,7 +9,8 @@ async function fixture(page: Page) {
   const hosts = sampleFleet();
   hosts[0].credential_id = 'cred-1';
   hosts[0].credential_name = 'Ops key';
-  const state = { created: [] as Record<string, unknown>[], updated: [] as Record<string, unknown>[], errors: [] as string[] };
+  const state = { hosts, listReads: 0, tagWrites: 0, checkExpiry: false,
+    created: [] as Record<string, unknown>[], updated: [] as Record<string, unknown>[], errors: [] as string[] };
   page.on('pageerror', error => state.errors.push(error.message));
   await page.addInitScript(() => {
     localStorage.setItem('lang', 'en');
@@ -26,7 +27,7 @@ async function fixture(page: Page) {
       state.created.push(request.postDataJSON());
       return route.fulfill({ headers, json: { ...hosts[0], id: 'new-host', name: 'win-01', credential_id: null } });
     }
-    if (path === '/api/servers') return route.fulfill({ headers, json: hosts });
+    if (path === '/api/servers') { state.listReads++; return route.fulfill({ headers, json: hosts }); }
     if (path === '/api/servers/uptime') return route.fulfill({ json: { servers: [] } });
     if (path === '/api/credentials') return route.fulfill({ json: [
       { id: 'cred-1', user_id: 'u', name: 'Ops key', ssh_username: 'ops', has_password: false, has_key: true, credential_type: 'linux', created_at: '2030-01-01T00:00:00Z' },
@@ -36,11 +37,18 @@ async function fixture(page: Page) {
       const server = hosts.find(item => item.id === match[1]);
       if (!server) return route.fulfill({ status: 404, json: { error: 'not found' } });
       const rest = match[2] || '';
-      if (rest === '' && request.method() === 'PUT') { state.updated.push(request.postDataJSON()); return route.fulfill({ headers, json: server }); }
+      if (rest === '' && request.method() === 'PUT') {
+        const payload = request.postDataJSON();
+        state.updated.push(payload);
+        if (state.checkExpiry && payload.expected_expires_at !== (server.expires_at ?? null)) {
+          return route.fulfill({ status: 409, json: { error_code: 'expiry_changed', error: 'Expiry changed concurrently' } });
+        }
+        return route.fulfill({ headers, json: server });
+      }
       if (rest === '') return route.fulfill({ headers, json: server });
       if (rest === '/metrics/latest') return route.fulfill({ headers, json: server.latest_metrics });
       if (rest === '/metrics') return route.fulfill({ headers, json: [] });
-      if (rest === '/tags') return route.fulfill({ json: {} });
+      if (rest === '/tags') { state.tagWrites++; return route.fulfill({ json: {} }); }
     }
     return route.fulfill({ json: [] });
   });
@@ -75,6 +83,7 @@ test('adding a Windows host keeps the dialog buttons on screen and sends only Wi
   expect(state.created[0].port).toBeUndefined();
   expect(state.created[0].ssh_key).toBeUndefined();
   expect(state.created[0].ssh_host_key).toBeUndefined();
+  expect(state.created[0]).not.toHaveProperty('expected_expires_at');
   await expect(dialog).toBeHidden();
   expect(state.errors).toEqual([]);
 });
@@ -92,8 +101,60 @@ test('editing a host pre-fills the form and hides direct credentials behind a sh
   await expect(dialog.getByLabel(en['server.sshPassword'])).toHaveCount(0);
   await dialog.getByRole('button', { name: 'OK', exact: true }).click();
   await expect.poll(() => state.updated.length).toBe(1);
-  expect(state.updated[0]).toMatchObject({ name: 'idle-host', credential_id: 'cred-1', server_type: 'linux', port: 22 });
+  expect(state.updated[0]).toMatchObject({ name: 'idle-host', credential_id: 'cred-1', server_type: 'linux', port: 22, expected_expires_at: null });
   expect(state.updated[0].ssh_password).toBeUndefined();
   expect(state.updated[0].ssh_key).toBeUndefined();
   expect(state.errors).toEqual([]);
 });
+
+for (const view of ['dashboard', 'detail'] as const) {
+  test(`${view}: an edit opened before automatic renewal sends the original expiry and explains a conflict`, async ({ page }) => {
+    const state = await fixture(page);
+    await page.clock.install({ time: new Date(observedAt) });
+    const originalExpiry = '2030-05-01T12:00:00Z';
+    const renewedExpiry = '2030-06-01T12:00:00Z';
+    state.hosts[0].expires_at = originalExpiry;
+    state.checkExpiry = true;
+    const openEditor = async () => {
+      if (view === 'dashboard') {
+        await page.getByRole('radio', { name: en['dashboard.listView'] }).locator('..').click();
+        await page.getByRole('row').filter({ hasText: 'idle-host' }).getByRole('button', { name: en['common.edit'], exact: true }).click();
+      } else {
+        await page.locator('.detail-actions').getByRole('button', { name: en['common.edit'] }).click();
+      }
+    };
+    await page.goto(view === 'dashboard' ? '/dashboard' : '/servers/idle-host');
+    await openEditor();
+    const dialog = page.getByRole('dialog');
+    const date = dialog.getByLabel(en['server.expiresAt']);
+    const originalDisplay = await date.inputValue();
+    await dialog.getByLabel(en['server.serverName']).fill('Unsaved server name');
+    state.hosts[0] = { ...state.hosts[0], expires_at: renewedExpiry };
+    if (view === 'dashboard') {
+      const reads = state.listReads;
+      await page.clock.fastForward(3100);
+      await expect.poll(() => state.listReads).toBeGreaterThan(reads);
+      await expect(page.getByRole('row').filter({ hasText: 'idle-host' })).toContainText('Expired 14d');
+    }
+    await expect(date).toHaveValue(originalDisplay);
+    await dialog.getByRole('button', { name: 'OK', exact: true }).click();
+    await expect.poll(() => state.updated.length).toBe(1);
+    expect(state.updated[0].expected_expires_at).toBe(originalExpiry);
+    expect(new Date(state.updated[0].expires_at as string).toISOString()).toBe(new Date(originalExpiry).toISOString());
+    await expect(page.getByText(en['server.expiryChanged'], { exact: true })).toBeVisible();
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByLabel(en['server.serverName'])).toHaveValue('Unsaved server name');
+    expect(state.tagWrites).toBe(0);
+    expect(state.hosts[0].expires_at).toBe(renewedExpiry);
+
+    // Following the prompt obtains a new baseline rather than silently retrying the old draft.
+    await page.reload();
+    await openEditor();
+    await dialog.getByRole('button', { name: 'OK', exact: true }).click();
+    await expect.poll(() => state.updated.length).toBe(2);
+    expect(state.updated[1].expected_expires_at).toBe(renewedExpiry);
+    await expect(dialog).toBeHidden();
+    expect(state.tagWrites).toBe(1);
+    expect(state.errors).toEqual([]);
+  });
+}

@@ -69,6 +69,10 @@ func main() {
 	alertEngine := services.NewAlertEngine(db, time.Duration(cfg.AlertInterval)*time.Second, notifier)
 	alertEngine.Start()
 	webhookDispatcher := services.StartWebhookDispatcher(db, notifier)
+	var expiryRenewer *services.ExpiryRenewer
+	if cfg.AutoRenewExpiry {
+		expiryRenewer = services.StartExpiryRenewer(db, cfg.ExpiryTimezone)
+	}
 
 	// Shared SSH connection cache for interactive API calls (Docker management).
 	sshCache := services.NewSSHConnCache()
@@ -117,6 +121,9 @@ func main() {
 	collector.Stop()
 	alertEngine.Stop()
 	webhookDispatcher.Stop()
+	if expiryRenewer != nil {
+		expiryRenewer.Stop()
+	}
 	sshCache.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

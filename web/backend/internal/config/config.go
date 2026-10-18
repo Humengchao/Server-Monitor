@@ -8,6 +8,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
+	_ "time/tzdata"
 )
 
 type Config struct {
@@ -29,6 +31,8 @@ type Config struct {
 	// deployments keep their behavior; set ALLOW_REGISTRATION=false to close
 	// signup once the initial accounts exist.
 	AllowRegistration bool
+	AutoRenewExpiry   bool
+	ExpiryTimezone    *time.Location
 }
 
 // defaultTrustedProxies covers loopback and RFC1918 ranges, matching the
@@ -78,6 +82,14 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	autoRenewExpiry, err := loadBoolDefault("AUTO_RENEW_EXPIRY", true)
+	if err != nil {
+		return nil, err
+	}
+	expiryTimezone, err := time.LoadLocation(getEnv("EXPIRY_TIMEZONE", "Asia/Shanghai"))
+	if err != nil {
+		return nil, fmt.Errorf("EXPIRY_TIMEZONE: %w", err)
+	}
 	return &Config{
 		DatabaseURL:          dbURL,
 		JWTSecret:            jwtSecret,
@@ -91,6 +103,8 @@ func Load() (*Config, error) {
 		TrustedProxies:       trustedProxies,
 		AllowPrivateWebhooks: strings.EqualFold(strings.TrimSpace(os.Getenv("ALLOW_PRIVATE_WEBHOOKS")), "true"),
 		AllowRegistration:    allowRegistration,
+		AutoRenewExpiry:      autoRenewExpiry,
+		ExpiryTimezone:       expiryTimezone,
 	}, nil
 }
 

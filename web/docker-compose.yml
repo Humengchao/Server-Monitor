@@ -26,6 +26,8 @@ services:
       CORS_ORIGIN: http://${DOMAIN:-localhost:19080}
       POLL_INTERVAL: ${POLL_INTERVAL:-3}
       ALERT_INTERVAL: ${ALERT_INTERVAL:-30}
+      AUTO_RENEW_EXPIRY: ${AUTO_RENEW_EXPIRY:-true}
+      EXPIRY_TIMEZONE: ${EXPIRY_TIMEZONE:-Asia/Shanghai}
       # Alert webhooks may not target the host's private network unless this is
       # explicitly enabled. See README security notes.
       ALLOW_PRIVATE_WEBHOOKS: ${ALLOW_PRIVATE_WEBHOOKS:-false}

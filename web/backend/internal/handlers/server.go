@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -94,22 +95,23 @@ type CreateServerRequest struct {
 }
 
 type UpdateServerRequest struct {
-	Name            string     `json:"name" binding:"required"`
-	Host            string     `json:"host" binding:"required"`
-	Port            int        `json:"port"`
-	SSHUsername     string     `json:"ssh_username"`
-	SSHPassword     string     `json:"ssh_password"`
-	SSHKey          string     `json:"ssh_key"`
-	SSHHostKey      string     `json:"ssh_host_key"`
-	CredentialID    *uuid.UUID `json:"credential_id"`
-	ServerType      string     `json:"server_type"`
-	ExpiresAt       *time.Time `json:"expires_at"`
-	Notes           string     `json:"notes"`
-	BillingPrice    float64    `json:"billing_price"`
-	BillingCurrency string     `json:"billing_currency"`
-	BillingCycle    string     `json:"billing_cycle"`
-	TrafficLimit    int64      `json:"traffic_limit_bytes"`
-	PublicLocation  string     `json:"public_location"`
+	ExpectedExpiresAt json.RawMessage `json:"expected_expires_at"`
+	Name              string          `json:"name" binding:"required"`
+	Host              string          `json:"host" binding:"required"`
+	Port              int             `json:"port"`
+	SSHUsername       string          `json:"ssh_username"`
+	SSHPassword       string          `json:"ssh_password"`
+	SSHKey            string          `json:"ssh_key"`
+	SSHHostKey        string          `json:"ssh_host_key"`
+	CredentialID      *uuid.UUID      `json:"credential_id"`
+	ServerType        string          `json:"server_type"`
+	ExpiresAt         *time.Time      `json:"expires_at"`
+	Notes             string          `json:"notes"`
+	BillingPrice      float64         `json:"billing_price"`
+	BillingCurrency   string          `json:"billing_currency"`
+	BillingCycle      string          `json:"billing_cycle"`
+	TrafficLimit      int64           `json:"traffic_limit_bytes"`
+	PublicLocation    string          `json:"public_location"`
 }
 
 func normalizeServerConnection(name, host, username string, port int) (string, string, string, int, error) {
@@ -308,6 +310,14 @@ func (h *ServerHandler) Update(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	var expected *models.ExpiryExpectation
+	if len(req.ExpectedExpiresAt) > 0 {
+		expected = &models.ExpiryExpectation{}
+		if err := json.Unmarshal(req.ExpectedExpiresAt, &expected.ExpiresAt); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "expected_expires_at must be an RFC3339 timestamp or null"})
+			return
+		}
+	}
 	name, host, username, port, err := normalizeServerConnection(req.Name, req.Host, req.SSHUsername, req.Port)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -371,7 +381,11 @@ func (h *ServerHandler) Update(c *gin.Context) {
 		TrafficLimit:    req.TrafficLimit,
 		PublicLocation:  req.PublicLocation,
 	}
-	if err := models.UpdateServer(db, s); err != nil {
+	if err := models.UpdateServerWithExpiryExpectation(c.Request.Context(), db, s, expected); err != nil {
+		if errors.Is(err, models.ErrServerExpiryChanged) {
+			c.JSON(http.StatusConflict, gin.H{"error": "server expiry changed; reload before saving", "error_code": "expiry_changed"})
+			return
+		}
 		if err == sql.ErrNoRows {
 			c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
 			return

@@ -181,6 +181,8 @@ export const serversApi = {
     ssh_host_key?: string;
     credential_id?: string | null;
     expires_at?: string | null;
+    /** Expiry observed when the edit form opened; null guards an unset date. */
+    expected_expires_at?: string | null;
     billing_price?: number;
     billing_currency?: string;
     billing_cycle?: string;

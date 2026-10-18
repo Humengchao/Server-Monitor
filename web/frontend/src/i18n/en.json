@@ -208,6 +208,7 @@
   "pollError.other.short": "Failed",
   "server.operationFailed": "Operation failed",
   "server.updateFailed": "Update failed",
+  "server.expiryChanged": "The expiration date has changed. Refresh the page and reopen this form to load the updated date before saving.",
   "server.notFound": "Server not found",
   "server.empty": "No servers yet. Click \"Add Server\" to get started.",
   "server.filterByTag": "Filter by tag",
