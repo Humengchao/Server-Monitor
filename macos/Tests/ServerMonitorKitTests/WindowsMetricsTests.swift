@@ -111,7 +111,7 @@ struct PerServerThresholdTests {
         settings.notifyOnOffline = false
         settings.cpuThreshold = 90
         let recorder = Recorder()
-        let service = AlertService(settings: settings) { recorder.record($0, $1) }
+        let service = AlertService(settings: settings, delivery: { recorder.record($0, $1) })
 
         var server = Server(name: "web-1", host: "10.0.0.1", username: "root", authKind: .agent)
         server.cpuThreshold = 50
@@ -129,7 +129,7 @@ struct PerServerThresholdTests {
         settings.notifyOnOffline = false
         settings.cpuThreshold = 50
         let recorder = Recorder()
-        let service = AlertService(settings: settings) { recorder.record($0, $1) }
+        let service = AlertService(settings: settings, delivery: { recorder.record($0, $1) })
 
         var server = Server(name: "noisy", host: "10.0.0.2", username: "root", authKind: .agent)
         server.cpuThreshold = 0   // explicitly off, not "inherit"

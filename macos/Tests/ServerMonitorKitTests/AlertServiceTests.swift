@@ -30,9 +30,9 @@ struct AlertServiceTests {
         settings.memoryThreshold = memory
         settings.diskThreshold = disk
         let recorder = Recorder()
-        let service = AlertService(settings: settings) { title, body in
+        let service = AlertService(settings: settings, delivery: { title, body in
             recorder.record(title, body)
-        }
+        })
         return (service, settings, recorder)
     }
 
@@ -80,9 +80,9 @@ struct AlertServiceTests {
         settings.diskThreshold = 0
         let recorder = Recorder()
         var now = Date(timeIntervalSince1970: 1_000_000)
-        let service = AlertService(settings: settings, now: { now }) { title, body in
+        let service = AlertService(settings: settings, now: { now }, delivery: { title, body in
             recorder.record(title, body)
-        }
+        })
         let host = server
         for _ in 0..<3 { service.evaluate(server: host, status: .online(at: now), snapshot: snapshot(cpu: 95)) }
         #expect(recorder.count == 1)
