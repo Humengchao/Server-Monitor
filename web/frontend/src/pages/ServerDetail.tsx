@@ -260,22 +260,7 @@ export default function ServerDetail() {
     const submittedNotes = notes;
     setSavingNotes(true);
     try {
-      await serversApi.update(server.id, {
-        name: server.name,
-        host: server.host,
-        port: server.port,
-        ssh_username: server.ssh_username,
-        ssh_host_key: server.ssh_host_key || '',
-        credential_id: server.credential_id,
-        server_type: server.server_type || 'linux',
-        expires_at: server.expires_at || null,
-        billing_price: server.billing_price || 0,
-        billing_currency: server.billing_currency || 'CNY',
-        billing_cycle: server.billing_cycle || 'year',
-        traffic_limit_bytes: server.traffic_limit_bytes || 0,
-        public_location: server.public_location || '',
-        notes: submittedNotes,
-      });
+      await serversApi.updateNotes(savedServerId, submittedNotes);
       message.success(t('server.notesSaved'));
       setServer((current) => current?.id === savedServerId ? { ...current, notes: submittedNotes } : current);
       // Only the submitted text is saved. Edits typed while awaiting this

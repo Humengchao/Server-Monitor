@@ -26,6 +26,17 @@ public final class SessionManager: ObservableObject {
     @Published public private(set) var lastOpened: UUID?
 
     private let database: Database
+    private var terminals: [UUID: TerminalSession] = [:]
+
+    /// The session, including its terminal buffer and SSH process, belongs to
+    /// this manager rather than whichever sidebar page is currently visible.
+    func terminalSession(for id: UUID) -> TerminalSession {
+        if let existing = terminals[id] { return existing }
+        let terminal = TerminalSession(persistent: true)
+        terminal.onEnded = { [weak self] _ in self?.close(id) }
+        terminals[id] = terminal
+        return terminal
+    }
 
     public init(database: Database) {
         self.database = database
@@ -61,15 +72,18 @@ public final class SessionManager: ObservableObject {
 
     public func close(_ id: UUID) {
         guard let index = active.firstIndex(where: { $0.id == id }) else { return }
-        let session = active.remove(at: index)
-        try? database.save(SessionRecord(
-            id: session.id,
-            serverID: session.serverID,
-            serverName: session.serverName,
-            kind: session.kind,
-            startedAt: session.startedAt,
-            endedAt: Date()
-        ))
+        active.remove(at: index)
+        terminals.removeValue(forKey: id)?.close()
+        try? database.endSession(id: id)
+    }
+
+    public func close(serverID: UUID) {
+        for id in active.filter({ $0.serverID == serverID }).map(\.id) { close(id) }
+    }
+
+    /// Called synchronously at application termination, while the store is open.
+    public func closeAll() {
+        for id in active.map(\.id) { close(id) }
     }
 
     public func sessions(kind: SessionRecord.Kind) -> [ActiveSession] {

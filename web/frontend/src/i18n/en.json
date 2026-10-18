@@ -788,5 +788,9 @@
   "dashboard.resultCount": "Showing {{count}} / {{total}} hosts",
   "dashboard.clearFilters": "Clear filters",
   "dashboard.lastSample": "Last sample · {{time}}",
-  "dashboard.historicalMetrics": "Historical readings"
+  "dashboard.historicalMetrics": "Historical readings",
+  "alerts.previousPage": "Previous page",
+  "alerts.nextPage": "Next page",
+  "alerts.pageNumber": "Page {{count}}",
+  "batch.execUncertain": "Some commands may already have run. The result could not be confirmed; check the hosts before retrying."
 }

@@ -267,7 +267,7 @@ func (store *sftpFiles) Page(directory string, offset, limit int) (RemoteFileLis
 	if store.transport == nil {
 		return RemoteFileList{}, errors.New("SSH transport required")
 	}
-	session, err := store.transport.NewSession()
+	session, err := newSSHSession(store.context, store.transport)
 	if err != nil {
 		return RemoteFileList{}, err
 	}

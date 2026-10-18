@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  App, Button, Card, Col, Empty, Form, Input, InputNumber, Modal, Row, Segmented, Select,
+  Alert, App, Button, Card, Col, Empty, Form, Input, InputNumber, Modal, Row, Segmented, Select,
   Skeleton, Space, Switch, Table, Tag, Tooltip, Typography,
 } from 'antd';
 import {
@@ -10,6 +10,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { alertsApi, AlertEvent, AlertMetric, AlertRule, METRIC_UNITS, PERCENT_METRICS } from '../api/alerts';
+import type { AlertEventState } from '../api/alerts';
 import { serversApi, Server } from '../api/servers';
 import { usePolling } from '../hooks/usePolling';
 import { formatDateTime } from '../utils/format';
@@ -89,7 +90,12 @@ export default function Alerts() {
   const { message, modal } = App.useApp();
   const navigate = useNavigate();
   const [rules, setRules] = useState<AlertRule[]>([]);
-  const [events, setEvents] = useState<AlertEvent[]>([]);
+  const [eventPage, setEventPage] = useState<{ state: AlertEventState; cursor: string; previous: string[] }>({ state: 'active', cursor: '', previous: [] });
+  const [eventResult, setEventResult] = useState<{ page: typeof eventPage; events: AlertEvent[]; next?: string } | null>(null);
+  const events = eventResult?.page === eventPage ? eventResult.events : [];
+  const eventFilter = eventPage.state;
+  const [activeCount, setActiveCount] = useState<number | null>(null);
+  const [loadError, setLoadError] = useState(false);
   const [servers, setServers] = useState<Server[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<'events' | 'rules'>('events');
@@ -97,20 +103,64 @@ export default function Alerts() {
   const [savingRule, setSavingRule] = useState(false);
   const [editingRule, setEditingRule] = useState<AlertRule | null>(null);
   const [testing, setTesting] = useState(false);
+  const [pendingRules, setPendingRules] = useState<Set<string>>(new Set());
   const [form] = Form.useForm();
   const watchedMetric = Form.useWatch('metric', form) as AlertMetric | undefined;
+  const mountedRef = useRef(false);
+  const requestRef = useRef<AbortController | null>(null);
+  const mutationCountRef = useRef(0);
+  const togglingRef = useRef(new Set<string>());
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      requestRef.current?.abort();
+    };
+  }, []);
 
   const load = useCallback(async (showLoading = true) => {
+    if (!mountedRef.current || mutationCountRef.current > 0) return;
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
     if (showLoading) setLoading(true);
     try {
-      const [ruleRes, eventRes] = await Promise.all([alertsApi.listRules(), alertsApi.listEvents(false, 200)]);
+      const [ruleRes, eventRes, summaryRes] = await Promise.all([
+        alertsApi.listRules(controller.signal), alertsApi.eventPage(eventPage.state, eventPage.cursor, controller.signal),
+        alertsApi.summary(controller.signal),
+      ]);
+      if (!mountedRef.current || controller.signal.aborted || requestRef.current !== controller) return;
       setRules(ruleRes.data || []);
-      setEvents(eventRes.data || []);
+      setEventResult({ page: eventPage, events: eventRes.data.events || [], next: eventRes.data.next_cursor });
+      setActiveCount(summaryRes.data.active);
+      setLoadError(false);
     } catch {
+      if (!mountedRef.current || controller.signal.aborted || requestRef.current !== controller) return;
       if (showLoading) message.error(t('alerts.loadFailed'));
+      setLoadError(true);
+    } finally {
+      if (mountedRef.current && requestRef.current === controller) {
+        requestRef.current = null;
+        setLoading(false);
+      }
     }
-    if (showLoading) setLoading(false);
-  }, [message, t]);
+  }, [eventPage, message, t]);
+  const loadRef = useRef(load);
+  useEffect(() => { loadRef.current = load; }, [load]);
+
+  // A read started before a write must not undo the optimistic state. Wait for
+  // all current writes to finish, then fetch one authoritative snapshot.
+  const beginMutation = () => {
+    mutationCountRef.current++;
+    requestRef.current?.abort();
+    requestRef.current = null;
+    setLoading(false);
+  };
+  const finishMutation = () => {
+    mutationCountRef.current--;
+    if (mutationCountRef.current === 0) void loadRef.current(false);
+  };
 
   // Alerts change on the engine's cadence, not the collector's, so a slower
   // poll than the dashboard keeps this page current.
@@ -118,30 +168,24 @@ export default function Alerts() {
 
   useEffect(() => {
     const initial = window.setTimeout(() => load(), 0);
-    return () => window.clearTimeout(initial);
+    return () => { window.clearTimeout(initial); requestRef.current?.abort(); };
   }, [load]);
 
   useEffect(() => {
-    serversApi.list().then((res) => setServers(res.data || [])).catch(() => undefined);
+    const controller = new AbortController();
+    serversApi.list(controller.signal)
+      .then((res) => { if (!controller.signal.aborted) setServers(res.data || []); })
+      .catch(() => undefined);
+    return () => controller.abort();
   }, []);
 
-  const activeEvents = useMemo(() => events.filter((e) => !e.resolved_at), [events]);
-  const [eventFilter, setEventFilter] = useState<'active' | 'resolved' | 'all'>('active');
   // Rules a reader needs to act on come first: currently firing, then armed,
   // then paused. Creation order buries a firing rule under paused ones.
   const sortedRules = useMemo(() => {
-    const firingByRule = new Map<string, number>();
-    for (const e of events) {
-      if (!e.resolved_at && e.rule_id) firingByRule.set(e.rule_id, (firingByRule.get(e.rule_id) || 0) + 1);
-    }
-    const rank = (r: AlertRule) => (firingByRule.get(r.id) ? 0 : r.enabled ? 1 : 2);
+    const rank = (r: AlertRule) => (r.firing_count > 0 ? 0 : r.enabled ? 1 : 2);
     return [...rules].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
-  }, [rules, events]);
-  const shownEvents = useMemo(() => {
-    if (eventFilter === 'active') return events.filter((e) => !e.resolved_at);
-    if (eventFilter === 'resolved') return events.filter((e) => e.resolved_at);
-    return events;
-  }, [events, eventFilter]);
+  }, [rules]);
+  const shownEvents = events;
   const enabledRules = useMemo(() => rules.filter((r) => r.enabled).length, [rules]);
   const coveredServers = useMemo(() => {
     if (rules.some((r) => r.enabled && !r.server_id)) return servers.length;
@@ -185,26 +229,33 @@ export default function Alerts() {
       webhook_url: String(values.webhook_url || '').trim(),
     };
     setSavingRule(true);
+    beginMutation();
     try {
       if (editingRule) {
         await alertsApi.updateRule(editingRule.id, payload);
+        if (!mountedRef.current) return;
         message.success(t('alerts.ruleUpdated'));
       } else {
         await alertsApi.createRule(payload);
+        if (!mountedRef.current) return;
         message.success(t('alerts.ruleCreated'));
       }
       setModalOpen(false);
       setEditingRule(null);
       form.resetFields();
-      load(false);
     } catch (err: unknown) {
-      message.error(apiError(err, t('alerts.saveFailed')));
+      if (mountedRef.current) message.error(apiError(err, t('alerts.saveFailed')));
     } finally {
-      setSavingRule(false);
+      finishMutation();
+      if (mountedRef.current) setSavingRule(false);
     }
   };
 
   const handleToggle = async (rule: AlertRule, enabled: boolean) => {
+    if (togglingRef.current.has(rule.id)) return;
+    togglingRef.current.add(rule.id);
+    setPendingRules(new Set(togglingRef.current));
+    beginMutation();
     // Optimistic: the switch should feel instant even though the write is a
     // full rule update round trip.
     setRules((prev) => prev.map((r) => (r.id === rule.id ? { ...r, enabled } : r)));
@@ -219,10 +270,15 @@ export default function Alerts() {
         enabled,
         webhook_url: rule.webhook_url,
       });
-      load(false);
     } catch {
-      setRules((prev) => prev.map((r) => (r.id === rule.id ? { ...r, enabled: !enabled } : r)));
-      message.error(t('alerts.saveFailed'));
+      if (mountedRef.current) {
+        setRules((prev) => prev.map((r) => (r.id === rule.id ? { ...r, enabled: rule.enabled } : r)));
+        message.error(t('alerts.saveFailed'));
+      }
+    } finally {
+      togglingRef.current.delete(rule.id);
+      if (mountedRef.current) setPendingRules(new Set(togglingRef.current));
+      finishMutation();
     }
   };
 
@@ -233,12 +289,14 @@ export default function Alerts() {
       okText: t('common.delete'),
       okType: 'danger',
       onOk: async () => {
+        beginMutation();
         try {
           await alertsApi.deleteRule(rule.id);
-          message.success(t('alerts.ruleDeleted'));
-          load(false);
+          if (mountedRef.current) message.success(t('alerts.ruleDeleted'));
         } catch {
-          message.error(t('alerts.deleteFailed'));
+          if (mountedRef.current) message.error(t('alerts.deleteFailed'));
+        } finally {
+          finishMutation();
         }
       },
     });
@@ -313,7 +371,8 @@ export default function Alerts() {
       key: 'enabled',
       width: 90,
       render: (_: unknown, rule: AlertRule) => (
-        <Switch size="small" checked={rule.enabled} onChange={(checked) => handleToggle(rule, checked)} />
+        <Switch size="small" checked={rule.enabled} loading={pendingRules.has(rule.id)}
+          aria-label={`${t('alerts.enabled')}: ${rule.name}`} onChange={(checked) => handleToggle(rule, checked)} />
       ),
     },
     {
@@ -322,8 +381,8 @@ export default function Alerts() {
       width: 100,
       render: (_: unknown, rule: AlertRule) => (
         <Space size={2}>
-          <Button type="text" aria-label={t('common.edit')} icon={<EditOutlined />} onClick={() => openEdit(rule)} />
-          <Button type="text" danger aria-label={t('common.delete')} icon={<DeleteOutlined />} onClick={() => handleDelete(rule)} />
+          <Button type="text" disabled={pendingRules.has(rule.id)} aria-label={t('common.edit')} icon={<EditOutlined />} onClick={() => openEdit(rule)} />
+          <Button type="text" danger disabled={pendingRules.has(rule.id)} aria-label={t('common.delete')} icon={<DeleteOutlined />} onClick={() => handleDelete(rule)} />
         </Space>
       ),
     },
@@ -338,7 +397,7 @@ export default function Alerts() {
           <Text type="secondary">{t('alerts.subtitle')}</Text>
         </div>
         <Space wrap className="page-actions">
-          <Button icon={<ReloadOutlined />} onClick={() => load()} loading={loading}>{t('common.refresh')}</Button>
+          <Button aria-label={t('common.refresh')} icon={<ReloadOutlined />} onClick={() => load()} loading={loading}>{t('common.refresh')}</Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>{t('alerts.addRule')}</Button>
         </Space>
       </div>
@@ -347,9 +406,9 @@ export default function Alerts() {
           inside it resolves its span percentage against the grid track instead
           of the row, collapsing each tile to a quarter of its cell. */}
       <div className="overview-grid">
-        <Card className={`overview-card ${activeEvents.length ? 'overview-card-danger' : 'overview-card-success'}`} variant="borderless">
-          <div className="overview-icon">{activeEvents.length ? <AlertOutlined /> : <CheckCircleOutlined />}</div>
-          <div><Text type="secondary">{t('alerts.active')}</Text><strong>{activeEvents.length}</strong></div>
+        <Card className={`overview-card ${activeCount === null ? 'overview-card-muted' : activeCount ? 'overview-card-danger' : 'overview-card-success'}`} variant="borderless">
+          <div className="overview-icon">{activeCount ? <AlertOutlined /> : <CheckCircleOutlined />}</div>
+          <div><Text type="secondary">{t('alerts.active')}</Text><strong>{activeCount ?? '—'}</strong></div>
         </Card>
         <Card className="overview-card overview-card-primary" variant="borderless">
           <div className="overview-icon"><BellOutlined /></div>
@@ -374,16 +433,16 @@ export default function Alerts() {
             { label: t('alerts.rules'), value: 'rules', icon: <BellOutlined /> },
           ]}
         />
-        {view === 'events' && events.length > 0 && (
+        {view === 'events' && (
           <Space size={12}>
             {/* Defaults to "active": on a page whose job is to show what is
                 broken, resolved history is context, not the headline. */}
             <Segmented
               size="small"
               value={eventFilter}
-              onChange={(value) => setEventFilter(value as typeof eventFilter)}
+              onChange={(value) => setEventPage({ state: value as AlertEventState, cursor: '', previous: [] })}
               options={[
-                { label: `${t('alerts.filterActive')} ${activeEvents.length}`, value: 'active' },
+                { label: `${t('alerts.filterActive')} ${activeCount ?? '—'}`, value: 'active' },
                 { label: t('alerts.filterResolved'), value: 'resolved' },
                 { label: t('alerts.filterAll'), value: 'all' },
               ]}
@@ -393,7 +452,8 @@ export default function Alerts() {
         )}
       </div>
 
-      {loading ? (
+      {loadError && <Alert type="warning" showIcon title={t('alerts.loadFailed')} />}
+      {(loading || (!loadError && eventResult?.page !== eventPage)) ? (
         <Card><Skeleton active paragraph={{ rows: 6 }} /></Card>
       ) : view === 'rules' ? (
         <Card className="panel-card" styles={{ body: { padding: 0 } }}>
@@ -449,6 +509,18 @@ export default function Alerts() {
           ))}
         </div>
       )}
+
+      {view === 'events' && <Space style={{ marginTop: 16 }}>
+        <Button disabled={loading || !eventPage.previous.length} onClick={() => setEventPage(current => ({
+          ...current, cursor: current.previous[current.previous.length - 1], previous: current.previous.slice(0, -1),
+        }))}>{t('alerts.previousPage')}</Button>
+        <Text>{t('alerts.pageNumber', { count: eventPage.previous.length + 1 })}</Text>
+        <Button disabled={loading || eventResult?.page !== eventPage || !eventResult.next} onClick={() => {
+          if (eventResult?.page === eventPage && eventResult.next) setEventPage({
+            ...eventPage, cursor: eventResult.next, previous: [...eventPage.previous, eventPage.cursor],
+          });
+        }}>{t('alerts.nextPage')}</Button>
+      </Space>}
 
       <Modal
         title={editingRule ? t('alerts.editRule') : t('alerts.addRule')}

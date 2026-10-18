@@ -1,6 +1,7 @@
 package models
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"time"
@@ -53,7 +54,11 @@ type PublicServerMetric struct {
 // each server's creation time, otherwise a host added yesterday would advertise
 // a 3% SLA.
 func GetPublicServerMetrics(db *sql.DB, since30d, until time.Time) ([]PublicServerMetric, error) {
-	rows, err := db.Query(`
+	return GetPublicServerMetricsContext(context.Background(), db, since30d, until)
+}
+
+func GetPublicServerMetricsContext(ctx context.Context, db *sql.DB, since30d, until time.Time) ([]PublicServerMetric, error) {
+	rows, err := db.QueryContext(ctx, `
 		SELECT COALESCE(s.public_location, ''),
 			COALESCE((
 				SELECT JSON_AGG(JSON_BUILD_OBJECT('name', t.name, 'color', t.color) ORDER BY t.name)::TEXT

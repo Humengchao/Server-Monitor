@@ -2,7 +2,7 @@ name: Build and Deploy
 on:
   push:
     branches: [main]
-    paths: ['web/**', '.github/workflows/deploy.yml']
+    paths: ['web/**', 'shared/**', '.github/workflows/deploy.yml']
   workflow_dispatch:
 concurrency:
   group: server-monitor-production
@@ -12,20 +12,39 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: monitor_test
+          POSTGRES_PASSWORD: monitor_test
+          POSTGRES_DB: monitor_test
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready -U monitor_test" --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      SERVER_MONITOR_TEST_DATABASE_URL: postgres://monitor_test:monitor_test@localhost:5432/monitor_test?sslmode=disable
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: web/backend/go.mod
-          cache-dependency-path: web/backend/go.sum
-      - run: go test -race ./... && go vet ./...
-        working-directory: web/backend
-      - run: bash web/scripts/deploy_test.sh
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
           cache-dependency-path: web/frontend/package-lock.json
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: web/backend/go.mod
+          cache-dependency-path: web/backend/go.sum
+      - name: Test backend
+        shell: bash
+        run: |
+          go test -race ./... 2>&1 | tee "$RUNNER_TEMP/go-tests.log"
+          go vet ./...
+        working-directory: web/backend
+      - name: Report backend failures
+        if: failure()
+        run: node shared/scripts/ci-errors.mjs "$RUNNER_TEMP/go-tests.log"
+      - run: bash web/scripts/deploy_test.sh
+      - run: node shared/scripts/generate-probes.mjs --check
       - run: npm ci && npm run lint && npm run build && npx playwright install --with-deps chromium && npm run test:smoke
         working-directory: web/frontend
       - uses: actions/upload-artifact@v4

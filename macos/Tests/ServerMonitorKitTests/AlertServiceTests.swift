@@ -71,6 +71,33 @@ struct AlertServiceTests {
         #expect(recorder.count == 1)
     }
 
+    @Test func newBreachDuringCooldownAlertsWhenCooldownExpires() {
+        let settings = AppSettings()
+        settings.notificationsEnabled = true
+        settings.notifyOnOffline = false
+        settings.cpuThreshold = 80
+        settings.memoryThreshold = 0
+        settings.diskThreshold = 0
+        let recorder = Recorder()
+        var now = Date(timeIntervalSince1970: 1_000_000)
+        let service = AlertService(settings: settings, now: { now }) { title, body in
+            recorder.record(title, body)
+        }
+        let host = server
+        for _ in 0..<3 { service.evaluate(server: host, status: .online(at: now), snapshot: snapshot(cpu: 95)) }
+        #expect(recorder.count == 1)
+        service.evaluate(server: host, status: .online(at: now), snapshot: snapshot(cpu: 10))
+        now += 60
+        for _ in 0..<5 { service.evaluate(server: host, status: .online(at: now), snapshot: snapshot(cpu: 95)) }
+        #expect(recorder.count == 1, "a new episode still respects the previous cooldown")
+        now += 14 * 60
+        service.evaluate(server: host, status: .online(at: now), snapshot: snapshot(cpu: 95))
+        #expect(recorder.count == 2, "a suppressed episode must be retried after cooldown")
+        now += 60 * 60
+        service.evaluate(server: host, status: .online(at: now), snapshot: snapshot(cpu: 95))
+        #expect(recorder.count == 2, "the same episode still alerts only once")
+    }
+
     @Test func droppingBelowTheLimitResetsTheRun() {
         let (service, _, recorder) = makeService(cpu: 80)
         let host = server

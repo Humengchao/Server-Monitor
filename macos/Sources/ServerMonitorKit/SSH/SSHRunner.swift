@@ -152,7 +152,8 @@ public struct SSHRunner: Sendable {
         }
 
         if target.port != 22, case .sshConfigAlias = target.credential {} else if target.port != 22 {
-            arguments += ["-p", String(target.port)]
+            // -p means something different to scp; -o works for both clients.
+            arguments += ["-o", "Port=\(target.port)"]
         }
         return arguments
     }
@@ -221,6 +222,12 @@ public struct SSHRunner: Sendable {
               let password = Keychain.password(serverID: target.serverID)
         else { return nil }
 
+        return try makeAskpass(password: password)
+    }
+
+    /// The editor can test a draft password without writing it to Keychain.
+    static func makeAskpass(password: String) throws -> Askpass {
+
         let directory = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("sm-askpass-\(UUID().uuidString)")
         try FileManager.default.createDirectory(
@@ -228,6 +235,8 @@ public struct SSHRunner: Sendable {
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700]
         )
+        var completed = false
+        defer { if !completed { try? FileManager.default.removeItem(at: directory) } }
 
         let secretURL = directory.appendingPathComponent("secret")
         try Data(password.utf8).write(to: secretURL, options: [.atomic])
@@ -252,7 +261,40 @@ public struct SSHRunner: Sendable {
         environment["SM_SECRET"] = secretURL.path
         environment["DISPLAY"] = environment["DISPLAY"] ?? ":0"
 
+        completed = true
         return Askpass(environment: environment, directory: directory)
+    }
+
+    /// A fresh authentication attempt must not borrow an already-authenticated
+    /// ControlMaster, or an incorrect draft password would appear to work.
+    static func connectionTestArguments(for target: SSHTarget) -> [String] {
+        var arguments = baseArguments(for: target, controlPath: "none")
+        removeOption("ControlMaster=auto", from: &arguments)
+        removeOption("ControlPersist=300", from: &arguments)
+        arguments += ["-o", "ControlMaster=no", "-o", "ControlPersist=no"]
+        return arguments + [target.sshDestination, "echo SM_CONNECTION_OK"]
+    }
+
+    public func testConnection(on target: SSHTarget, password: String? = nil) async throws {
+        let askpass: Askpass?
+        if case .password = target.credential {
+            guard let secret = password ?? Keychain.password(serverID: target.serverID) else {
+                throw SSHError.missingCredential
+            }
+            askpass = try Self.makeAskpass(password: secret)
+        } else {
+            askpass = nil
+        }
+        defer { askpass?.cleanUp() }
+        let output = try await Self.execute(
+            executable: "/usr/bin/ssh",
+            arguments: Self.connectionTestArguments(for: target),
+            timeout: 20,
+            environment: askpass?.environment
+        )
+        guard output.lines().contains(where: { $0.trimmingCharacters(in: .whitespaces) == "SM_CONNECTION_OK" }) else {
+            throw SSHError.commandFailed("The host did not confirm the test connection")
+        }
     }
 
     /// Drops the multiplexed connection for a host, e.g. after its settings

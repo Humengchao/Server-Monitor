@@ -19,7 +19,7 @@ namespace ServerMonitor.App.Platform;
 /// The icon is generated rather than a static asset, because it carries the
 /// number worth glancing at — the offline count if anything is down, otherwise
 /// the peak CPU — the way the menu-bar item does. That is also why it is
-/// redrawn on publish rather than on a timer.
+/// redrawn on observed status changes, even when the main window is hidden.
 /// </remarks>
 public sealed class TrayIcon : IDisposable
 {
@@ -66,7 +66,7 @@ public sealed class TrayIcon : IDisposable
     /// Redraws the icon and tooltip if the fleet's summary has changed.
     /// </summary>
     /// <remarks>
-    /// Called on every publish. The early return matters: creating an
+    /// Called on every observed result. The early return matters: creating an
     /// <see cref="Icon"/> allocates a GDI handle, and doing that nine times a
     /// minute for an unchanged picture leaks handles until the process runs
     /// out of them.
@@ -193,7 +193,7 @@ public sealed class TrayIcon : IDisposable
         {
             foreach (var server in offline.Take(8))
             {
-                var reason = _monitor.Status.TryGetValue(server.Id, out var status) ? status.Reason : "";
+                var reason = _monitor.ObservedStatus.TryGetValue(server.Id, out var status) ? status.Reason : "";
                 var item = new ToolStripMenuItem($"● {server.Name}")
                 {
                     ForeColor = Color.FromArgb(0xC0, 0x10, 0x20),

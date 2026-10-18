@@ -3,7 +3,8 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { useTranslation } from 'react-i18next';
 import { MetricPoint } from '../api/servers';
 import { DarkModeContext } from '../contexts/DarkModeContext';
-import { formatDate, formatTime } from '../utils/format';
+import { formatDate, formatDateTime, formatTime } from '../utils/format';
+import { sampleMetrics } from '../utils/chartSampling';
 
 interface Props {
   history: MetricPoint[];
@@ -13,13 +14,6 @@ interface SeriesSpec {
   key: string;
   label: string;
   color: string;
-}
-
-// Downsample data to keep chart rendering performant.
-function downsample<T>(data: T[], maxPoints: number): T[] {
-  if (data.length <= maxPoints) return data;
-  const step = data.length / maxPoints;
-  return Array.from({ length: maxPoints }, (_, i) => data[Math.floor(i * step)]);
 }
 
 /**
@@ -33,7 +27,7 @@ function pickRateUnit(peak: number): { divisor: number; suffix: string } {
   return { divisor: 1, suffix: 'B/s' };
 }
 
-function formatAxisTime(iso: string, spansMultipleDays: boolean, lang: string): string {
+function formatAxisTime(iso: number, spansMultipleDays: boolean, lang: string): string {
   const time = formatTime(iso, lang, { hour: '2-digit', minute: '2-digit' });
   if (!spansMultipleDays) return time;
   return `${formatDate(iso, lang, { month: '2-digit', day: '2-digit' })} ${time}`;
@@ -49,15 +43,16 @@ interface TooltipEntry {
 interface ChartTooltipProps {
   active?: boolean;
   payload?: TooltipEntry[];
-  label?: string;
+  label?: string | number;
   unit: string;
 }
 
 function ChartTooltip({ active, payload, label, unit }: ChartTooltipProps) {
+  const { i18n } = useTranslation();
   if (!active || !payload?.length) return null;
   return (
     <div className="chart-tooltip">
-      <span className="chart-tooltip-time">{label}</span>
+      <span className="chart-tooltip-time">{typeof label === 'number' ? formatDateTime(label, i18n.language) : label}</span>
       {payload.map((entry) => (
         <span key={entry.dataKey} className="chart-tooltip-row">
           <i style={{ background: entry.color }} />
@@ -70,7 +65,7 @@ function ChartTooltip({ active, payload, label, unit }: ChartTooltipProps) {
 }
 
 /** One row of the chart dataset: a formatted timestamp plus numeric series. */
-type ChartRow = { time: string } & Record<string, string | number>;
+type ChartRow = { time: number } & Record<string, number>;
 
 function MetricPanel({
   title, data, series, unit, dark, domain,
@@ -82,6 +77,8 @@ function MetricPanel({
   dark: boolean;
   domain?: [number, number];
 }) {
+  const { i18n } = useTranslation();
+  const spansMultipleDays = data.length > 1 && data[data.length - 1].time - data[0].time > 86400000;
   const grid = dark ? 'rgba(255,255,255,.08)' : 'rgba(24,32,51,.07)';
   const axis = dark ? 'rgba(226,232,248,.5)' : 'rgba(85,95,120,.75)';
 
@@ -111,6 +108,9 @@ function MetricPanel({
             <CartesianGrid stroke={grid} vertical={false} />
             <XAxis
               dataKey="time"
+              type="number"
+              domain={['dataMin', 'dataMax']}
+              tickFormatter={(value: number) => formatAxisTime(value, spansMultipleDays, i18n.language)}
               tick={{ fontSize: 11, fill: axis }}
               tickLine={false}
               axisLine={{ stroke: grid }}
@@ -154,18 +154,14 @@ function MetricPanel({
 }
 
 function MetricsChart({ history }: Props) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const dark = useContext(DarkModeContext);
 
   const { rows, netUnit, diskUnit, hasLatency } = useMemo(() => {
     if (!history || history.length === 0) {
       return { rows: [], netUnit: { divisor: 1, suffix: 'B/s' }, diskUnit: { divisor: 1, suffix: 'B/s' }, hasLatency: false };
     }
-    const sampled = downsample(history, 300);
-    const first = new Date(sampled[0].recorded_at);
-    const last = new Date(sampled[sampled.length - 1].recorded_at);
-    const spansMultipleDays = last.getTime() - first.getTime() > 24 * 3600 * 1000;
-
+    const sampled = sampleMetrics(history);
     const netPeak = Math.max(...sampled.map((p) => Math.max(p.network_rx_bytes, p.network_tx_bytes)), 0);
     const diskPeak = Math.max(...sampled.map((p) => Math.max(p.disk_rx_bytes, p.disk_tx_bytes)), 0);
     const net = pickRateUnit(netPeak);
@@ -176,7 +172,7 @@ function MetricsChart({ history }: Props) {
       diskUnit: disk,
       hasLatency: sampled.some((p) => p.latency_ms > 0),
       rows: sampled.map((p) => ({
-        time: formatAxisTime(p.recorded_at, spansMultipleDays, i18n.language),
+        time: Date.parse(p.recorded_at),
         cpu: Math.round(p.cpu_percent * 10) / 10,
         memory: p.memory_total ? Math.round((p.memory_used / p.memory_total) * 1000) / 10 : 0,
         rx: Math.round((p.network_rx_bytes / net.divisor) * 100) / 100,
@@ -188,7 +184,7 @@ function MetricsChart({ history }: Props) {
         latency: p.latency_ms,
       })),
     };
-  }, [history, i18n.language]);
+  }, [history]);
 
   if (rows.length === 0) {
     return <div className="chart-empty">{t('metrics.noData')}</div>;

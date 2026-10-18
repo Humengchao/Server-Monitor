@@ -39,3 +39,8 @@ vnstat-install-probe = for m in apt-get dnf yum apk pacman zypper; do command -v
 # 128 KB firmware variable store on the storage card of every UEFI host — so
 # the check also drops anything mounted under /sys, /proc or /dev.
 pseudo-filesystem-types = tmpfs devtmpfs overlay squashfs udev none efivarfs ramfs
+
+# Web stores root filesystem usage and Docker presence, while the native
+# clients also render per-mount inventories and engine counts.
+web-disk-usage = df -P -B1 /
+web-docker-info = if command -v docker >/dev/null 2>&1; then echo installed; timeout 5 docker info --format '{{.ServerVersion}}' 2>/dev/null || timeout 5 sudo -n docker info --format '{{.ServerVersion}}' 2>/dev/null || true; else echo absent; fi

@@ -5,76 +5,71 @@ import Testing
 @Suite("SFTP listing")
 @MainActor
 struct SFTPClientTests {
+    private func listing(_ rows: [[String]]) -> String {
+        (["SM-FILES-V1"] + rows.flatMap { $0 } + ["SM-FILES-END", ""]).joined(separator: "\0")
+    }
 
-    @Test func parsesLongIsoListing() {
-        let output = """
-        total 28
-        drwxr-xr-x  4 root root  4096 2026-08-20 11:03 apps
-        -rw-r--r--  1 root root  1024 2026-08-25 09:15 notes.txt
-        lrwxrwxrwx  1 root root     7 2026-01-02 00:00 current -> apps/v2
-        """
-        let files = SFTPClient.parseListing(output, parent: "/srv")
+    private func entry(_ name: String, type: String = "f") -> [String] {
+        [name, type, "1024", "1787656500.25", type == "d" ? "drwxr-xr-x" : "-rw-r--r--", "root"]
+    }
 
+    @Test func parsesStructuredListingAndKeepsDirectoriesFirst() throws {
+        let files = try SFTPClient.parseListing(listing([
+            entry("notes.txt"), entry("apps", type: "d"), entry("current -> release", type: "l"),
+        ]), parent: "/srv")
         #expect(files.count == 3)
-        // Directories sort first.
         #expect(files[0].name == "apps")
         #expect(files[0].isDirectory)
         #expect(files[0].path == "/srv/apps")
-
-        let notes = files.first { $0.name == "notes.txt" }
-        #expect(notes?.size == 1024)
-        #expect(notes?.isDirectory == false)
-        #expect(notes?.owner == "root")
-
-        // A symlink keeps its own name, not the "-> target" suffix.
-        let link = files.first { $0.isSymlink }
-        #expect(link?.name == "current")
+        let link = try #require(files.first { $0.isSymlink })
+        #expect(link.name == "current -> release")
+        let notes = try #require(files.first { $0.name == "notes.txt" })
+        #expect(notes.size == 1024)
+        #expect(notes.owner == "root")
+        #expect(notes.modified?.timeIntervalSince1970 == 1787656500.25)
     }
 
-    @Test func keepsSpacesInFileNames() {
-        let output = "-rw-r--r--  1 root root  10 2026-08-25 09:15 my report final.txt"
-        let files = SFTPClient.parseListing(output, parent: "/data")
-        #expect(files.count == 1)
-        #expect(files[0].name == "my report final.txt")
-        #expect(files[0].path == "/data/my report final.txt")
+    @Test func exactNamesRemainDistinctThroughDeletionCommand() throws {
+        let names = ["keep backup", "keep  backup", " leading and trailing ", "line\nbreak", "tab\tname", "it's a -> file", ".hidden", "\u{76EE}\u{5F55}"]
+        let files = try SFTPClient.parseListing(listing(names.map { entry($0) }), parent: "/data")
+        #expect(Set(files.map(\.name)) == Set(names))
+        #expect(Set(files.map(\.id)).count == names.count)
+        for file in files {
+            #expect(file.path == "/data/" + file.name)
+            #expect(try SFTPClient.removeCommand(file) == "rm -f -- " + SFTPClient.quote("/data/" + file.name))
+        }
     }
 
-    @Test func skipsTotalLineAndDotEntries() {
-        let output = """
-        total 4
-        drwxr-xr-x 2 root root 4096 2026-08-25 09:15 .
-        drwxr-xr-x 3 root root 4096 2026-08-25 09:15 ..
-        -rw-r--r-- 1 root root    0 2026-08-25 09:15 .hidden
-        """
-        let files = SFTPClient.parseListing(output, parent: "/x")
-        // Dotfiles stay; . and .. do not.
-        #expect(files.count == 1)
-        #expect(files[0].name == ".hidden")
+    @Test func rootAndEmptyDirectoryAreRepresentedExactly() throws {
+        let files = try SFTPClient.parseListing(listing([entry("a")]), parent: "/")
+        #expect(files[0].path == "/a")
+        #expect(try SFTPClient.parseListing(listing([]), parent: "/empty").isEmpty)
     }
 
-    @Test func parentWithTrailingSlashDoesNotDoubleUp() {
-        let files = SFTPClient.parseListing(
-            "-rw-r--r-- 1 root root 1 2026-08-25 09:15 a.txt",
-            parent: "/"
-        )
-        #expect(files[0].path == "/a.txt")
+    @Test func ambiguousOrTruncatedListingsFailClosed() {
+        let valid = listing([entry("ok")])
+        for output in [
+            "-rw-r--r-- 1 root root 5 2026-08-25 09:15 ok.txt",
+            String(valid.dropLast()),
+            "SM-FILES-V1\0name\0SM-FILES-END\0",
+            listing([entry("bad\u{FFFD}name")]),
+            listing([entry("../other")]),
+            listing([entry("same"), entry("same")]),
+        ] {
+            #expect(throws: SFTPClient.Failure.self) { try SFTPClient.parseListing(output, parent: "/tmp") }
+        }
     }
 
-    @Test func ignoresMalformedLines() {
-        let output = """
-        garbage
-        -rw-r--r-- 1 root root 5 2026-08-25 09:15 ok.txt
-        short line
-        """
-        let files = SFTPClient.parseListing(output, parent: "/tmp")
-        #expect(files.count == 1)
-        #expect(files[0].name == "ok.txt")
+    @Test func refusesUnsafeMutationPaths() {
+        let file = RemoteFile(name: "..", path: "/data/..", size: 0, modified: nil,
+                              isDirectory: true, isSymlink: false, mode: "drwxr-xr-x", owner: "root")
+        #expect(throws: SFTPClient.Failure.self) { try SFTPClient.removeCommand(file) }
+        #expect(!SFTPClient.isFileName("../../target"))
+        #expect(SFTPClient.isFileName(" name \n"))
     }
 
     @Test func quotingEscapesSingleQuotes() {
-        // A remote name is filesystem data reaching a shell; it must not break out.
-        let quoted = SFTPClient.quote("it's a file; rm -rf /")
-        #expect(quoted == "'it'\\''s a file; rm -rf /'")
+        #expect(SFTPClient.quote("it's a file; rm -rf /") == "'it'\\''s a file; rm -rf /'")
     }
 }
 

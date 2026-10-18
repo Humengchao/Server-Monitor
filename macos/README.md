@@ -14,7 +14,7 @@ than sharing its collection logic — this app is standalone.
 ├── AlertService        offline/threshold notifications, debounced
 ├── MetricsCollector    one SSH round trip -> parsed snapshot (actor)
 ├── SSHRunner           system /usr/bin/ssh + ControlMaster multiplexing
-├── SFTPClient          remote browsing (ls) and transfer (scp)
+├── SFTPClient          NUL-delimited directory records (GNU find) + scp
 └── Database            SQLite via GRDB: servers, snippets, identities,
                         metric history, session history
 ```

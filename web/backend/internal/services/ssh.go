@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -155,6 +156,10 @@ func DialSSH(host string, port int, username, password, key, hostKey string) (*s
 // once the handshake completes. TCP connection establishment and the SSH
 // handshake share one timeout rather than each receiving a fresh budget.
 func dialSSHClientConn(host string, port int, username, password, key, hostKey string, timeout time.Duration) (*ssh.Client, net.Conn, error) {
+	return dialSSHClientConnContext(context.Background(), host, port, username, password, key, hostKey, timeout)
+}
+
+func dialSSHClientConnContext(ctx context.Context, host string, port int, username, password, key, hostKey string, timeout time.Duration) (*ssh.Client, net.Conn, error) {
 	config, err := buildSSHClientConfig(username, password, key, hostKey, timeout)
 	if err != nil {
 		return nil, nil, err
@@ -162,7 +167,7 @@ func dialSSHClientConn(host string, port int, username, password, key, hostKey s
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	deadline := time.Now().Add(timeout)
 	dialer := net.Dialer{Deadline: deadline}
-	tcpConn, err := dialer.Dial("tcp", addr)
+	tcpConn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, nil, fmt.Errorf("ssh dial: %w", err)
 	}
@@ -170,10 +175,17 @@ func dialSSHClientConn(host string, port int, username, password, key, hostKey s
 		tcpConn.Close()
 		return nil, nil, fmt.Errorf("ssh deadline: %w", err)
 	}
+	// This connection is not shared until the handshake succeeds.
+	stopCancel := context.AfterFunc(ctx, func() { _ = tcpConn.Close() })
+	defer stopCancel()
 	sshConn, chans, reqs, err := ssh.NewClientConn(tcpConn, addr, config)
 	if err != nil {
 		tcpConn.Close()
 		return nil, nil, fmt.Errorf("ssh handshake: %w", err)
+	}
+	if !stopCancel() || ctx.Err() != nil {
+		_ = tcpConn.Close()
+		return nil, nil, ctx.Err()
 	}
 	if err := tcpConn.SetDeadline(time.Time{}); err != nil {
 		// The transport is live; a failed reset only risks a spurious timeout.

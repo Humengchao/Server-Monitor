@@ -1,15 +1,17 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Alert, Button, Empty, Input, Result, Segmented, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import { ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { hostOpsApi, ListeningPort, PortExposure, exposureColor } from '../api/hostops';
 import { usePolling } from '../hooks/usePolling';
+import { useHostPanel } from '../hooks/useHostPanel';
 
 const { Text } = Typography;
 
 // Listening sockets change rarely; this is a page you read, not a monitor you
 // watch. Refreshing on demand plus a slow tick is enough.
 const REFRESH_MS = 30000;
+const NO_PORTS: ListeningPort[] = [];
 
 interface Props {
   serverId: string;
@@ -31,42 +33,13 @@ const WELL_KNOWN: Record<number, string> = {
 
 export default function PortTable({ serverId }: Props) {
   const { t } = useTranslation();
-  const [ports, setPorts] = useState<ListeningPort[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data, loading, error: loadError, load } = useHostPanel(serverId, hostOpsApi.ports);
+  const ports = data?.ports || NO_PORTS;
+  const total = data?.total || 0;
+  const error = loadError === null ? null : loadError || t('port.loadFailed');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<ExposureFilter>('all');
-  const abortRef = useRef<AbortController | null>(null);
-
-  const load = useCallback(async (showLoading = true) => {
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-    if (showLoading) setLoading(true);
-    try {
-      const res = await hostOpsApi.ports(serverId, controller.signal);
-      setPorts(res.data.ports || []);
-      setTotal(res.data.total || 0);
-      setError(null);
-    } catch (err: unknown) {
-      if ((err as { code?: string })?.code === 'ERR_CANCELED') return;
-      const detail = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
-      setError(detail || t('port.loadFailed'));
-    } finally {
-      if (!controller.signal.aborted) setLoading(false);
-    }
-  }, [serverId, t]);
-
   usePolling(() => load(false), REFRESH_MS, { leading: false });
-
-  useEffect(() => {
-    const initial = window.setTimeout(() => load(), 0);
-    return () => {
-      window.clearTimeout(initial);
-      abortRef.current?.abort();
-    };
-  }, [load]);
 
   const counts = useMemo(() => ({
     public: ports.filter((p) => p.exposure === 'public').length,

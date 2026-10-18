@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { App, Button, Empty, Input, Progress, Result, Segmented, Space, Table, Tooltip, Typography } from 'antd';
 import {
   CloseCircleOutlined, ReloadOutlined, SearchOutlined, PauseCircleOutlined, PlayCircleOutlined,
@@ -8,10 +8,12 @@ import { PHONE_QUERY, useMediaQuery } from '../hooks/useMediaQuery';
 import { serversApi, ProcessInfo } from '../api/servers';
 import { formatBytes, severityColor } from '../utils/format';
 import { usePolling } from '../hooks/usePolling';
+import { useHostPanel } from '../hooks/useHostPanel';
 
 const { Text } = Typography;
 
 const REFRESH_MS = 5000;
+const NO_PROCESSES: ProcessInfo[] = [];
 
 interface Props {
   serverId: string;
@@ -44,40 +46,12 @@ export default function ProcessTable({ serverId, serverType }: Props) {
   const { t } = useTranslation();
   const phone = useMediaQuery(PHONE_QUERY);
   const { message, modal } = App.useApp();
-  const [processes, setProcesses] = useState<ProcessInfo[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data, loading, error: loadError, load, scheduleReload, isActive } = useHostPanel(serverId, serversApi.getProcesses);
+  const processes = data?.processes || NO_PROCESSES;
+  const total = data?.total || 0;
+  const error = loadError === null ? null : loadError || t('process.loadFailed');
   const [query, setQuery] = useState('');
   const [live, setLive] = useState(true);
-  // Reading the process table opens an SSH session; an in-flight request must
-  // be abandoned when the tab unmounts rather than landing on a dead component.
-  const abortRef = useRef<AbortController | null>(null);
-
-  const load = useCallback(async (showLoading = true) => {
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-    if (showLoading) setLoading(true);
-    try {
-      const res = await serversApi.getProcesses(serverId, controller.signal);
-      setProcesses(res.data.processes || []);
-      setTotal(res.data.total || 0);
-      setError(null);
-    } catch (err: unknown) {
-      if ((err as { code?: string })?.code === 'ERR_CANCELED') return;
-      const detail = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
-      setError(detail || t('process.loadFailed'));
-    } finally {
-      if (!controller.signal.aborted) setLoading(false);
-    }
-  }, [serverId, t]);
-
-  useEffect(() => {
-    const initial = window.setTimeout(() => load(), 0);
-    return () => { window.clearTimeout(initial); abortRef.current?.abort(); };
-  }, [load]);
-
   usePolling(() => load(false), REFRESH_MS, { leading: false, enabled: live });
 
   const filtered = useMemo(() => {
@@ -106,12 +80,15 @@ export default function ProcessTable({ serverId, serverType }: Props) {
       okText: force ? t('process.kill') : t('process.terminate'),
       okType: 'danger',
       onOk: async () => {
+        if (!isActive()) return;
         try {
           await serversApi.killProcess(serverId, proc.pid, force);
+          if (!isActive()) return;
           message.success(t('process.signalSent', { pid: proc.pid }));
           // The host needs a moment to reap the process before it disappears.
-          window.setTimeout(() => load(false), 700);
+          scheduleReload(700);
         } catch (err: unknown) {
+          if (!isActive()) return;
           const detail = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
           message.error(detail || t('process.signalFailed'));
         }

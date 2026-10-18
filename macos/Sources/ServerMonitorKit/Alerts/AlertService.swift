@@ -16,11 +16,15 @@ public final class AlertService: ObservableObject {
 
     private let settings: AppSettings
     private let deliver: AlertDelivery
+    private let now: () -> Date
 
     /// Consecutive breaching polls per server and metric.
     private var breachRun: [String: Int] = [:]
     /// When each alert last fired, so a persistent problem does not repeat.
     private var lastFired: [String: Date] = [:]
+    /// A sustained episode alerts once, including when its first eligible
+    /// sample falls inside the preceding episode's cooldown.
+    private var alertedEpisodes: Set<String> = []
     /// Previous status per server, to detect transitions rather than states.
     private var previousOnline: [UUID: Bool] = [:]
 
@@ -30,9 +34,14 @@ public final class AlertService: ObservableObject {
     private let sustainedPolls = 3
     private let cooldown: TimeInterval = 15 * 60
 
-    public init(settings: AppSettings, delivery: @escaping AlertDelivery = AlertService.systemDelivery) {
+    public init(
+        settings: AppSettings,
+        now: @escaping () -> Date = Date.init,
+        delivery: @escaping AlertDelivery = AlertService.systemDelivery
+    ) {
         self.settings = settings
         self.deliver = delivery
+        self.now = now
     }
 
     public enum Metric: String, CaseIterable {
@@ -102,7 +111,11 @@ public final class AlertService: ObservableObject {
 
         // Thresholds only make sense for a host that answered.
         guard isOnline, let snapshot else {
-            for metric in Metric.allCases { breachRun["\(metric.rawValue):\(server.id)"] = 0 }
+            for metric in Metric.allCases {
+                let key = "\(metric.rawValue):\(server.id)"
+                breachRun[key] = 0
+                alertedEpisodes.remove(key)
+            }
             return
         }
 
@@ -119,22 +132,24 @@ public final class AlertService: ObservableObject {
         let key = "\(metric.rawValue):\(server.id)"
         guard limit > 0 else {
             breachRun[key] = 0
+            alertedEpisodes.remove(key)
             return
         }
         guard value >= Double(limit) else {
             // Recovering resets the run so the next breach must build up again.
             breachRun[key] = 0
+            alertedEpisodes.remove(key)
             return
         }
-        let run = (breachRun[key] ?? 0) + 1
+        let run = min(sustainedPolls, (breachRun[key] ?? 0) + 1)
         breachRun[key] = run
-        guard run == sustainedPolls else { return }
+        guard run >= sustainedPolls, !alertedEpisodes.contains(key) else { return }
 
-        send(
+        if send(
             key: key,
             title: server.name,
             body: L10nBridge.threshold(metric: metric, value: value, limit: limit)
-        )
+        ) { alertedEpisodes.insert(key) }
     }
 
     public func forget(serverID: UUID) {
@@ -142,17 +157,23 @@ public final class AlertService: ObservableObject {
         for metric in Metric.allCases {
             breachRun.removeValue(forKey: "\(metric.rawValue):\(serverID)")
             lastFired.removeValue(forKey: "\(metric.rawValue):\(serverID)")
+            alertedEpisodes.remove("\(metric.rawValue):\(serverID)")
         }
+        lastFired.removeValue(forKey: "offline:\(serverID)")
+        lastFired.removeValue(forKey: "recovered:\(serverID)")
     }
 
     // MARK: - Delivery
 
-    private func send(key: String, title: String, body: String, ignoreCooldown: Bool = false) {
-        if !ignoreCooldown, let last = lastFired[key], Date().timeIntervalSince(last) < cooldown {
-            return
+    @discardableResult
+    private func send(key: String, title: String, body: String, ignoreCooldown: Bool = false) -> Bool {
+        let date = now()
+        if !ignoreCooldown, let last = lastFired[key], date.timeIntervalSince(last) < cooldown {
+            return false
         }
-        lastFired[key] = Date()
+        lastFired[key] = date
         deliver(title, body)
+        return true
     }
 
     /// Hands a notification to the system.

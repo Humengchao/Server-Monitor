@@ -32,6 +32,7 @@ export default function ContainerActions({ container, busy, onAction, onLogs, on
         icon={icon}
         aria-label={t(`docker.${action}`)}
         loading={busy === `${container.id}:${action}`}
+        disabled={busy !== null && busy !== `${container.id}:${action}`}
         onClick={() => onAction(action)}
       />
     </Tooltip>

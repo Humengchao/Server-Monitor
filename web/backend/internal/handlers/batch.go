@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -152,6 +153,8 @@ func normalizeBatchCommand(command string) (string, error) {
 }
 
 func (h *BatchHandler) BulkExec(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), services.BatchTimeout)
+	defer cancel()
 	userID := c.MustGet("user_id").(uuid.UUID)
 	var req BulkExecRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -170,7 +173,7 @@ func (h *BatchHandler) BulkExec(c *gin.Context) {
 	}
 
 	db := c.MustGet("db").(*models.DB)
-	servers, err := models.GetServersByIDsAndUser(db, serverIDs, userID)
+	servers, err := models.GetServersByIDsAndUserContext(ctx, db, serverIDs, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load servers"})
 		return
@@ -180,7 +183,7 @@ func (h *BatchHandler) BulkExec(c *gin.Context) {
 		return
 	}
 
-	results := services.RunBatchCommand(h.sshCache, servers, command)
+	results := services.RunBatchCommandContext(ctx, h.sshCache, servers, command)
 	succeeded := 0
 	for _, r := range results {
 		if r.OK {

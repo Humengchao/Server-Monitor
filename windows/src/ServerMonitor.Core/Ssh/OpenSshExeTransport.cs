@@ -241,7 +241,7 @@ public sealed class OpenSshExeTransport : ISshTransport
     {
         lock (_gateLock)
         {
-            if (_gates.Remove(target.ServerId, out var gate)) gate.Dispose();
+            _gates.Remove(target.ServerId);
         }
         return Task.CompletedTask;
     }
@@ -336,7 +336,7 @@ public sealed class OpenSshExeTransport : ISshTransport
     {
         lock (_gateLock)
         {
-            foreach (var gate in _gates.Values) gate.Dispose();
+            // In-flight subprocesses still release their gate on completion.
             _gates.Clear();
         }
         return ValueTask.CompletedTask;

@@ -41,7 +41,7 @@ func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, noti
 		if origin == cfg.CORSOrigin || cfg.CORSOrigin == "*" {
 			c.Header("Access-Control-Allow-Origin", origin)
 		}
-		c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
+		c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
 		// The API client sends Cache-Control and Pragma on every request; if
 		// they are missing here, a cross-origin deployment fails preflight on
 		// every call. Same-origin setups behind nginx never send a preflight,
@@ -138,6 +138,7 @@ func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, noti
 			servers.GET("/:id/uptime", uptimeH.Detail)
 			servers.POST("", serverH.Create)
 			servers.PUT("/:id", serverH.Update)
+			servers.PATCH("/:id/notes", serverH.UpdateNotes)
 			servers.DELETE("/:id", serverH.Delete)
 			servers.PUT("/:id/tags", serverH.SetTags)
 			servers.POST("/:id/poll", middleware.RateLimit(20, 1*time.Minute), serverH.PollRetry)
@@ -195,6 +196,7 @@ func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, noti
 			alerts.PUT("/rules/:id", alertH.UpdateRule)
 			alerts.DELETE("/rules/:id", alertH.DeleteRule)
 			alerts.GET("/events", alertH.ListEvents)
+			alerts.GET("/events/page", alertH.ListEventPage)
 			alerts.GET("/summary", alertH.Summary)
 			// Outbound probe: rate-limited so the endpoint can't be used to
 			// hammer a third-party host through the panel.

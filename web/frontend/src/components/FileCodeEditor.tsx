@@ -3,22 +3,25 @@ import { Alert, Select, Space, Typography } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { basicSetup } from 'codemirror';
 import { Annotation, Compartment, EditorState, Prec, Transaction } from '@codemirror/state';
+import type { Text } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { DarkModeContext } from '../contexts/DarkModeContext';
 import { detectFileLanguage, fileLanguages } from '../utils/fileLanguage';
+import { updatedUTF8Size } from '../utils/textStats';
 
 interface Props {
   path: string;
-  value: string;
+  value: Text;
+  bytes: number;
   readOnly: boolean;
-  onChange: (value: string) => void;
+  onChange: (value: Text, bytes: number) => void;
   onSave: () => void;
 }
 
 const externalChange = Annotation.define<boolean>();
 
-export default function FileCodeEditor({ path, value, readOnly, onChange, onSave }: Props) {
+export default function FileCodeEditor({ path, value, bytes, readOnly, onChange, onSave }: Props) {
   const { t } = useTranslation();
   const darkMode = useContext(DarkModeContext);
   const parent = useRef<HTMLDivElement>(null);
@@ -27,6 +30,7 @@ export default function FileCodeEditor({ path, value, readOnly, onChange, onSave
   const [mode, setMode] = useState('auto');
   const [loaded, setLoaded] = useState<{ name: string; failed: boolean } | null>(null);
   const [compartments] = useState(() => ({ language: new Compartment(), theme: new Compartment(), editing: new Compartment() }));
+  const [initial] = useState(() => ({ value, bytes }));
   const detected = useMemo(() => detectFileLanguage(path), [path]);
   const language = mode === 'auto' ? detected : fileLanguages.find((item) => item.name === mode) || null;
   const label = t('files.editorLabel', { path });
@@ -36,9 +40,11 @@ export default function FileCodeEditor({ path, value, readOnly, onChange, onSave
 
   useEffect(() => {
     if (!parent.current) return;
+    let byteCount = initial.bytes;
     const view = new EditorView({
       parent: parent.current,
       state: EditorState.create({
+        doc: initial.value,
         extensions: [
           basicSetup,
           EditorState.lineSeparator.of('\n'),
@@ -48,8 +54,9 @@ export default function FileCodeEditor({ path, value, readOnly, onChange, onSave
           compartments.editing.of([]),
           Prec.highest(keymap.of([{ key: 'Mod-s', preventDefault: true, run: () => { callbacks.current.onSave(); return true; } }])),
           EditorView.updateListener.of((update) => {
+            if (update.docChanged) byteCount = updatedUTF8Size(update.startState.doc, update.changes, update.state.doc, byteCount);
             if (update.docChanged && !update.transactions.some((transaction) => transaction.annotation(externalChange))) {
-              callbacks.current.onChange(update.state.doc.toString());
+              callbacks.current.onChange(update.state.doc, byteCount);
             }
           }),
         ],
@@ -57,11 +64,11 @@ export default function FileCodeEditor({ path, value, readOnly, onChange, onSave
     });
     editor.current = view;
     return () => { editor.current = null; view.destroy(); };
-  }, [compartments]);
+  }, [compartments, initial]);
 
   useEffect(() => {
     const view = editor.current;
-    if (view && value !== view.state.doc.toString()) {
+    if (view && !value.eq(view.state.doc)) {
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value }, annotations: [externalChange.of(true), Transaction.addToHistory.of(false)] });
     }
   }, [value]);

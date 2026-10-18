@@ -18,7 +18,8 @@ namespace ServerMonitor.App.Views;
 /// </remarks>
 public sealed class DockerPage : UserControl
 {
-    private static Core.Collect.MonitorService Monitor => App.Current.Monitor;
+    private readonly Core.Collect.MonitorService Monitor;
+    private readonly Action<string>? _log;
 
     private readonly Action<Guid> _openServer;
     private readonly StackPanel _root = Ui.Rows(0);
@@ -27,6 +28,13 @@ public sealed class DockerPage : UserControl
     private Server? _host;
     private Tab _tab = Tab.Containers;
     private bool _loading;
+    private bool _active = true;
+    private CancellationTokenSource? _request;
+    private int _generation;
+    private Server? _dataHost;
+    private SshTarget? _dataTarget;
+    internal IReadOnlyList<DockerContainer> LoadedContainers => _containers;
+    internal Task PendingLoad { get; private set; } = Task.CompletedTask;
 
     private List<DockerContainer> _containers = [];
     private Dictionary<string, DockerContainerStats> _stats = [];
@@ -38,15 +46,40 @@ public sealed class DockerPage : UserControl
 
     private enum Tab { Containers, Images, Volumes, Networks, Compose }
 
-    public DockerPage(Action<Guid> openServer)
+    public DockerPage(Action<Guid> openServer) : this(App.Current.Monitor, openServer, App.Log) { }
+
+    internal DockerPage(Core.Collect.MonitorService monitor, Action<Guid> openServer, Action<string>? log = null)
     {
+        Monitor = monitor;
+        _log = log;
         _openServer = openServer;
         _root.Margin = new Thickness(20, 0, 20, 20);
         Content = Ui.Scroll(_root);
 
         _host = Monitor.Servers.FirstOrDefault(s => s.HasDocker);
         Rebuild();
-        if (_host is not null) _ = LoadAsync();
+        if (_host is not null) PendingLoad = LoadAsync();
+        Unloaded += (_, _) => Deactivate();
+        Loaded += (_, _) =>
+        {
+            if (_active) return;
+            _active = true;
+            PendingLoad = LoadAsync();
+        };
+    }
+
+    internal Task SelectHostAsync(Server server)
+    {
+        _host = server;
+        return PendingLoad = LoadAsync();
+    }
+
+    internal void Deactivate()
+    {
+        _active = false;
+        _generation++;
+        _request?.Cancel();
+        _request = null;
     }
 
     private void Rebuild()
@@ -76,8 +109,7 @@ public sealed class DockerPage : UserControl
             server => server.Name,
             server =>
             {
-                _host = server;
-                _ = LoadAsync();
+                _ = SelectHostAsync(server);
             });
 
         // The picker shows a host name and carries no label of its own.
@@ -304,8 +336,9 @@ public sealed class DockerPage : UserControl
     private ContextMenu ContainerMenu(int index)
     {
         var menu = new ContextMenu();
-        if (index >= _containers.Count) return menu;
+        if (index >= _containers.Count || _dataHost is not { } host || _dataTarget is not { } target) return menu;
         var container = _containers[index];
+        var generation = _generation;
 
         void Item(string key, Action action)
         {
@@ -318,12 +351,12 @@ public sealed class DockerPage : UserControl
         // "Start" on a running container does nothing and looks broken.
         if (container.IsRunning)
         {
-            Item("docker.stop", () => _ = PerformAsync(ContainerAction.Stop, container));
-            Item("docker.restart", () => _ = PerformAsync(ContainerAction.Restart, container));
+            Item("docker.stop", () => _ = PerformAsync(ContainerAction.Stop, container, host, target, generation));
+            Item("docker.restart", () => _ = PerformAsync(ContainerAction.Restart, container, host, target, generation));
         }
         else
         {
-            Item("docker.start", () => _ = PerformAsync(ContainerAction.Start, container));
+            Item("docker.start", () => _ = PerformAsync(ContainerAction.Start, container, host, target, generation));
         }
         menu.Items.Add(new Separator());
         if (container.IsRunning)
@@ -332,17 +365,16 @@ public sealed class DockerPage : UserControl
             // host gets: docker exec -it needs a pty, which is exactly what
             // the shell channel is.
             var shell = new MenuItem { Header = Strings.IsChinese ? "容器 Shell" : "Container shell" };
-            shell.Click += (_, _) => OpenShell(container);
+            shell.Click += (_, _) => { if (IsCurrent(host, generation)) OpenShell(container, host); };
             menu.Items.Add(shell);
         }
-        Item("docker.logs", () => _ = ShowLogsAsync(container));
+        Item("docker.logs", () => _ = ShowLogsAsync(container, host, target, generation));
         Item("common.copy", () => Ui.Copy(container.Id));
         return menu;
     }
 
-    private void OpenShell(DockerContainer container)
+    private void OpenShell(DockerContainer container, Server host)
     {
-        if (_host is not { } host) return;
         Windows.Terminal(
             Window.GetWindow(this),
             host,
@@ -352,35 +384,44 @@ public sealed class DockerPage : UserControl
             $"{container.Name} · {host.Name}");
     }
 
-    private async Task PerformAsync(ContainerAction action, DockerContainer container)
+    private bool IsCurrent(Server host, int generation) =>
+        _active && _host?.Id == host.Id && _generation == generation;
+
+    internal async Task PerformAsync(ContainerAction action, DockerContainer container,
+        Server host, SshTarget target, int generation)
     {
-        if (_host is not { } host) return;
+        if (!IsCurrent(host, generation)) return;
+        _request?.Cancel();
+        _request = null;
         _loading = true;
         RebuildBody();
         try
         {
-            await Monitor.Docker.PerformAsync(action, container.Id, Monitor.Target(host));
-            await LoadAsync();
+            await Monitor.Docker.PerformAsync(action, container.Id, target);
+            if (IsCurrent(host, generation)) PendingLoad = LoadAsync();
         }
         catch (Exception error)
         {
+            if (!IsCurrent(host, generation)) return;
             _error = FailureText.For(error);
             _loading = false;
             RebuildBody();
         }
     }
 
-    private async Task ShowLogsAsync(DockerContainer container)
+    private async Task ShowLogsAsync(DockerContainer container, Server host, SshTarget target, int generation)
     {
-        if (_host is not { } host) return;
+        if (!IsCurrent(host, generation)) return;
         try
         {
-            var logs = await Monitor.Docker.LogsAsync(container.Id, Monitor.Target(host));
+            var logs = await Monitor.Docker.LogsAsync(container.Id, target);
+            if (!IsCurrent(host, generation)) return;
             var window = new LogWindow(container.Name, logs) { Owner = Window.GetWindow(this) };
             window.Show();
         }
         catch (Exception error)
         {
+            if (!IsCurrent(host, generation)) return;
             Ui.Complain(Window.GetWindow(this), FailureText.For(error));
         }
     }
@@ -426,9 +467,25 @@ public sealed class DockerPage : UserControl
 
     private async Task LoadAsync()
     {
-        if (_host is not { } host) return;
+        if (!_active || _host is not { } selected) return;
+        var host = selected.Clone();
+        _request?.Cancel();
+        using var request = new CancellationTokenSource();
+        _request = request;
+        var generation = ++_generation;
+        var token = request.Token;
+        bool Current() => IsCurrent(host, generation) && ReferenceEquals(_request, request);
+
         _loading = true;
         _error = null;
+        _containers = [];
+        _images = [];
+        _volumes = [];
+        _networks = [];
+        _compose = [];
+        _stats = [];
+        _dataHost = null;
+        _dataTarget = null;
         RebuildBody();
 
         try
@@ -452,43 +509,63 @@ public sealed class DockerPage : UserControl
             // already in hand.
             var clock = System.Diagnostics.Stopwatch.StartNew();
 
-            _containers = await docker.ListContainersAsync(target);
+            var containers = await docker.ListContainersAsync(target, token);
+            if (!Current()) return;
+            _containers = containers;
+            _dataHost = host;
+            _dataTarget = target;
             var listed = clock.ElapsedMilliseconds;
             _loading = false;
             Rebuild();
 
             // The cheap four next, so every tab has its count while the
             // expensive one is still outstanding.
-            _images = await docker.ListImagesAsync(target);
-            _volumes = await docker.ListVolumesAsync(target);
-            _networks = await docker.ListNetworksAsync(target);
-            _compose = await docker.ListComposeProjectsAsync(target);
+            var images = await docker.ListImagesAsync(target, token);
+            if (!Current()) return;
+            _images = images;
+            var volumes = await docker.ListVolumesAsync(target, token);
+            if (!Current()) return;
+            _volumes = volumes;
+            var networks = await docker.ListNetworksAsync(target, token);
+            if (!Current()) return;
+            _networks = networks;
+            var compose = await docker.ListComposeProjectsAsync(target, token);
+            if (!Current()) return;
+            _compose = compose;
             var counted = clock.ElapsedMilliseconds;
             Rebuild();
 
-            await Monitor.RefreshDockerSummaryAsync(host);
+            await Monitor.RefreshDockerSummaryAsync(host, token);
+            if (!Current()) return;
 
             // Last, because it is the most expensive thing on the page by an
             // order of magnitude and the least of what anyone came for: two
             // columns of a table whose other four arrived first.
-            _stats = await docker.StatsAsync(target);
+            var stats = await docker.StatsAsync(target, token);
+            if (!Current()) return;
+            _stats = stats;
             Rebuild();
 
             // One line, because "the container page is slow" is otherwise
             // unanswerable from a log: the commands themselves are fast and
             // what they mostly wait on is the metrics poll, which holds the
             // host's single connection while this page queues behind it.
-            App.Log($"docker {host.Name}: listed {listed} ms, "
+            _log?.Invoke($"docker {host.Name}: listed {listed} ms, "
                 + $"counted {counted} ms, stats {clock.ElapsedMilliseconds} ms");
         }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         catch (Exception error)
         {
-            _error = FailureText.For(error);
+            if (Current()) _error = FailureText.For(error);
         }
         finally
         {
-            _loading = false;
-            Rebuild();
+            if (Current())
+            {
+                _request = null;
+                _loading = false;
+                Rebuild();
+            }
         }
     }
 }

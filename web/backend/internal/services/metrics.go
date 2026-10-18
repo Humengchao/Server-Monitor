@@ -2,6 +2,7 @@ package services
 
 import (
 	"bytes"
+	"compress/flate"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -702,15 +703,15 @@ const (
 // samples half a second apart. A command that fails leaves an empty section
 // and parses to zero values, matching the previous per-command behaviour.
 var linuxMetricsCommand = strings.Join([]string{
-	"cat /proc/stat",
-	"sleep 0.5 || sleep 1; cat /proc/stat",
-	"cat /proc/meminfo",
-	"cat /proc/loadavg",
-	"cat /proc/net/dev",
-	"cat /proc/diskstats",
-	"cat /proc/uptime",
-	"nproc",
-	"df -P -B1 /",
+	sharedLinuxSections["statFirst"],
+	sharedLinuxSections["statSecond"],
+	sharedLinuxSections["memInfo"],
+	sharedLinuxSections["loadAvg"],
+	sharedLinuxSections["netDev"],
+	sharedLinuxSections["diskStats"],
+	sharedLinuxSections["uptime"],
+	sharedLinuxSections["nproc"],
+	sharedProbeValues["web-disk-usage"],
 	linuxDockerProbe,
 }, "; echo "+linuxSectionSeparator+"; ")
 
@@ -729,10 +730,7 @@ var linuxMetricsCommand = strings.Join([]string{
 // against a wedged daemon, and this is the last section of a 20-second batched
 // run — without the cap it would starve every metric behind it and then be
 // reported as "no Docker" on top.
-const linuxDockerProbe = `if command -v docker >/dev/null 2>&1; then echo installed; ` +
-	`timeout 5 docker info --format '{{.ServerVersion}}' 2>/dev/null || ` +
-	`timeout 5 sudo -n docker info --format '{{.ServerVersion}}' 2>/dev/null || true; ` +
-	`else echo absent; fi`
+var linuxDockerProbe = sharedProbeValues["web-docker-info"]
 
 // splitLinuxSections splits batched command output on separator lines. If the
 // output was truncated, the remaining sections come back empty.
@@ -1064,39 +1062,19 @@ func parseDockerVersion(out string) string {
 	return version
 }
 
-// windowsMetricsScript gathers all metrics in a single PowerShell invocation as
-// key=value lines. Uses CIM classes (locale-independent, unlike Get-Counter).
-// Perf raw counters (BytesReceivedPersec etc.) are cumulative despite the name,
-// matching the /proc counter semantics used for rate calculation.
-const windowsMetricsScript = `$ErrorActionPreference='SilentlyContinue'
-$os = Get-CimInstance Win32_OperatingSystem
-$cpu = (Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average
-$cores = (Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors
-$nics = Get-CimInstance Win32_PerfRawData_Tcpip_NetworkInterface
-$netrx = ($nics | Measure-Object -Property BytesReceivedPersec -Sum).Sum
-$nettx = ($nics | Measure-Object -Property BytesSentPersec -Sum).Sum
-$disk = Get-CimInstance Win32_PerfRawData_PerfDisk_PhysicalDisk -Filter "Name='_Total'"
-$uptime = [int64]((Get-Date) - $os.LastBootUpTime).TotalSeconds
-$disks = Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3'
-$disktotal = ($disks | Measure-Object -Property Size -Sum).Sum
-$diskfree = ($disks | Measure-Object -Property FreeSpace -Sum).Sum
-$queue = (Get-CimInstance Win32_PerfFormattedData_PerfOS_System).ProcessorQueueLength
-$dockerpresent = if (Get-Command docker -ErrorAction SilentlyContinue) { 'installed' } else { 'absent' }
-$docker = if ($dockerpresent -eq 'installed') { docker info --format "{{.ServerVersion}}" 2>$null } else { '' }
-Write-Output ("cpu=" + [int64][math]::Round([double]$cpu))
-Write-Output ("memtotal=" + $os.TotalVisibleMemorySize)
-Write-Output ("memfree=" + $os.FreePhysicalMemory)
-Write-Output ("netrx=" + [int64]$netrx)
-Write-Output ("nettx=" + [int64]$nettx)
-Write-Output ("diskread=" + [int64]$disk.DiskReadBytesPersec)
-Write-Output ("diskwrite=" + [int64]$disk.DiskWriteBytesPersec)
-Write-Output ("uptime=" + $uptime)
-Write-Output ("cores=" + $cores)
-Write-Output ("disktotal=" + [int64]$disktotal)
-Write-Output ("diskfree=" + [int64]$diskfree)
-Write-Output ("queue=" + [int64]$queue)
-Write-Output ("dockerpresent=" + $dockerpresent)
-Write-Output ("docker=" + $docker)`
+// The canonical script is generated from shared/probes. Compress once so the
+// complete probe stays within cmd.exe's command-line limit on Windows hosts.
+var windowsMetricsCommand = buildWindowsMetricsCommand()
+
+func buildWindowsMetricsCommand() string {
+	var compressed bytes.Buffer
+	writer, _ := flate.NewWriter(&compressed, flate.BestCompression)
+	_, _ = writer.Write([]byte(windowsMetricsScript))
+	_ = writer.Close()
+	payload := base64.StdEncoding.EncodeToString(compressed.Bytes())
+	stub := "$s=[IO.Compression.DeflateStream]::new([IO.MemoryStream]::new([Convert]::FromBase64String('" + payload + "')),[IO.Compression.CompressionMode]::Decompress);iex ([IO.StreamReader]::new($s)).ReadToEnd()"
+	return "powershell -NoProfile -NonInteractive -EncodedCommand " + encodePowerShell(stub)
+}
 
 // encodePowerShell encodes a script as UTF-16LE base64 for -EncodedCommand,
 // which sidesteps quoting differences between cmd.exe and powershell default shells.
@@ -1111,8 +1089,7 @@ func encodePowerShell(script string) string {
 }
 
 func (c *Collector) collectWindows(client *ssh.Client, s *models.Server) (*models.MetricPoint, error) {
-	cmd := "powershell -NoProfile -NonInteractive -EncodedCommand " + encodePowerShell(windowsMetricsScript)
-	out, err := RunCmd(client, cmd)
+	out, err := RunCmd(client, windowsMetricsCommand)
 	// Do not promote a partial PowerShell response to a successful sample. A
 	// command failure can leave a handful of key/value lines in stdout; saving
 	// those would make the host appear online with fabricated zero metrics.
@@ -1129,7 +1106,8 @@ func (c *Collector) collectWindows(client *ssh.Client, s *models.Server) (*model
 		}
 		v = strings.TrimSpace(v)
 		if k == "docker" {
-			dockerVersion = parseDockerVersion(v)
+			version, _, _ := strings.Cut(v, "|")
+			dockerVersion = parseDockerVersion(version)
 			continue
 		}
 		if k == "dockerpresent" {

@@ -196,13 +196,14 @@ test('notes edited during a save remain dirty until those edits are saved', asyn
   const submitted: string[] = [];
   let release!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });
-  await page.route('**/api/servers/idle-host', async route => {
-    if (route.request().method() !== 'PUT') return route.fallback();
+  await page.route('**/api/servers/idle-host/notes', async route => {
+    expect(route.request().method()).toBe('PATCH');
+    expect(Object.keys(route.request().postDataJSON())).toEqual(['notes']);
     const notes = route.request().postDataJSON().notes as string;
     submitted.push(notes);
     if (submitted.length === 1) await held;
     state.hosts[0].notes = notes;
-    await route.fulfill({ json: state.hosts[0] });
+    await route.fulfill({ json: { message: 'updated' } });
   });
   await page.goto('/servers/idle-host');
   await page.getByRole('tab', { name: en['server.notes'], exact: true }).click();

@@ -4,6 +4,7 @@ import SwiftUI
 
 @main
 struct ServerMonitorApp: App {
+    @NSApplicationDelegateAdaptor(AppLifecycleDelegate.self) private var lifecycle
     @StateObject private var localization = Localization()
     @StateObject private var settings: AppSettings
     // Plain stored properties, not @StateObject. A @StateObject subscribes the
@@ -50,6 +51,11 @@ struct ServerMonitorApp: App {
         sessions = SessionManager(database: database)
         alerts = AlertService(settings: settings)
         startupFailure = failure
+        monitor.serverDidDelete = { [weak sessions] id in sessions?.close(serverID: id) }
+        lifecycle.onTerminate = { [monitor, sessions] in
+            monitor.stop()
+            sessions.closeAll()
+        }
     }
 
     /// Reports window visibility to the service for as long as the app runs.
@@ -73,7 +79,7 @@ struct ServerMonitorApp: App {
     @MainActor
     private static var anyWindowVisible: Bool {
         NSApp.windows.contains { window in
-            window.isVisible && window.occlusionState.contains(.visible)
+            window.canBecomeMain && window.isVisible && window.occlusionState.contains(.visible)
         }
     }
 
@@ -161,5 +167,16 @@ struct ServerMonitorApp: App {
                 .environmentObject(alerts)
                 .environmentObject(localization)
         }
+    }
+}
+
+/// A termination callback must be synchronous: an unstructured Task may never
+/// get another executor turn once AppKit starts shutting the process down.
+@MainActor
+final class AppLifecycleDelegate: NSObject, NSApplicationDelegate {
+    var onTerminate: (() -> Void)?
+
+    func applicationWillTerminate(_ notification: Notification) {
+        onTerminate?()
     }
 }

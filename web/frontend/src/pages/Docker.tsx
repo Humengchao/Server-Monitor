@@ -228,6 +228,7 @@ export function ServerDockerPanel({ serverId, version }: { serverId: string; ver
   const [loading, setLoading] = useState(true);
   const inventoryRequest = useRef<AbortController | null>(null);
   const statsRequest = useRef<AbortController | null>(null);
+  const scopeRef = useRef<object | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [statsError, setStatsError] = useState(false);
   const [logsTarget, setLogsTarget] = useState<{ containerId: string; containerName: string } | null>(null);
@@ -235,9 +236,10 @@ export function ServerDockerPanel({ serverId, version }: { serverId: string; ver
   // `${containerId}:${action}` of the action currently in flight, so the row's
   // own button spins and repeat clicks are swallowed.
   const [actionBusy, setActionBusy] = useState<string | null>(null);
+  const actionPendingRef = useRef(false);
 
   const loadContainers = useCallback(async (showLoading = true) => {
-    if (inventoryRequest.current) return;
+    if (!scopeRef.current || inventoryRequest.current) return;
     const controller = new AbortController();
     inventoryRequest.current = controller;
     if (showLoading) setLoading(true);
@@ -245,12 +247,15 @@ export function ServerDockerPanel({ serverId, version }: { serverId: string; ver
       const response = await serversApi.getContainers(serverId, controller.signal);
       if (controller.signal.aborted) return;
       setContainers(previous => mergeStats(response.data || [], previous));
+      // Statistics can take longer than the 15s inventory polling interval.
+      // Let the existing request (including queued work) finish; restarting it
+      // on every successful inventory refresh can prevent it ever completing.
+      if (statsRequest.current && !statsRequest.current.signal.aborted) return;
       setStatsLoading(true);
       setStatsError(false);
-      statsRequest.current?.abort();
       const statistics = new AbortController();
       statsRequest.current = statistics;
-      void queueStats(() => serversApi.getContainerStats(serverId, statistics.signal)).then(response => {
+      void queueStats(() => serversApi.getContainerStats(serverId, statistics.signal), statistics.signal).then(response => {
         if (!statistics.signal.aborted) setContainers(current => mergeStats(current, response.data || []));
       }).catch(() => { if (!statistics.signal.aborted) setStatsError(true); })
         .finally(() => { if (statsRequest.current === statistics) { statsRequest.current = null; setStatsLoading(false); } });
@@ -262,11 +267,13 @@ export function ServerDockerPanel({ serverId, version }: { serverId: string; ver
   }, [message, serverId, t]);
 
   useEffect(() => {
+    scopeRef.current = {};
     const timer = window.setTimeout(() => {
       setContainers([]);
       void loadContainers();
     }, 0);
     return () => {
+      scopeRef.current = null;
       window.clearTimeout(timer);
       inventoryRequest.current?.abort();
       inventoryRequest.current = null;
@@ -280,18 +287,24 @@ export function ServerDockerPanel({ serverId, version }: { serverId: string; ver
   usePolling(() => loadContainers(false), 15000, { leading: false });
 
   const runAction = async (containerId: string, action: 'start' | 'stop' | 'restart') => {
+    const scope = scopeRef.current;
+    if (!scope || actionPendingRef.current) return;
+    actionPendingRef.current = true;
     setActionBusy(`${containerId}:${action}`);
     try {
       await serversApi.containerAction(serverId, containerId, action);
+      if (scopeRef.current !== scope) return;
       message.success(t('docker.actionSuccess', { action: t(`docker.${action}`) }));
       inventoryRequest.current?.abort();
       inventoryRequest.current = null;
       statsRequest.current?.abort();
       await loadContainers();
     } catch {
+      if (scopeRef.current !== scope) return;
       message.error(t('docker.actionFailed', { action: t(`docker.${action}`) }));
     } finally {
-      setActionBusy(null);
+      actionPendingRef.current = false;
+      if (scopeRef.current) setActionBusy(null);
     }
   };
 
@@ -426,14 +439,16 @@ export default function Docker() {
   // `${containerId}:${action}` of the action currently in flight, so the row's
   // own button spins and repeat clicks are swallowed.
   const [actionBusy, setActionBusy] = useState<string | null>(null);
+  const actionPendingRef = useRef(false);
 
   const expandServerId = searchParams.get('server');
 
   const requestsRef = useRef(new Map<string, AbortController>());
   const loadGenerationRef = useRef(0);
+  const mountedRef = useRef(false);
 
   const loadContainers = useCallback(async (serverId: string, showLoading = true) => {
-    if (requestsRef.current.has(serverId)) return;
+    if (!mountedRef.current || requestsRef.current.has(serverId)) return;
     const controller = new AbortController();
     requestsRef.current.set(serverId, controller);
     const generation = loadGenerationRef.current;
@@ -443,11 +458,13 @@ export default function Docker() {
     try {
       const response = await serversApi.getContainers(serverId, controller.signal);
       if (generation !== loadGenerationRef.current || controller.signal.aborted) return;
-      setServers((previous) => previous.map((item) => item.server.id === serverId ? { ...item, containers: mergeStats(response.data || [], item.containers), loading: false, loaded: true, error: false, statsLoading: true, statsError: false } : item));
+      const pendingStats = requestsRef.current.get('stats:' + serverId);
+      setServers((previous) => previous.map((item) => item.server.id === serverId ? { ...item, containers: mergeStats(response.data || [], item.containers), loading: false, loaded: true, error: false } : item));
+      if (pendingStats && !pendingStats.signal.aborted) return;
+      setServers((previous) => previous.map((item) => item.server.id === serverId ? { ...item, statsLoading: true, statsError: false } : item));
       const statsController = new AbortController();
-      requestsRef.current.get('stats:' + serverId)?.abort();
       requestsRef.current.set('stats:' + serverId, statsController);
-      void queueStats(() => serversApi.getContainerStats(serverId, statsController.signal)).then((stats) => {
+      void queueStats(() => serversApi.getContainerStats(serverId, statsController.signal), statsController.signal).then((stats) => {
         if (generation !== loadGenerationRef.current || statsController.signal.aborted) return;
         setServers(previous => previous.map(item => item.server.id === serverId ? { ...item, containers: mergeStats(item.containers, stats.data || []), statsLoading: false } : item));
       }).catch(() => {
@@ -463,13 +480,16 @@ export default function Docker() {
   }, []);
 
   const loadServers = useCallback(async () => {
+    if (!mountedRef.current) return;
     const generation = ++loadGenerationRef.current;
     for (const controller of requestsRef.current.values()) controller.abort();
     requestsRef.current.clear();
     setInitialLoading(true);
     setLoadError(false);
+    const controller = new AbortController();
+    requestsRef.current.set('servers', controller);
     try {
-      const response = await serversApi.list();
+      const response = await serversApi.list(controller.signal);
       if (generation !== loadGenerationRef.current) return;
       const allServers = response.data || [];
       const withDocker: ServerDocker[] = allServers.filter((server) => server.has_docker).map((server) => ({
@@ -495,23 +515,30 @@ export default function Docker() {
         message.error(t('docker.loadFailed'));
       }
     } finally {
+      if (requestsRef.current.get('servers') === controller) requestsRef.current.delete('servers');
       if (generation === loadGenerationRef.current) setInitialLoading(false);
     }
   }, [expandServerId, loadContainers, message, t]);
 
   const runAction = async (serverId: string, containerId: string, action: 'start' | 'stop' | 'restart') => {
+    if (!mountedRef.current || actionPendingRef.current) return;
+    actionPendingRef.current = true;
+    const generation = loadGenerationRef.current;
     setActionBusy(`${containerId}:${action}`);
     try {
       await serversApi.containerAction(serverId, containerId, action);
+      if (!mountedRef.current || generation !== loadGenerationRef.current) return;
       message.success(t('docker.actionSuccess', { action: t(`docker.${action}`) }));
       requestsRef.current.get(serverId)?.abort();
       requestsRef.current.delete(serverId);
       requestsRef.current.get('stats:' + serverId)?.abort();
       void loadContainers(serverId);
     } catch {
+      if (!mountedRef.current || generation !== loadGenerationRef.current) return;
       message.error(t('docker.actionFailed', { action: t(`docker.${action}`) }));
     } finally {
-      setActionBusy(null);
+      actionPendingRef.current = false;
+      if (mountedRef.current) setActionBusy(null);
     }
   };
 
@@ -538,8 +565,9 @@ export default function Docker() {
   }, []);
 
   useEffect(() => {
+    mountedRef.current = true;
     const timer = window.setTimeout(() => { void loadServers(); }, 0);
-    return () => { window.clearTimeout(timer); cancelLoads(); };
+    return () => { mountedRef.current = false; window.clearTimeout(timer); cancelLoads(); };
   }, [loadServers, cancelLoads]);
 
   // Refresh resource readings only for expanded hosts. The request guard in
@@ -603,9 +631,11 @@ export default function Docker() {
   ];
 
   const redetect = async (server: Server) => {
+    const generation = loadGenerationRef.current;
     setRedetecting(server.id);
     try {
       const res = await serversApi.redetectDocker(server.id);
+      if (!mountedRef.current || generation !== loadGenerationRef.current) return;
       if (res.data.installed) {
         message.success(t('docker.redetectFound', { name: server.name, version: res.data.version || '' }));
         loadServers();
@@ -616,10 +646,11 @@ export default function Docker() {
         message.warning(t('docker.redetectUnknown', { name: server.name }));
       }
     } catch (err: unknown) {
+      if (!mountedRef.current || generation !== loadGenerationRef.current) return;
       const detail = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
       message.error(detail || t('docker.redetectFailed'));
     } finally {
-      setRedetecting(null);
+      if (mountedRef.current) setRedetecting(null);
     }
   };
 

@@ -13,11 +13,18 @@ struct TerminalPane: View {
     @EnvironmentObject private var sessions: SessionManager
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var loc: Localization
-    @StateObject private var session = TerminalSession()
+    @StateObject private var session: TerminalSession
     @State private var target: SSHTarget?
     @State private var failure: String?
     /// Bumped to rebuild the terminal view, which restarts the ssh process.
     @State private var generation = 0
+
+    init(server: Server, remoteCommand: String? = nil, sessionID: UUID? = nil, session: TerminalSession? = nil) {
+        self.server = server
+        self.remoteCommand = remoteCommand
+        self.sessionID = sessionID
+        _session = StateObject(wrappedValue: session ?? TerminalSession())
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -42,13 +49,6 @@ struct TerminalPane: View {
             }
         }
         .onAppear(perform: resolve)
-        .onChange(of: session.state) { _, state in
-            // Record the end time as soon as the shell exits, rather than
-            // waiting for the user to dismiss the pane.
-            if case .ended = state, let sessionID {
-                sessions.close(sessionID)
-            }
-        }
     }
 
     private var statusBar: some View {
@@ -79,6 +79,7 @@ struct TerminalPane: View {
             SnippetMenu(session: session)
 
             Button(loc.t("terminal.reconnect"), systemImage: "arrow.clockwise") {
+                session.reconnect()
                 generation += 1
             }
             .controlSize(.small)

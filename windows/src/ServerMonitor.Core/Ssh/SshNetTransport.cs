@@ -1,4 +1,5 @@
 using Renci.SshNet;
+using System.Collections.Concurrent;
 using ServerMonitor.Core.Store;
 using Renci.SshNet.Common;
 
@@ -58,6 +59,7 @@ public sealed class SshNetTransport : ISshTransport
     private readonly Dictionary<Guid, Pooled> _pool = [];
     private readonly SemaphoreSlim _poolLock = new(1, 1);
     private readonly CancellationTokenSource _sweeper = new();
+    private readonly Task _sweepTask;
     private bool _disposed;
 
     /// <summary>
@@ -102,7 +104,7 @@ public sealed class SshNetTransport : ISshTransport
         // downgrading every host after it to "unknown".
         _knownHosts.OnError ??= message => _log?.Invoke($"known_hosts: {message}");
         _log = log;
-        _ = SweepAsync(_sweeper.Token);
+        _sweepTask = SweepAsync(_sweeper.Token);
     }
 
     public async Task<string> RunAsync(
@@ -207,6 +209,7 @@ public sealed class SshNetTransport : ISshTransport
     /// </remarks>
     private async Task<Pooled> LeaseAsync(SshTarget target, CancellationToken cancellationToken)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         var resolved = _config.Resolve(target);
         var fingerprint = resolved.Fingerprint;
 
@@ -228,9 +231,17 @@ public sealed class SshNetTransport : ISshTransport
             var client = await ConnectAsync(resolved, target, cancellationToken).ConfigureAwait(false);
             var pooled = new Pooled { Client = client, Fingerprint = fingerprint };
 
-            await _poolLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            // Once connected we own the client, even if the caller cancels
+            // while waiting to publish it into the pool.
+            await _poolLock.WaitAsync().ConfigureAwait(false);
             try
             {
+                if (_disposed || cancellationToken.IsCancellationRequested)
+                {
+                    Close(pooled);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    throw new ObjectDisposedException(nameof(SshNetTransport));
+                }
                 // A reconfigure or a Forget may have landed mid-handshake; the
                 // entry that wins is this one, and any stale one it replaces
                 // is closed rather than leaked.
@@ -363,9 +374,9 @@ public sealed class SshNetTransport : ISshTransport
             {
                 var jumpResolved = _config.Resolve(jump);
                 var jumpClient = new SshClient(BuildInfo(jumpResolved, target.ServerId, passwordOwner));
-                Arm(jumpClient, jumpResolved.HostName);
-                await jumpClient.ConnectAsync(cancellationToken).ConfigureAwait(false);
                 hops.Add(jumpClient);
+                Arm(jumpClient, jumpResolved.HostName, jumpResolved.Port);
+                await jumpClient.ConnectAsync(cancellationToken).ConfigureAwait(false);
 
                 // Port 0 lets the OS pick, so two hosts behind the same
                 // bastion cannot collide on a hard-coded local port.
@@ -381,7 +392,7 @@ public sealed class SshNetTransport : ISshTransport
             var info = BuildInfo(
                 resolved with { HostName = host, Port = port }, target.ServerId, passwordOwner);
             client = build(info);
-            Arm(client, resolved.HostName);
+            Arm(client, resolved.HostName, resolved.Port);
             await client.ConnectAsync(cancellationToken).ConfigureAwait(false);
 
             // The hops belong to this connection now: closing it must close
@@ -404,17 +415,19 @@ public sealed class SshNetTransport : ISshTransport
     }
 
     /// <summary>Jump connections and forwards owned by an outer client.</summary>
-    private readonly Dictionary<BaseClient, (List<SshClient> Hops, List<ForwardedPortLocal> Forwards)> _owned = [];
+    private readonly ConcurrentDictionary<BaseClient, (List<SshClient> Hops, List<ForwardedPortLocal> Forwards)> _owned = new();
 
     private static void Release(List<SshClient> hops, List<ForwardedPortLocal> forwards)
     {
         foreach (var forward in forwards)
         {
-            try { forward.Stop(); forward.Dispose(); } catch (Exception) { /* already gone */ }
+            try { forward.Stop(); } catch (Exception) { /* already gone */ }
+            try { forward.Dispose(); } catch (Exception) { /* already gone */ }
         }
         foreach (var hop in hops)
         {
-            try { hop.Disconnect(); hop.Dispose(); } catch (Exception) { /* already gone */ }
+            try { hop.Disconnect(); } catch (Exception) { /* already gone */ }
+            try { hop.Dispose(); } catch (Exception) { /* already gone */ }
         }
     }
 
@@ -541,19 +554,19 @@ public sealed class SshNetTransport : ISshTransport
     /// contact, and it avoids the trap where an askpass helper answers the
     /// fingerprint question with the password and the connection hangs.
     /// </remarks>
-    private void Arm(BaseClient client, string displayHost)
+    private void Arm(BaseClient client, string displayHost, int port)
     {
         client.HostKeyReceived += (_, e) =>
         {
-            var verdict = _knownHosts.Check(displayHost, e.HostKeyName, e.HostKey);
+            var verdict = _knownHosts.Check(displayHost, e.HostKeyName, e.HostKey, port);
             switch (verdict)
             {
                 case HostKeyVerdict.Known:
                     e.CanTrust = true;
                     break;
                 case HostKeyVerdict.Unknown:
-                    _knownHosts.Add(displayHost, e.HostKeyName, e.HostKey);
-                    e.CanTrust = true;
+                    e.CanTrust = _knownHosts.Add(displayHost, e.HostKeyName, e.HostKey, port);
+                    if (!e.CanTrust) _log?.Invoke($"{displayHost}:{port}: could not persist host key — refusing");
                     break;
                 default:
                     // Refuse rather than throw from the handler: SSH.NET turns
@@ -561,7 +574,7 @@ public sealed class SshNetTransport : ISshTransport
                     // message, and an exception thrown here would cross a
                     // socket callback.
                     e.CanTrust = false;
-                    _log?.Invoke($"{displayHost}: host key CHANGED — refusing");
+                    _log?.Invoke($"{displayHost}:{port}: host key {verdict} — refusing");
                     break;
             }
         };
@@ -588,18 +601,10 @@ public sealed class SshNetTransport : ISshTransport
 
     private void Close(Pooled pooled)
     {
-        try
-        {
-            if (_owned.Remove(pooled.Client, out var owned)) Release(owned.Hops, owned.Forwards);
-            pooled.Client.Disconnect();
-            pooled.Client.Dispose();
-        }
-        catch (Exception)
-        {
-            // Closing a connection that is already gone is the normal case
-            // here — it is why we are closing it.
-        }
-        pooled.Gate.Dispose();
+        CloseClient(pooled.Client);
+        // Gate users may still be releasing or waiting after an eviction.
+        // SemaphoreSlim has no OS handle unless AvailableWaitHandle is used;
+        // leave this managed gate alive until its last user is collected.
     }
 
     /// <summary>
@@ -645,7 +650,7 @@ public sealed class SshNetTransport : ISshTransport
                 var now = DateTime.UtcNow;
                 foreach (var (id, pooled) in _sftp.ToList())
                 {
-                    if (now - pooled.LastUsed < IdleTimeout && pooled.Client.IsConnected) continue;
+                    if (!pooled.Activity.CanSweep(now, IdleTimeout, pooled.Client.IsConnected)) continue;
                     _sftp.Remove(id);
                     CloseSftp(pooled);
                 }
@@ -677,7 +682,7 @@ public sealed class SshNetTransport : ISshTransport
     /// browser eventually closes the connection rather than holding it for the
     /// life of the app.
     /// </remarks>
-    public async Task<SftpClient> LeaseSftpAsync(
+    public async Task<SftpLease> LeaseSftpAsync(
         SshTarget target, CancellationToken cancellationToken = default)
     {
         var resolved = _config.Resolve(target);
@@ -686,12 +691,12 @@ public sealed class SshNetTransport : ISshTransport
         await _sftpLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             if (_sftp.TryGetValue(target.ServerId, out var existing))
             {
                 if (existing.Fingerprint == fingerprint && existing.Client.IsConnected)
                 {
-                    existing.LastUsed = DateTime.UtcNow;
-                    return existing.Client;
+                    return existing.Activity.Acquire(existing.Client);
                 }
                 CloseSftp(existing);
                 _sftp.Remove(target.ServerId);
@@ -700,10 +705,21 @@ public sealed class SshNetTransport : ISshTransport
             var client = await ConnectAsync(
                 resolved,
                 target,
-                info => new SftpClient(info) { KeepAliveInterval = TimeSpan.FromSeconds(15) },
+                info => new SftpClient(info)
+                {
+                    KeepAliveInterval = TimeSpan.FromSeconds(15),
+                    OperationTimeout = TimeSpan.FromSeconds(30),
+                },
                 cancellationToken).ConfigureAwait(false);
-            _sftp[target.ServerId] = new PooledSftp { Client = client, Fingerprint = fingerprint };
-            return client;
+            var pooled = new PooledSftp { Client = client, Fingerprint = fingerprint };
+            if (_disposed || cancellationToken.IsCancellationRequested)
+            {
+                CloseSftp(pooled);
+                cancellationToken.ThrowIfCancellationRequested();
+                throw new ObjectDisposedException(nameof(SshNetTransport));
+            }
+            _sftp[target.ServerId] = pooled;
+            return pooled.Activity.Acquire(client);
         }
         finally
         {
@@ -715,24 +731,21 @@ public sealed class SshNetTransport : ISshTransport
     {
         public required SftpClient Client { get; init; }
         public required string Fingerprint { get; init; }
-        public DateTime LastUsed { get; set; } = DateTime.UtcNow;
+        public SftpActivity Activity { get; } = new();
     }
 
     private readonly Dictionary<Guid, PooledSftp> _sftp = [];
     private readonly SemaphoreSlim _sftpLock = new(1, 1);
 
     private void CloseSftp(PooledSftp pooled)
+        => CloseClient(pooled.Client);
+
+    private void CloseClient(BaseClient client)
     {
-        try
-        {
-            if (_owned.Remove(pooled.Client, out var owned)) Release(owned.Hops, owned.Forwards);
-            pooled.Client.Disconnect();
-            pooled.Client.Dispose();
-        }
-        catch (Exception)
-        {
-            // Same as Close: this runs because the connection is finished.
-        }
+        if (_owned.TryRemove(client, out var owned)) Release(owned.Hops, owned.Forwards);
+        try { client.Disconnect(); } catch (Exception) { /* already gone */ }
+        // Disconnect can fail precisely when the connection needs disposing.
+        try { client.Dispose(); } catch (Exception) { /* already gone */ }
     }
 
     private async Task EvictSftpAsync(Guid serverId)
@@ -753,19 +766,26 @@ public sealed class SshNetTransport : ISshTransport
         if (_disposed) return;
         _disposed = true;
         await _sweeper.CancelAsync().ConfigureAwait(false);
+        await _sweepTask.ConfigureAwait(false);
         await _poolLock.WaitAsync().ConfigureAwait(false);
         try
         {
             foreach (var pooled in _pool.Values) Close(pooled);
             _pool.Clear();
-            foreach (var pooled in _sftp.Values) CloseSftp(pooled);
-            _sftp.Clear();
         }
         finally
         {
             _poolLock.Release();
         }
+        await _sftpLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            foreach (var pooled in _sftp.Values) CloseSftp(pooled);
+            _sftp.Clear();
+        }
+        finally { _sftpLock.Release(); }
         _sweeper.Dispose();
-        _poolLock.Dispose();
+        // Handshakes already in flight can still reach these managed gates;
+        // they observe _disposed before publishing their newly owned client.
     }
 }

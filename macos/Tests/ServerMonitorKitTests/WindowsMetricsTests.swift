@@ -216,6 +216,32 @@ struct PasswordAuthTests {
         #expect(try SSHRunner.makeAskpass(for: target(UUID())) == nil)
     }
 
+    @Test func draftPasswordIsTemporaryAndConnectionTestDoesNotReuseAMaster() throws {
+        let id = UUID()
+        let draft = "unsaved-secret"
+        let helper = try SSHRunner.makeAskpass(password: draft)
+        defer { helper.cleanUp() }
+        let secretPath = try #require(helper.environment["SM_SECRET"])
+        #expect(try String(contentsOfFile: secretPath, encoding: .utf8) == draft)
+        #expect(Keychain.password(serverID: id) == nil, "testing must not save the form password")
+        let arguments = SSHRunner.connectionTestArguments(for: target(id))
+        #expect(arguments.contains("ControlPath=none"))
+        #expect(arguments.contains("ControlMaster=no"))
+        #expect(arguments.contains("ControlPersist=no"))
+        #expect(!arguments.contains("ControlMaster=auto"))
+        #expect(!arguments.contains("ControlPersist=300"))
+        #expect(!arguments.contains(draft))
+    }
+
+    @Test func explicitPortsUseOptionsSharedBySSHAndSCP() {
+        let target = SSHTarget(serverID: UUID(), host: "host", port: 2222, username: "u", credential: .agent)
+        let arguments = SSHRunner.baseArguments(for: target, controlPath: "/tmp/master")
+        #expect(arguments.contains("Port=2222"))
+        #expect(!arguments.contains("-p"), "scp uses lowercase p for preserving metadata")
+        let alias = SSHTarget(serverID: UUID(), host: "alias", port: 2222, username: "", credential: .sshConfigAlias)
+        #expect(!SSHRunner.baseArguments(for: alias, controlPath: "/tmp/master").contains("Port=2222"))
+    }
+
     @Test func helperIsCreatedLockedDownAndRemoved() throws {
         let id = UUID()
         try Keychain.savePassword("s3cret!", serverID: id)

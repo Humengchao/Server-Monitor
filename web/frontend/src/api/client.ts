@@ -9,6 +9,8 @@ declare module 'axios' {
      * request body, a 401 is about that credential, not the session.
      */
     skipAuthRedirect?: boolean;
+    /** Session used when dispatching; a late rejection cannot expire a newer login. */
+    sessionToken?: string | null;
   }
 }
 
@@ -26,6 +28,7 @@ const client = axios.create({
 client.interceptors.request.use((config) => {
   if (useAuthStore.getState().expired && !config.skipAuthRedirect) throw new axios.CanceledError('Session expired');
   const token = localStorage.getItem('token');
+  config.sessionToken = token;
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -40,6 +43,7 @@ client.interceptors.response.use(
     // down the session — see skipAuthRedirect below.
     const skipRedirect = (err.config as { skipAuthRedirect?: boolean } | undefined)?.skipAuthRedirect;
     if (err.response?.status === 401 && !skipRedirect
+      && err.config?.sessionToken === localStorage.getItem('token')
       && !['/login', '/register'].includes(window.location.pathname)) {
       useAuthStore.getState().expire();
     }

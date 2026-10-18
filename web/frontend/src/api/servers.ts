@@ -192,6 +192,9 @@ export const serversApi = {
 
   delete: (id: string) => client.delete(`/servers/${id}`),
 
+  updateNotes: (id: string, notes: string) =>
+    client.patch<{ message: string }>(`/servers/${id}/notes`, { notes }),
+
   pollNow: (id: string) => client.post<{ ok: boolean; kind?: PollErrorKind; error?: string }>(`/servers/${id}/poll`),
 
   setTags: (id: string, tag_ids: string[]) =>
@@ -209,10 +212,10 @@ export const serversApi = {
   bulkDelete: (server_ids: string[]) =>
     client.post<{ message: string; deleted: number }>('/servers/bulk/delete', { server_ids }),
 
-  // Fans a command out over SSH; allow well past the default axios timeout
-  // because the backend waits up to 60s per host.
-  bulkExec: (server_ids: string[], command: string) =>
-    client.post<BatchExecResponse>('/servers/bulk/exec', { server_ids, command }, { timeout: 120000 }),
+  // The backend bounds a full batch to nine minutes, including queued hosts.
+  // Leave headroom beyond its deadline and the proxy's 570-second read timeout.
+  bulkExec: (server_ids: string[], command: string, signal?: AbortSignal) =>
+    client.post<BatchExecResponse>('/servers/bulk/exec', { server_ids, command }, { timeout: 600000, signal }),
 
   getProcesses: (id: string, signal?: AbortSignal) =>
     client.get<ProcessListResponse>(`/servers/${id}/processes`, { signal, timeout: 20000 }),

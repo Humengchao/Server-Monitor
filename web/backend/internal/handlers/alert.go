@@ -226,6 +226,15 @@ func (h *AlertHandler) ListEvents(c *gin.Context) {
 func (h *AlertHandler) Summary(c *gin.Context) {
 	userID := c.MustGet("user_id").(uuid.UUID)
 	db := c.MustGet("db").(*models.DB)
+	if c.Query("by_server") == "1" {
+		summary, err := models.GetActiveAlertSummary(c.Request.Context(), db.Raw, userID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load alert summary"})
+			return
+		}
+		c.JSON(http.StatusOK, summary)
+		return
+	}
 	count, err := models.CountActiveAlerts(db.Raw, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load alert summary"})

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, App, Button, Collapse, Input, Modal, Space, Tag, Typography } from 'antd';
 import {
   CheckCircleFilled, CloseCircleFilled, CodeOutlined, PlayCircleOutlined, WarningOutlined,
@@ -49,6 +49,24 @@ export default function BatchExecModal({ open, servers, onClose }: Props) {
   const [command, setCommand] = useState('');
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState<BatchResult[] | null>(null);
+  const requestRef = useRef<AbortController | null>(null);
+  const confirmationRef = useRef<ReturnType<typeof modal.confirm> | null>(null);
+  const mountedRef = useRef(false);
+  const warningRef = useRef(() => message.warning(t('batch.execUncertain'), 8));
+  useEffect(() => { warningRef.current = () => message.warning(t('batch.execUncertain'), 8); }, [message, t]);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      confirmationRef.current?.destroy();
+      confirmationRef.current = null;
+      if (requestRef.current) {
+        requestRef.current.abort();
+        requestRef.current = null;
+        warningRef.current();
+      }
+    };
+  }, []);
 
   const risk = useMemo(() => detectRisk(command), [command]);
   const overLimit = servers.length > BATCH_MAX_TARGETS;
@@ -66,12 +84,14 @@ export default function BatchExecModal({ open, servers, onClose }: Props) {
   };
 
   const handleRun = async () => {
+    if (requestRef.current || confirmationRef.current || overLimit || !servers.length) return;
     const trimmed = command.trim();
     if (!trimmed) {
       message.warning(t('batch.commandRequired'));
       return;
     }
-    modal.confirm({
+    confirmationRef.current = modal.confirm({
+      afterClose: () => { confirmationRef.current = null; },
       title: t('batch.confirmTitle', { count: servers.length }),
       width: 560,
       content: (
@@ -87,10 +107,14 @@ export default function BatchExecModal({ open, servers, onClose }: Props) {
       okText: t('batch.run'),
       okType: 'danger',
       onOk: async () => {
+        if (!mountedRef.current || requestRef.current) return;
+        const controller = new AbortController();
+        requestRef.current = controller;
         setRunning(true);
         setResults(null);
         try {
-          const res = await serversApi.bulkExec(servers.map((s) => s.id), trimmed);
+          const res = await serversApi.bulkExec(servers.map((s) => s.id), trimmed, controller.signal);
+          if (!mountedRef.current || controller.signal.aborted) return;
           setResults(res.data.results || []);
           if (res.data.failed === 0) {
             message.success(t('batch.allSucceeded', { count: res.data.succeeded }));
@@ -98,9 +122,14 @@ export default function BatchExecModal({ open, servers, onClose }: Props) {
             message.warning(t('batch.partialSuccess', { ok: res.data.succeeded, failed: res.data.failed }));
           }
         } catch (err: unknown) {
-          message.error(apiError(err, t('batch.execFailed')));
+          if (!mountedRef.current) return;
+          const failure = err as { response?: { status?: number } };
+          if (!failure.response || (failure.response.status ?? 0) >= 500) warningRef.current();
+          else message.error(apiError(err, t('batch.execFailed')));
+        } finally {
+          if (requestRef.current === controller) requestRef.current = null;
+          if (mountedRef.current) setRunning(false);
         }
-        setRunning(false);
       },
     });
   };

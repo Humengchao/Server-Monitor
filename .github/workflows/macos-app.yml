@@ -9,6 +9,7 @@ on:
     branches: [main]
     paths:
       - 'macos/**'
+      - 'shared/**'
       - '.github/workflows/macos-app.yml'
     tags: ['v*']
   workflow_dispatch:
@@ -47,6 +48,12 @@ jobs:
           xcodebuild -version
           swift --version
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check shared probes
+        run: node ../shared/scripts/generate-probes.mjs --check
+
       - name: Cache SwiftPM build
         uses: actions/cache@v4
         with:
@@ -71,7 +78,11 @@ jobs:
         # SM_WIN_HOST are set, and nothing sets them here. Built under strict
         # concurrency with warnings as errors — the project keeps sources and
         # tests clean there, and this is where a regression gets caught.
-        run: swift test -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors 2>&1 | tail -n 40
+        run: swift test -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors 2>&1 | tee "$RUNNER_TEMP/swift-tests.log" | tail -n 40
+
+      - name: Report Swift failures
+        if: failure()
+        run: node ../shared/scripts/ci-errors.mjs "$RUNNER_TEMP/swift-tests.log"
 
       - name: Version
         id: version

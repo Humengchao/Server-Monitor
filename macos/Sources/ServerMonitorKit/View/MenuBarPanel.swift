@@ -52,7 +52,7 @@ public struct MenuBarPanel: View {
     }
 
     private var header: some View {
-        let offline = monitor.offlineServers.count
+        let offline = monitor.live.offlineCount
         return HStack(spacing: 8) {
             Text(loc.t("app.title")).font(.headline)
             Spacer()
@@ -77,8 +77,8 @@ public struct MenuBarPanel: View {
     }
 
     private func row(_ server: Server) -> some View {
-        let status = monitor.status[server.id] ?? .unknown
-        let snapshot = monitor.latest[server.id]
+        let reading = monitor.live.readings[server.id]
+        let status = reading?.status ?? .unknown
         return HStack(spacing: 8) {
             StatusDot(status: status)
             if !server.flag.isEmpty { Text(server.flag).font(.caption) }
@@ -86,10 +86,10 @@ public struct MenuBarPanel: View {
                 .font(.callout)
                 .lineLimit(1)
             Spacer(minLength: 6)
-            if let snapshot, status.isOnline {
+            if let cpu = reading?.cpuPercent, let memory = reading?.memoryPercent, status.isOnline {
                 HStack(spacing: 8) {
-                    metric("CPU", snapshot.cpuPercent)
-                    metric(loc.t("metric.memory"), snapshot.memoryPercent)
+                    metric("CPU", cpu)
+                    metric(loc.t("metric.memory"), memory)
                 }
             } else if case .offline(let reason) = status {
                 Text(loc.t("common.offline"))
@@ -152,15 +152,15 @@ public struct MenuBarLabel: View {
     public init() {}
 
     public var body: some View {
-        let offline = monitor.offlineServers.count
+        let offline = monitor.live.offlineCount
         HStack(spacing: 3) {
             Image(systemName: offline > 0 ? "bolt.trianglebadge.exclamationmark" : "bolt.horizontal")
             if offline > 0 {
                 Text(verbatim: "\(offline)").font(.caption2.weight(.bold))
-            } else if let peak = monitor.peakCPU {
+            } else if let peak = monitor.live.peakCPU {
                 // Showing the busiest host means the icon carries information
                 // even when everything is healthy.
-                Text(verbatim: "\(Int(peak.percent.rounded()))%")
+                Text(verbatim: "\(Int(peak.rounded()))%")
                     .font(.caption2)
                     .monospacedDigit()
             }

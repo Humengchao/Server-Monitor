@@ -27,6 +27,10 @@ import { compareServers, highResourceUsage, needsRenewal, serverStatus, summariz
 import type { FleetSort, ServerStatus } from '../utils/fleet';
 import { hasPollError } from '../utils/pollError';
 import { usePolling } from '../hooks/usePolling';
+import { responseClock } from '../hooks/useResponseClock';
+import { useFleetClock } from '../hooks/useFleetClock';
+import { shareFleetSnapshot } from '../utils/fleet';
+import type { ResponseClock } from '../hooks/useResponseClock';
 
 const { Title, Text } = Typography;
 
@@ -72,7 +76,8 @@ export default function Dashboard() {
   const [servers, setServers] = useState<Server[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  const loadInFlightRef = useRef(false);
+  const loadRequestRef = useRef<AbortController | null>(null);
+  const activeRef = useRef(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [savingServer, setSavingServer] = useState(false);
   const [editingServer, setEditingServer] = useState<Server | null>(null);
@@ -80,7 +85,11 @@ export default function Dashboard() {
   const [tagValues, setTagValues] = useState<string[]>([]);
   const [filterTagIds, setFilterTagIds] = useState<string[]>([]);
   const [selectedCredential, setSelectedCredential] = useState<string | undefined>(undefined);
-  const [refreshTimestamp, setRefreshTimestamp] = useState(0);
+  const [sampleClock, setSampleClock] = useState<ResponseClock | null>(null);
+  // Keep the last refresh label fixed while sample age continues to advance.
+  // Use the normal fleet cadence to avoid rendering every card each second.
+  const refreshTimestamp = sampleClock?.serverTime ?? 0;
+  const observedAt = useFleetClock(sampleClock, servers);
   // Timestamp of the last successful poll; drives the stale-data banner.
   const lastPollSuccessRef = useRef(0);
   const [pollStale, setPollStale] = useState(false);
@@ -166,25 +175,26 @@ export default function Dashboard() {
   }, [notification, t, i18n.language]);
 
   const loadServers = useCallback(async (showLoading = true) => {
-    if (loadInFlightRef.current) return;
-    loadInFlightRef.current = true;
+    if (!activeRef.current || loadRequestRef.current) return;
+    const controller = new AbortController();
+    loadRequestRef.current = controller;
     if (showLoading) {
       setLoading(true);
       setLoadError(false);
     }
     try {
-      const res = await serversApi.list();
-      setServers(res.data || []);
+      const res = await serversApi.list(controller.signal);
+      if (controller.signal.aborted || loadRequestRef.current !== controller) return;
+      setServers(previous => shareFleetSnapshot(previous, res.data || []));
       setLoadError(false);
-      lastPollSuccessRef.current = Date.now();
+      lastPollSuccessRef.current = performance.now();
       setPollStale(false);
       // Judge online/offline against the server's clock (Date header), not the
       // browser's: local clock skew beyond the 2-minute threshold would
       // otherwise flip every card to offline (or keep dead ones online).
-      const dateHeader = res.headers?.date;
-      const serverNow = typeof dateHeader === 'string' ? Date.parse(dateHeader) : NaN;
-      setRefreshTimestamp(Number.isNaN(serverNow) ? Date.now() : serverNow);
+      setSampleClock(responseClock(res.headers?.date));
     } catch {
+      if (controller.signal.aborted || loadRequestRef.current !== controller) return;
       if (showLoading) {
         setLoadError(true);
         message.error(t('server.loadFailed'));
@@ -192,18 +202,26 @@ export default function Dashboard() {
       // Background failures stay quiet at first, but once the outage outlasts
       // a few poll cycles the stale banner surfaces; it clears on recovery.
       const lastSuccess = lastPollSuccessRef.current;
-      if (lastSuccess > 0 && Date.now() - lastSuccess >= POLL_STALE_AFTER_MS) setPollStale(true);
+      if (lastSuccess > 0 && performance.now() - lastSuccess >= POLL_STALE_AFTER_MS) setPollStale(true);
     } finally {
-      if (showLoading) setLoading(false);
-      loadInFlightRef.current = false;
+      if (loadRequestRef.current === controller) {
+        loadRequestRef.current = null;
+        if (!controller.signal.aborted && showLoading) setLoading(false);
+      }
     }
   }, [message, t]);
 
   usePolling(() => loadServers(false), POLL_INTERVAL_MS, { leading: false });
 
   useEffect(() => {
+    activeRef.current = true;
     const timer = window.setTimeout(() => { void loadServers(); }, 0);
-    return () => window.clearTimeout(timer);
+    return () => {
+      activeRef.current = false;
+      window.clearTimeout(timer);
+      loadRequestRef.current?.abort();
+      loadRequestRef.current = null;
+    };
   }, [loadServers]);
 
   const handleSubmit = async (values: ServerFormValues) => {
@@ -244,28 +262,28 @@ export default function Dashboard() {
     const needle = query.trim().toLowerCase();
     return servers.filter((s) => {
       if (filterTagIds.length > 0 && !filterTagIds.some((id) => s.tags?.some((tag) => tag.id === id))) return false;
-      if (statusFilter !== 'all' && serverStatus(s, refreshTimestamp) !== statusFilter) return false;
+      if (statusFilter !== 'all' && serverStatus(s, observedAt) !== statusFilter) return false;
       if (!needle) return true;
       const haystack = [s.name, s.host, s.public_location, s.notes, ...(s.tags || []).map((tag) => tag.name)]
         .filter(Boolean).join(' ').toLowerCase();
       return haystack.includes(needle);
     });
 
-  }, [servers, filterTagIds, statusFilter, query, refreshTimestamp]);
+  }, [servers, filterTagIds, statusFilter, query, observedAt]);
 
   // Counts follow search / tag / status, so each shortcut describes exactly
   // the set it will show. A host can belong to more than one attention group.
   const focusGroups = useMemo(() => ({
     all: scopedServers,
-    alerts: scopedServers.filter(server => !!firing.byServer.get(server.id)?.length),
-    resource: scopedServers.filter(server => highResourceUsage(server, refreshTimestamp)),
-    expiry: scopedServers.filter(server => needsRenewal(server, refreshTimestamp)),
+    alerts: scopedServers.filter(server => !!firing.byServer.get(server.id)?.active),
+    resource: scopedServers.filter(server => highResourceUsage(server, observedAt)),
+    expiry: scopedServers.filter(server => needsRenewal(server, observedAt)),
     issues: scopedServers.filter(server => hasPollError(server)),
-  }), [scopedServers, firing.byServer, refreshTimestamp]);
+  }), [scopedServers, firing.byServer, observedAt]);
 
   const filteredServers = useMemo(() => [...focusGroups[focusFilter]]
-    .sort((a, b) => compareServers(a, b, sortKey, refreshTimestamp)),
-  [focusGroups, focusFilter, sortKey, refreshTimestamp]);
+    .sort((a, b) => compareServers(a, b, sortKey, observedAt)),
+  [focusGroups, focusFilter, sortKey, observedAt]);
 
   const hasFilters = !!query.trim() || filterTagIds.length > 0 || statusFilter !== 'all' || focusFilter !== 'all';
   const clearFilters = () => {
@@ -275,7 +293,7 @@ export default function Dashboard() {
     setFocusFilter('all');
   };
 
-  const fleet = useMemo(() => summarizeFleet(servers, refreshTimestamp), [servers, refreshTimestamp]);
+  const fleet = useMemo(() => summarizeFleet(servers, observedAt), [servers, observedAt]);
 
   const stats = useMemo(() => {
     const displayCurrency = i18n.language?.startsWith('zh') ? 'CNY' : 'USD';
@@ -600,7 +618,7 @@ export default function Dashboard() {
       ) : view === 'list' ? (
         <ServerTable
           servers={filteredServers}
-          observedAt={refreshTimestamp}
+          observedAt={observedAt}
           onEdit={handleEdit}
           onDelete={handleDelete}
           selectedIds={selecting ? selectedIds : undefined}
@@ -614,7 +632,7 @@ export default function Dashboard() {
             <Col key={s.id} xs={24} sm={12} lg={8} xl={6}>
               <ServerCard
                 server={s}
-                observedAt={refreshTimestamp}
+                observedAt={observedAt}
                 selectable={selecting}
                 selected={selectedIds.includes(s.id)}
                 onToggleSelect={toggleSelect}

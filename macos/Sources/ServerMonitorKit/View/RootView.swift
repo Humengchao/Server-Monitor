@@ -491,7 +491,10 @@ private struct SessionHost: View {
            let server = monitor.servers.first(where: { $0.id == session.serverID }) {
             switch session.kind {
             case .terminal:
-                TerminalPane(server: server, sessionID: session.id).id(session.id)
+                TerminalPane(
+                    server: server, sessionID: session.id,
+                    session: sessions.terminalSession(for: session.id)
+                ).id(session.id)
             case .sftp:
                 SFTPView(server: server).id(session.id)
             }

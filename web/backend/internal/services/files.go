@@ -160,7 +160,7 @@ type sftpFiles struct {
 }
 
 func NewSFTPFiles(ctx context.Context, client *ssh.Client, serverType string) (RemoteFiles, error) {
-	session, err := client.NewSession()
+	session, err := newSSHSession(ctx, client)
 	if err != nil {
 		return nil, err
 	}

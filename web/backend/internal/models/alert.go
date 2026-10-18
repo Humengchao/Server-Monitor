@@ -1,11 +1,13 @@
 package models
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 // Alert metrics the engine knows how to sample. Percent-based metrics are
@@ -102,7 +104,12 @@ func CreateAlertRule(db *sql.DB, r *AlertRule) error {
 }
 
 func UpdateAlertRule(db *sql.DB, r *AlertRule) error {
-	result, err := db.Exec(
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(
 		`UPDATE alert_rules SET name=$1, server_id=$2, metric=$3, comparator=$4, threshold=$5,
 		 duration_seconds=$6, enabled=$7, webhook_url=$8
 		 WHERE id=$9 AND user_id=$10
@@ -118,7 +125,19 @@ func UpdateAlertRule(db *sql.DB, r *AlertRule) error {
 	if rows == 0 {
 		return sql.ErrNoRows
 	}
-	return nil
+	// Fixing a webhook address must also unblock already queued deliveries.
+	// Disabled notifications are canceled; an in-flight HTTP request cannot be
+	// retracted, but its late acknowledgement cannot complete a retargeted row.
+	if !r.Enabled || r.WebhookURL == "" {
+		_, err = tx.Exec(`DELETE FROM alert_webhooks WHERE rule_id=$1 AND user_id=$2 AND delivered_at IS NULL`, r.ID, r.UserID)
+	} else {
+		_, err = tx.Exec(`UPDATE alert_webhooks SET target=$1,attempts=0,next_attempt_at=NOW()
+			WHERE rule_id=$2 AND user_id=$3 AND delivered_at IS NULL AND target<>$1`, r.WebhookURL, r.ID, r.UserID)
+	}
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func DeleteAlertRule(db *sql.DB, id, userID uuid.UUID) error {
@@ -298,6 +317,48 @@ func CountActiveAlerts(db *sql.DB, userID uuid.UUID) (int, error) {
 	err := db.QueryRow(
 		`SELECT COUNT(*) FROM alert_events WHERE user_id=$1 AND resolved_at IS NULL`, userID).Scan(&count)
 	return count, err
+}
+
+// ServerAlertSummary includes every active event on a host, independently of
+// the event history's page size. Rule names provide the dashboard's tooltip.
+type ServerAlertSummary struct {
+	ServerID  uuid.UUID `json:"server_id"`
+	Active    int       `json:"active"`
+	RuleNames []string  `json:"rule_names"`
+}
+
+type ActiveAlertSummary struct {
+	Active  int                  `json:"active"`
+	Servers []ServerAlertSummary `json:"servers"`
+}
+
+func GetActiveAlertSummary(ctx context.Context, db *sql.DB, userID uuid.UUID) (*ActiveAlertSummary, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT e.server_id, COUNT(*),
+		 COALESCE(ARRAY_AGG(r.name ORDER BY e.started_at DESC, e.id DESC)
+		   FILTER (WHERE COALESCE(r.name, '') <> ''), '{}'::text[])
+		 FROM alert_events e
+		 LEFT JOIN alert_rules r ON r.id = e.rule_id AND r.user_id = e.user_id
+		 WHERE e.user_id = $1 AND e.resolved_at IS NULL
+		 GROUP BY e.server_id
+		 ORDER BY e.server_id`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	summary := &ActiveAlertSummary{Servers: []ServerAlertSummary{}}
+	for rows.Next() {
+		var server ServerAlertSummary
+		if err := rows.Scan(&server.ServerID, &server.Active, pq.Array(&server.RuleNames)); err != nil {
+			return nil, err
+		}
+		summary.Active += server.Active
+		summary.Servers = append(summary.Servers, server)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return summary, nil
 }
 
 // PruneAlertEvents drops resolved events older than the retention window so the

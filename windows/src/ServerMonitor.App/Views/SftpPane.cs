@@ -42,6 +42,8 @@ public sealed class SftpPane : UserControl, ISessionPane
     private bool _busy;
     private SessionRecord? _session;
     private CancellationTokenSource? _transfer;
+    private readonly CancellationTokenSource _lifetime = new();
+    private bool _closed;
 
     /// <summary>One row of the listing.</summary>
     private sealed record Row(SftpEntry Entry)
@@ -174,8 +176,15 @@ public sealed class SftpPane : UserControl, ISessionPane
     /// </remarks>
     public void CloseSession()
     {
+        if (_closed) return;
+        _closed = true;
+        _lifetime.Cancel();
         _transfer?.Cancel();
-        EndSession();
+        if (!_busy)
+        {
+            EndSession();
+            _lifetime.Dispose();
+        }
     }
 
     /// <summary>The window this pane sits in, for the dialogs it opens.</summary>
@@ -246,7 +255,8 @@ public sealed class SftpPane : UserControl, ISessionPane
         Say(Strings.Get("terminal.connect"));
         return RunAsync(async () =>
         {
-            var home = await _browser.HomeAsync(Monitor.Target(_server)).ConfigureAwait(true);
+            var home = await _browser.HomeAsync(Monitor.Target(_server), _lifetime.Token).ConfigureAwait(true);
+            _lifetime.Token.ThrowIfCancellationRequested();
             StartSession();
             await GoAsync(home).ConfigureAwait(true);
         });
@@ -283,7 +293,7 @@ public sealed class SftpPane : UserControl, ISessionPane
     {
         Say(Strings.Get("common.refresh"));
         var entries = await _browser
-            .ListAsync(Monitor.Target(_server), _directory, _showHidden)
+            .ListAsync(Monitor.Target(_server), _directory, _showHidden, _lifetime.Token)
             .ConfigureAwait(true);
         _list.ItemsSource = entries.Select(entry => new Row(entry)).ToList();
         Say(entries.Count == 0
@@ -306,7 +316,7 @@ public sealed class SftpPane : UserControl, ISessionPane
         _ = RunAsync(async () =>
         {
             await _browser
-                .CreateDirectoryAsync(Monitor.Target(_server), SftpPath.Combine(_directory, name))
+                .CreateDirectoryAsync(Monitor.Target(_server), SftpPath.Combine(_directory, name), _lifetime.Token)
                 .ConfigureAwait(true);
             await ReloadAsync().ConfigureAwait(true);
         });
@@ -323,7 +333,7 @@ public sealed class SftpPane : UserControl, ISessionPane
         {
             await _browser
                 .RenameAsync(
-                    Monitor.Target(_server), entry.Path, SftpPath.Combine(_directory, name))
+                    Monitor.Target(_server), entry.Path, SftpPath.Combine(_directory, name), _lifetime.Token)
                 .ConfigureAwait(true);
             await ReloadAsync().ConfigureAwait(true);
         });
@@ -345,7 +355,7 @@ public sealed class SftpPane : UserControl, ISessionPane
         {
             foreach (var entry in chosen)
             {
-                await _browser.DeleteAsync(Monitor.Target(_server), entry.Path).ConfigureAwait(true);
+                await _browser.DeleteAsync(Monitor.Target(_server), entry.Path, _lifetime.Token).ConfigureAwait(true);
             }
             await ReloadAsync().ConfigureAwait(true);
         });
@@ -395,17 +405,18 @@ public sealed class SftpPane : UserControl, ISessionPane
     private Task UploadAsync(List<string> files) =>
         RunAsync(async () =>
         {
-            _transfer = new CancellationTokenSource();
+            _transfer = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
             try
             {
                 foreach (var file in files)
                 {
                     var remote = SftpPath.Combine(_directory, System.IO.Path.GetFileName(file));
+                    using var progress = Report(Strings.Get("sftp.uploading"));
                     await _browser.UploadAsync(
                         Monitor.Target(_server),
                         file,
                         remote,
-                        Report(Strings.Get("sftp.uploading")),
+                        progress,
                         _transfer.Token).ConfigureAwait(true);
                 }
                 await ReloadAsync().ConfigureAwait(true);
@@ -450,25 +461,25 @@ public sealed class SftpPane : UserControl, ISessionPane
             Title = Strings.Get("sftp.downloadSelected"),
         };
         if (folder.ShowDialog(Host) != true) return;
-        _ = TransferDownAsync([.. chosen.Select(entry => (
-            entry,
-            System.IO.Path.Combine(folder.FolderName, SftpPath.LocalNameFor(entry.Name))))]);
+        var paths = SftpPath.LocalDownloadPaths(folder.FolderName, chosen.Select(entry => entry.Name));
+        _ = TransferDownAsync([.. chosen.Zip(paths, (entry, path) => (entry, path))], overwrite: false);
     }
 
-    private Task TransferDownAsync(List<(SftpEntry Entry, string Local)> transfers) =>
+    private Task TransferDownAsync(List<(SftpEntry Entry, string Local)> transfers, bool overwrite = true) =>
         RunAsync(async () =>
         {
-            _transfer = new CancellationTokenSource();
+            _transfer = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
             try
             {
                 foreach (var (entry, local) in transfers)
                 {
+                    using var progress = Report(Strings.Get("sftp.downloading"));
                     await _browser.DownloadAsync(
                         Monitor.Target(_server),
                         entry.Path,
                         local,
-                        Report(Strings.Get("sftp.downloading")),
-                        _transfer.Token).ConfigureAwait(true);
+                        progress,
+                        _transfer.Token, overwrite).ConfigureAwait(true);
                 }
                 Say(Strings.Get("keys.copied"));
             }
@@ -484,18 +495,17 @@ public sealed class SftpPane : UserControl, ISessionPane
     /// A progress sink that updates the bar without flooding the dispatcher.
     /// </summary>
     /// <remarks>
-    /// SSH.NET reports per chunk, which for a large file is thousands of
-    /// callbacks a second; a dispatcher post each would starve the UI thread
-    /// it is trying to keep informed. One in every hundred is still smoother
-    /// than the eye can follow.
+    /// SSH.NET reports per chunk. Coalesce before posting to the dispatcher,
+    /// keeping one pending callback and the newest value instead of a queue
+    /// of callbacks that discard their work only after reaching the UI thread.
     /// </remarks>
-    private IProgress<TransferProgress> Report(string verb)
+    private CoalescedProgress<TransferProgress> Report(string verb)
     {
-        var seen = 0;
         _progress.Visibility = Visibility.Visible;
-        return new Progress<TransferProgress>(progress =>
+        return new CoalescedProgress<TransferProgress>(
+            action => Dispatcher.BeginInvoke(action, System.Windows.Threading.DispatcherPriority.Background), progress =>
         {
-            if (++seen % 100 != 0 && progress.Fraction < 1) return;
+            if (_closed) return;
             _progress.Value = progress.Fraction;
             Say($"{verb} {progress.Name} — {Format.Percent(progress.Fraction * 100)}");
         });
@@ -503,7 +513,7 @@ public sealed class SftpPane : UserControl, ISessionPane
 
     private async Task RunAsync(Func<Task> work)
     {
-        if (_busy) return;
+        if (_busy || _closed) return;
         _busy = true;
         try
         {
@@ -520,17 +530,24 @@ public sealed class SftpPane : UserControl, ISessionPane
         finally
         {
             _busy = false;
+            if (_closed)
+            {
+                EndSession();
+                _lifetime.Dispose();
+            }
         }
     }
 
     private void Say(string text)
     {
+        if (_closed) return;
         _message.Text = text;
         _message.Foreground = Theme.Ink.Brush(Theme.Palette.Secondary);
     }
 
     private void Fail(Exception error)
     {
+        if (_closed) return;
         _message.Text = FailureText.For(error);
         _message.Foreground = Theme.Ink.Brush(Theme.Palette.Offline);
     }

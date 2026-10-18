@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"database/sql"
+	"errors"
 	"net/http"
 	"time"
 
@@ -23,7 +25,7 @@ func (h *MetricsHandler) GetLatest(c *gin.Context) {
 	}
 	db := c.MustGet("db").(*models.DB)
 	// Authorization must not depend on SSH credentials being decryptable.
-	owned, err := models.ServerOwnedByUser(db.Raw, id, userID)
+	owned, err := models.ServerOwnedByUserContext(c.Request.Context(), db.Raw, id, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify server ownership"})
 		return
@@ -32,9 +34,15 @@ func (h *MetricsHandler) GetLatest(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
 		return
 	}
-	m, err := models.GetLatestMetric(db.Raw, id)
-	if err != nil {
+	m, err := models.GetLatestMetric(c.Request.Context(), db.Raw, id)
+	// A new server has no samples yet. Database failures must stay distinguishable
+	// so clients retain their last reading and show the failed refresh.
+	if errors.Is(err, sql.ErrNoRows) {
 		c.JSON(http.StatusOK, nil)
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load metrics"})
 		return
 	}
 	c.JSON(http.StatusOK, m)
@@ -48,7 +56,7 @@ func (h *MetricsHandler) GetHistory(c *gin.Context) {
 		return
 	}
 	db := c.MustGet("db").(*models.DB)
-	owned, err := models.ServerOwnedByUser(db.Raw, id, userID)
+	owned, err := models.ServerOwnedByUserContext(c.Request.Context(), db.Raw, id, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify server ownership"})
 		return
@@ -69,7 +77,7 @@ func (h *MetricsHandler) GetHistory(c *gin.Context) {
 			until = t
 		}
 	}
-	points, err := models.GetMetrics(db.Raw, id, since, until)
+	points, err := models.GetMetrics(c.Request.Context(), db.Raw, id, since, until)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load metrics"})
 		return

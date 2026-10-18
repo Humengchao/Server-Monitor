@@ -78,6 +78,12 @@ public sealed class MonitorService : INotifyPropertyChanged, IAsyncDisposable
     /// </remarks>
     public event Action? Published;
 
+    /// <summary>Lightweight tray state, updated even while view publishing is suspended.</summary>
+    public event Action? StatusUpdated;
+    public IReadOnlyDictionary<Guid, ServerStatus> ObservedStatus => _observedStatus;
+    private readonly Dictionary<Guid, ServerStatus> _observedStatus = [];
+    private readonly Dictionary<Guid, double> _observedCpu = [];
+
     // MARK: - Machinery
 
     private readonly MetricsCollector _collector;
@@ -159,12 +165,14 @@ public sealed class MonitorService : INotifyPropertyChanged, IAsyncDisposable
                 if (Database.LatestSample(server.Id) is { } sample)
                 {
                     _latest[server.Id] = sample.ToSnapshot();
+                    _observedCpu.TryAdd(server.Id, sample.CpuPercent);
                 }
             }
             Notify(nameof(Identities));
             Notify(nameof(Groups));
             Notify(nameof(Snippets));
             Published?.Invoke();
+            StatusUpdated?.Invoke();
         }
         catch (Exception error)
         {
@@ -237,6 +245,8 @@ public sealed class MonitorService : INotifyPropertyChanged, IAsyncDisposable
         Alerts?.Forget(server.Id);
         _latest.Remove(server.Id);
         _status.Remove(server.Id);
+        _observedStatus.Remove(server.Id);
+        _observedCpu.Remove(server.Id);
         _detailedServers.Remove(server.Id);
         _detailWanted.Remove(server.Id);
         _failureStreak.Remove(server.Id);
@@ -402,6 +412,7 @@ public sealed class MonitorService : INotifyPropertyChanged, IAsyncDisposable
             var summary = await Docker.SummaryAsync(Target(server), token).ConfigureAwait(false);
             _dispatch(() =>
             {
+                if (token.IsCancellationRequested || !HasServer(server.Id)) return;
                 _dockerSummaries[server.Id] = summary;
                 Published?.Invoke();
             });
@@ -881,6 +892,7 @@ public sealed class MonitorService : INotifyPropertyChanged, IAsyncDisposable
             {
                 if (!HasServer(server.Id)) return;
                 NoteSuccess(server.Id);
+                Observe(server.Id, ServerStatus.Online(completedAt), snapshot);
                 Commit(server.Id, () =>
                 {
                     _latest[server.Id] = snapshot;
@@ -936,6 +948,7 @@ public sealed class MonitorService : INotifyPropertyChanged, IAsyncDisposable
                 // in their language (FailureText).
                 _log?.Invoke($"{server.Name}: {error.Message}");
                 var failure = ServerStatus.Offline(Ssh.FailureText.For(error));
+                Observe(server.Id, failure, null);
                 Commit(server.Id, () => _status[server.Id] = failure);
                 Alerts?.Evaluate(Server(server.Id) ?? server, failure, null);
             });
@@ -1066,16 +1079,23 @@ public sealed class MonitorService : INotifyPropertyChanged, IAsyncDisposable
 
     /// <summary>Servers that failed their last poll, for the tray summary.</summary>
     public List<Server> OfflineServers => Servers
-        .Where(s => _status.TryGetValue(s.Id, out var status) && status.Kind == StatusKind.Offline)
+        .Where(s => _observedStatus.TryGetValue(s.Id, out var status) && status.Kind == StatusKind.Offline)
         .ToList();
 
     /// <summary>Highest CPU currently reported, or null when nothing has reported yet.</summary>
     public (Server Server, double Percent)? PeakCpu => Servers
-        .Where(s => _latest.ContainsKey(s.Id))
-        .Select(s => (Server: s, Percent: _latest[s.Id].CpuPercent))
+        .Where(s => _observedCpu.ContainsKey(s.Id))
+        .Select(s => (Server: s, Percent: _observedCpu[s.Id]))
         .OrderByDescending(p => p.Percent)
         .Select(p => ((Server, double)?)p)
         .FirstOrDefault();
+
+    private void Observe(Guid serverId, ServerStatus status, MetricSnapshot? snapshot)
+    {
+        _observedStatus[serverId] = status;
+        if (snapshot is not null) _observedCpu[serverId] = snapshot.CpuPercent;
+        StatusUpdated?.Invoke();
+    }
 
     /// <summary>One-shot connectivity check for the editor's "test connection" button.</summary>
     public Task<MetricSnapshot> TestConnectionAsync(

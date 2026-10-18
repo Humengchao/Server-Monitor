@@ -30,6 +30,7 @@ public actor MetricsCollector {
     static let dockerInterval: TimeInterval = 30
     /// Hosts already asked, so one that cannot answer is not asked every poll.
     private var cpuModelLookedUp: Set<UUID> = []
+    private var generations: [UUID: UInt64] = [:]
 
     public init(runner: SSHRunner = SSHRunner()) {
         self.runner = runner
@@ -43,7 +44,9 @@ public actor MetricsCollector {
     ) async throws -> MetricSnapshot {
         // Kick the ICMP probe off alongside the SSH round trip when it is due,
         // so latency costs no extra wall-clock time.
-        async let icmp = pingIfDue(target: target)
+        let generation = generations[target.serverID, default: 0]
+        try checkGeneration(target.serverID, generation)
+        async let icmp = pingIfDue(target: target, generation: generation)
 
         var snapshot: MetricSnapshot
         var elapsed: TimeInterval = 0
@@ -51,19 +54,20 @@ public actor MetricsCollector {
 
         switch osKind {
         case .windows:
-            snapshot = try await collectWindows(target: target)
+            snapshot = try await collectWindows(target: target, generation: generation)
         case .linux:
-            (snapshot, elapsed, clocks) = try await collectLinux(target: target, processes: processes)
+            (snapshot, elapsed, clocks) = try await collectLinux(target: target, processes: processes, generation: generation)
         case .auto:
             // Probe with one cheap command rather than speculatively running a
             // whole collection. The Linux batch contains `sleep` and several
             // `cat`s; against a Windows shell that does not fail fast, it hung
             // until the timeout — a detection should cost a moment, not 30s.
             let detected = try await detectOS(target: target)
+            try checkGeneration(target.serverID, generation)
             if detected == .linux {
-                (snapshot, elapsed, clocks) = try await collectLinux(target: target, processes: processes)
+                (snapshot, elapsed, clocks) = try await collectLinux(target: target, processes: processes, generation: generation)
             } else {
-                snapshot = try await collectWindows(target: target)
+                snapshot = try await collectWindows(target: target, generation: generation)
             }
             snapshot.detectedOS = detected
         }
@@ -78,7 +82,13 @@ public actor MetricsCollector {
             endClock: clocks.end
         )
         snapshot.latencyMs = await icmp?.averageMs ?? clockLatency
+        try checkGeneration(target.serverID, generation)
         return snapshot
+    }
+
+    private func checkGeneration(_ serverID: UUID, _ generation: UInt64) throws {
+        try Task.checkCancellation()
+        guard generations[serverID, default: 0] == generation else { throw CancellationError() }
     }
 
     /// Asks the host what it is, with a short timeout.
@@ -120,13 +130,14 @@ public actor MetricsCollector {
 
     /// The parsed model when the host gave one; otherwise the cached answer,
     /// or one `lscpu` round trip the first time.
-    private func cpuModel(parsed: String, target: SSHTarget) async -> String {
+    private func cpuModel(parsed: String, target: SSHTarget, generation: UInt64) async throws -> String {
         if !parsed.isEmpty { return parsed }
         if let cached = cpuModelCache[target.serverID] { return cached }
         guard !cpuModelLookedUp.contains(target.serverID) else { return "" }
         cpuModelLookedUp.insert(target.serverID)
         let answer = ((try? await runner.run(ProcParsers.cpuModelFallbackCommand, on: target, timeout: 15)) ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        try checkGeneration(target.serverID, generation)
         if !answer.isEmpty { cpuModelCache[target.serverID] = answer }
         return answer
     }
@@ -140,12 +151,13 @@ public actor MetricsCollector {
     }
 
     private func collectLinux(
-        target: SSHTarget, processes: Bool
+        target: SSHTarget, processes: Bool, generation: UInt64
     ) async throws -> (MetricSnapshot, TimeInterval, (start: String, end: String)) {
         let started = Date()
         let askDocker = Self.shouldSampleDocker(lastSampled: dockerSampledAt[target.serverID], now: started)
         let command = ProcParsers.linuxMetricsCommand(processes: processes, docker: askDocker)
         let output = try await runner.run(command, on: target)
+        try checkGeneration(target.serverID, generation)
         let elapsed = Date().timeIntervalSince(started)
 
         let sections = ProcParsers.splitSections(output, want: ProcParsers.Section.allCases.count)
@@ -195,9 +207,10 @@ public actor MetricsCollector {
         snapshot.filesystems = ProcParsers.filesystems(section(.diskUsage))
         snapshot.processes = ProcParsers.processes(section(.processes))
         snapshot.identity = ProcParsers.hostIdentity(section(.hostInfo))
-        snapshot.identity.cpuModel = await cpuModel(
-            parsed: snapshot.identity.cpuModel, target: target
+        snapshot.identity.cpuModel = try await cpuModel(
+            parsed: snapshot.identity.cpuModel, target: target, generation: generation
         )
+        try checkGeneration(target.serverID, generation)
         snapshot.gpu = ProcParsers.gpuStatus(section(.gpu))
         snapshot.interfaces = ProcParsers.netInterfaces(section(.netDev))
 
@@ -222,8 +235,9 @@ public actor MetricsCollector {
         return (snapshot, elapsed, (section(.startClock), section(.endClock)))
     }
 
-    private func collectWindows(target: SSHTarget) async throws -> MetricSnapshot {
+    private func collectWindows(target: SSHTarget, generation: UInt64) async throws -> MetricSnapshot {
         let output = try await runner.run(WindowsMetrics.command, on: target)
+        try checkGeneration(target.serverID, generation)
         guard var snapshot = WindowsMetrics.parse(output) else {
             // Carry the output: "no metrics" alone says nothing about whether
             // the shell rejected the command, PowerShell is missing, or the
@@ -305,7 +319,7 @@ public actor MetricsCollector {
     }
 
     /// Returns a fresh ICMP reading when one is due, otherwise the cached one.
-    private func pingIfDue(target: SSHTarget) async -> PingProbe.Reading? {
+    private func pingIfDue(target: SSHTarget, generation: UInt64) async -> PingProbe.Reading? {
         if let cached = pingCache[target.serverID],
            Date().timeIntervalSince(cached.takenAt) < pingInterval {
             return cached.reading
@@ -316,6 +330,7 @@ public actor MetricsCollector {
             // display on one dropped probe.
             return pingCache[target.serverID]?.reading
         }
+        guard !Task.isCancelled, generations[target.serverID, default: 0] == generation else { return nil }
         pingCache[target.serverID] = (reading, Date())
         return reading
     }
@@ -352,9 +367,15 @@ public actor MetricsCollector {
 
     /// Forgets a host's rate baseline and drops its multiplexed connection.
     public func forget(target: SSHTarget) async {
+        generations[target.serverID, default: 0] &+= 1
         baselines.removeValue(forKey: target.serverID)
         interfaceBaselines.removeValue(forKey: target.serverID)
         pingCache.removeValue(forKey: target.serverID)
+        cpuModelCache.removeValue(forKey: target.serverID)
+        cpuModelLookedUp.remove(target.serverID)
+        dockerCache.removeValue(forKey: target.serverID)
+        dockerSampledAt.removeValue(forKey: target.serverID)
+        if case .sshConfigAlias = target.credential { await Self.resolvedHosts.remove(target.host) }
         await runner.disconnect(target)
     }
 }

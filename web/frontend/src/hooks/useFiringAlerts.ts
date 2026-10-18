@@ -1,5 +1,5 @@
-import { useCallback, useState } from 'react';
-import { alertsApi, AlertEvent } from '../api/alerts';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { alertsApi, ServerAlertSummary } from '../api/alerts';
 import { usePolling } from './usePolling';
 
 // The alert engine evaluates on its own cadence (ALERT_INTERVAL, 30s by
@@ -7,8 +7,8 @@ import { usePolling } from './usePolling';
 const REFRESH_MS = 20000;
 
 export interface FiringAlerts {
-  /** Currently-firing events keyed by server ID; a server may have several. */
-  byServer: Map<string, AlertEvent[]>;
+  /** Active counts and rule names for every firing server. */
+  byServer: Map<string, ServerAlertSummary>;
   loading: boolean;
   error: boolean;
 }
@@ -22,34 +22,44 @@ export interface FiringAlerts {
  * people actually look.
  */
 export function useFiringAlerts(): FiringAlerts {
-  const [byServer, setByServer] = useState<Map<string, AlertEvent[]>>(new Map());
+  const [byServer, setByServer] = useState<Map<string, ServerAlertSummary>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const requestRef = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
+    if (requestRef.current) return;
+    const controller = new AbortController();
+    requestRef.current = controller;
     try {
-      // active=1 so the server does the filtering: on a fleet with a long
-      // alert history, pulling everything just to discard the resolved ones
-      // wastes the round trip.
-      const res = await alertsApi.listEvents(true, 200);
-      const next = new Map<string, AlertEvent[]>();
-      for (const event of res.data || []) {
-        if (event.resolved_at || !event.server_id) continue;
-        const list = next.get(event.server_id);
-        if (list) list.push(event);
-        else next.set(event.server_id, [event]);
+      // The event history is capped; an aggregate keeps older active alerts
+      // visible even when newer incidents fill that entire page.
+      const res = await alertsApi.serverSummary(controller.signal);
+      if (controller.signal.aborted || requestRef.current !== controller) return;
+      const next = new Map<string, ServerAlertSummary>();
+      for (const server of res.data.servers || []) {
+        if (server.active > 0) next.set(server.server_id, server);
       }
       setByServer(next);
       setError(false);
     } catch {
+      if (controller.signal.aborted || requestRef.current !== controller) return;
       // Alert state is supplementary here; a failure must not disturb the list.
       setError(true);
     } finally {
-      setLoading(false);
+      if (requestRef.current === controller) {
+        requestRef.current = null;
+        if (!controller.signal.aborted) setLoading(false);
+      }
     }
   }, []);
 
   usePolling(() => load(), REFRESH_MS);
+
+  useEffect(() => () => {
+    requestRef.current?.abort();
+    requestRef.current = null;
+  }, []);
 
   return { byServer, loading, error };
 }

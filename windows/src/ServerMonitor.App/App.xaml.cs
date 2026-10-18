@@ -206,9 +206,8 @@ public partial class App : Application
         // tray after any real close threw out of ShowWindow.
         _window.Closed += (_, _) => _window = null;
         _tray = new TrayIcon(Monitor, ShowWindow, QuitApp, OpenServer);
-        // Redrawn on publish rather than on a timer, so the icon's number is
-        // never a tick behind what the window shows.
-        Monitor.Published += () => _tray.Refresh();
+        // The tray stays current when the main window suspends its rendering.
+        Monitor.StatusUpdated += () => _tray.Refresh();
 
         _instance.ListenForActivation(() => Dispatcher.Invoke(ShowWindow));
 

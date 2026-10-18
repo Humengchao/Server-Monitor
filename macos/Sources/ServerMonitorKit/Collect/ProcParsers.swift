@@ -39,38 +39,12 @@ public enum ProcParsers {
     /// asked for only when something will show them. A skipped section still
     /// emits its separator, so the parser's section count never moves.
     public static func linuxMetricsCommand(processes: Bool, docker: Bool) -> String {
-        let commands = [
-            "date +%s%N",
-            "cat /proc/stat",
-            "sleep 0.5 || sleep 1; cat /proc/stat",
-            "cat /proc/meminfo",
-            "cat /proc/loadavg",
-            "cat /proc/net/dev",
-            "cat /proc/diskstats",
-            "cat /proc/uptime",
-            "nproc",
-            // Every local filesystem, not just `/`: the storage card lists
-            // mounts, and the headline figure still comes from `/`.
-            "df -P -B1 \(pseudoFilesystemExclusions) 2>/dev/null || df -P -B1",
-            // Sorted by CPU share, trimmed here rather than locally so the
-            // round trip stays small on a busy host.
-            processes ? "ps -eo pid=,user=,pcpu=,pmem=,rss=,args= --sort=-pcpu 2>/dev/null | head -n 30" : "true",
-            // key=value rather than one fact per line: `lines()` drops empty lines,
-            // so a host where any of these produced nothing shifted every later
-            // field up — the CPU model would arrive as the IP address list.
-            "echo host=$(hostname); echo kern=$(uname -r); echo arch=$(uname -m); echo os=$(. /etc/os-release 2>/dev/null && echo $PRETTY_NAME); echo ips=$(hostname -I 2>/dev/null); echo cpu=$(grep -m1 '^model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2-)",
-            // Short-circuits to nothing on the ~all hosts with no NVIDIA card,
-            // so this costs one `command -v` there. Emitted as key=value for
-            // the same reason the host-info section is.
-            "command -v nvidia-smi >/dev/null 2>&1 && { nvidia-smi | grep -m1 'Driver Version' | sed -E 's/.*Driver Version: *([^ ]+).*CUDA Version: *([^ ]+).*/driver=\\1\\ncuda=\\2/'; nvidia-smi --query-gpu=index,name,utilization.gpu,memory.total,memory.used,temperature.gpu,fan.speed,power.draw,power.limit --format=csv,noheader,nounits | sed 's/^/gpu=/'; nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader,nounits | sed 's/^/proc=/'; } || true",
-            // The engine counts cost nothing extra here — this call was already
-            // being made for the version alone, and asking for all four fields
-            // saves the machine screen and the Docker page a round trip each.
-            docker
-                ? "D=\"{{.ServerVersion}}|{{.Images}}|{{.ContainersRunning}}|{{.ContainersStopped}}|{{.ContainersPaused}}\"; docker info --format \"$D\" || sudo -n docker info --format \"$D\" || true"
-                : "true",
-            "date +%s%N",
-        ]
+        let commands = SharedProbes.linuxSections.map { section in
+            section
+                .replacingOccurrences(of: "%PROCESSES%", with: processes ? SharedProbes.values["processes"]! : "true")
+                .replacingOccurrences(of: "%DOCKER%", with: docker ? SharedProbes.values["docker-info"]! : "true")
+                .replacingOccurrences(of: "%DF_EXCLUDE%", with: pseudoFilesystemExclusions)
+        }
         return commands.joined(separator: "; echo \(sectionSeparator); ")
     }
 
@@ -449,16 +423,15 @@ public enum ProcParsers {
     /// builds the `-x` flags `df` is asked with, and it is the check applied to
     /// whatever comes back — the fallback `df` on a host whose `df` lacks `-x`
     /// returns everything, so the local check has to be complete anyway.
-    static let pseudoFilesystemTypes = [
-        "tmpfs", "devtmpfs", "overlay", "squashfs", "udev", "none", "efivarfs", "ramfs",
-    ]
+    static let pseudoFilesystemTypes = SharedProbes.values["pseudo-filesystem-types"]!
+        .split(separator: " ").map(String.init)
 
     static let pseudoFilesystemExclusions = pseudoFilesystemTypes.map { "-x \($0)" }.joined(separator: " ")
 
     /// Where `/proc/cpuinfo` has no model name — every aarch64 host — `lscpu`
     /// derives one from the implementer/part tables. It walks every core's
     /// sysfs topology to do it, so it is asked once per host, not per poll.
-    static let cpuModelFallbackCommand = "lscpu 2>/dev/null | grep -m1 -i '^model name' | cut -d: -f2-"
+    static let cpuModelFallbackCommand = SharedProbes.values["cpu-model-fallback"]!
 
     /// Rows of `ps -eo pid=,user=,pcpu=,pmem=,rss=,args=`.
     ///

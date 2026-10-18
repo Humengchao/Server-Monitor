@@ -11,6 +11,28 @@ export const MAX_FUTURE_SAMPLE_SKEW_MS = 30000;
 export const RESOURCE_WARNING_PERCENT = 90;
 export const RENEWAL_WINDOW_DAYS = 30;
 
+function equalFields(a: object, b: object, omit: string[] = []): boolean {
+  const first = a as Record<string, unknown>, second = b as Record<string, unknown>;
+  const keys = Object.keys(first).filter(key => !omit.includes(key));
+  return keys.length === Object.keys(second).filter(key => !omit.includes(key)).length
+    && keys.every(key => Object.is(first[key], second[key]));
+}
+
+/** Compare once on receipt rather than serializing every card on every render. */
+export function shareFleetSnapshot(previous: Server[], incoming: Server[]): Server[] {
+  const byId = new Map(previous.map(server => [server.id, server]));
+  const next = incoming.map(server => {
+    const old = byId.get(server.id);
+    if (!old || !equalFields(old, server, ['tags', 'latest_metrics'])) return server;
+    const oldTags = old.tags || [], tags = server.tags || [];
+    if (oldTags.length !== tags.length || !oldTags.every((tag, index) => equalFields(tag, tags[index]))) return server;
+    if (old.latest_metrics !== server.latest_metrics
+      && (!old.latest_metrics || !server.latest_metrics || !equalFields(old.latest_metrics, server.latest_metrics))) return server;
+    return old;
+  });
+  return next.length === previous.length && next.every((server, index) => server === previous[index]) ? previous : next;
+}
+
 export function serverStatus(server: Server, observedAt: number): ServerStatus {
   const recordedAt = Date.parse(server.latest_metrics?.recorded_at || '');
   if (!Number.isFinite(recordedAt)) return 'pending';

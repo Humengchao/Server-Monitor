@@ -1,4 +1,5 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import type { Text as EditorText } from '@codemirror/state';
 import type { DragEvent } from 'react';
 import { Alert, App, Breadcrumb, Button, Card, Empty, Input, Modal, Progress, Space, Spin, Table, Tag, Tooltip, Typography } from 'antd';
 import {
@@ -18,7 +19,7 @@ const FileCodeEditor = lazy(() => import('./FileCodeEditor'));
 
 const { Text } = Typography;
 const TEXT_LIMIT = 2 * 1024 * 1024;
-interface Editor { entry: RemoteFileEntry; content: string; original: string; revision: string; crlf: boolean }
+interface Editor { entry: RemoteFileEntry; content: EditorText; original: EditorText; bytes: number; revision: string; crlf: boolean }
 interface Props extends FileTarget { onLockedChange?: (locked: boolean) => void }
 
 // The audit log stores "METHOD basename" for the text and upload endpoints and
@@ -58,12 +59,17 @@ export default function FileManager({ serverId, containerId, onLockedChange }: P
     confirmations.current.add(instance);
     return instance;
   };
-  const dirty = !!editor && editor.content !== editor.original;
+  const dirty = !!editor && !editor.content.eq(editor.original);
   const locked = busy || dirty;
 
   useEffect(() => {
     onLockedChange?.(locked);
-    useFileSessionStore.setState({ locked, draft: dirty && editor ? { name: editor.entry.name, path: editor.entry.path, content: editor.crlf ? editor.content.replace(/\r?\n/g, '\r\n') : editor.content } : null });
+    // Keep the persistent document intact while typing. Materialize a string only
+    // if the operator actually exports the draft, including after session expiry.
+    useFileSessionStore.setState({ locked, draft: dirty && editor ? {
+      name: editor.entry.name, path: editor.entry.path,
+      content: () => editor.content.sliceString(0, editor.content.length, editor.crlf ? '\r\n' : '\n'),
+    } : null });
   }, [locked, dirty, editor, onLockedChange]);
   useEffect(() => () => { onLockedChange?.(false); useFileSessionStore.setState({ locked: false, draft: null }); }, [onLockedChange]);
 
@@ -117,9 +123,12 @@ export default function FileManager({ serverId, containerId, onLockedChange }: P
     const controller = startOperation();
     try {
       const response = await filesApi.read({ serverId, containerId }, entry.path, controller.signal);
+      const { Text: DocumentText } = await import('@codemirror/state');
       if (!controller.signal.aborted) {
         const text = response.data.content.replace(/\r\n/g, '\n');
-        setEditor({ entry, content: text, original: text, revision: response.data.revision, crlf: response.data.content.includes('\r\n') });
+        const doc = DocumentText.of(text.split('\n'));
+        setEditor({ entry, content: doc, original: doc, bytes: new TextEncoder().encode(text).length,
+          revision: response.data.revision, crlf: response.data.content.includes('\r\n') });
       }
     } catch (failure) { await showFailure(failure, controller.signal); }
     finally { if (operation.current === controller) setBusy(false); }
@@ -133,8 +142,8 @@ export default function FileManager({ serverId, containerId, onLockedChange }: P
 
   const saveText = async () => {
     if (!editor || !dirty || busy || editor.entry.is_symlink) return;
-    const content = editor.crlf ? editor.content.replace(/\r?\n/g, '\r\n') : editor.content;
-    if (new TextEncoder().encode(content).byteLength > TEXT_LIMIT) { message.error(t('files.textLimit')); return; }
+    if (editor.bytes + (editor.crlf ? editor.content.lines - 1 : 0) > TEXT_LIMIT) { message.error(t('files.textLimit')); return; }
+    const content = editor.content.sliceString(0, editor.content.length, editor.crlf ? '\r\n' : '\n');
     const controller = startOperation('saving');
     const snapshot = editor;
     try {
@@ -261,9 +270,7 @@ export default function FileManager({ serverId, containerId, onLockedChange }: P
   const entries = listing?.entries || [];
   const needle = filter.trim().toLowerCase();
   const visibleEntries = needle ? entries.filter((entry) => entry.name.toLowerCase().includes(needle)) : entries;
-  const editorStats = useMemo(() => editor
-    ? { lines: editor.content.split('\n').length, bytes: new TextEncoder().encode(editor.content).byteLength }
-    : null, [editor]);
+  const editorStats = editor ? { lines: editor.content.lines, bytes: editor.bytes } : null;
 
   const columns: ColumnsType<RemoteFileEntry> = [
     {
@@ -378,7 +385,7 @@ export default function FileManager({ serverId, containerId, onLockedChange }: P
     <Modal destroyOnHidden open={!!editor} title={<Space><FileOutlined /><span className="file-editor-name">{editor?.entry.path}</span>{dirty && <Tag color="orange">{t('files.unsaved')}</Tag>}</Space>} width="min(1100px, 95vw)" onCancel={closeEditor} mask={{ closable: !dirty && !busy }} keyboard={!busy} footer={<Space><Button disabled={busy} onClick={closeEditor}>{t('files.close')}</Button><Button type="primary" icon={<SaveOutlined />} loading={busy} disabled={!dirty || editor?.entry.is_symlink} onClick={() => { void saveText(); }}>{t('common.save')}</Button></Space>}>
       {editor?.entry.is_symlink && <Alert type="warning" showIcon title={t('files.symlinkReadOnly')} />}
       {editor && <Suspense fallback={<div className="file-editor-loading"><Spin /><Text type="secondary">{t('files.editorLoading')}</Text></div>}>
-        <FileCodeEditor key={editor.entry.path} path={editor.entry.path} value={editor.content} readOnly={busy || editor.entry.is_symlink} onChange={(content) => setEditor((current) => current ? { ...current, content } : current)} onSave={() => { void saveText(); }} />
+        <FileCodeEditor key={editor.entry.path} path={editor.entry.path} value={editor.content} bytes={editor.bytes} readOnly={busy || editor.entry.is_symlink} onChange={(content, bytes) => setEditor((current) => current ? { ...current, content, bytes } : current)} onSave={() => { void saveText(); }} />
       </Suspense>}
       {editor && editorStats && (
         <Text type="secondary" className="file-editor-status" title={t('files.textLimit')}>

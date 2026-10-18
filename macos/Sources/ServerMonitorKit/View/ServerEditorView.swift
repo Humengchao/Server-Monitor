@@ -327,7 +327,7 @@ public struct ServerEditorView: View {
                 port: server.port,
                 username: server.username,
                 credential: server.credential
-            ))
+            ), password: password.isEmpty ? nil : password)
             info = loc.t("server.connectionOK")
         } catch {
             failure = error.localizedDescription

@@ -313,6 +313,15 @@ public final class Database: @unchecked Sendable {
         try queue.write { db in try record.save(db) }
     }
 
+    public func endSession(id: UUID, at date: Date = Date()) throws {
+        try queue.write { db in
+            // Deleting a host nulls its reference. Updating only the end time
+            // must not resurrect that foreign key from an in-memory session.
+            try db.execute(sql: "UPDATE sessionRecord SET endedAt = ? WHERE id = ?",
+                           arguments: [date, id])
+        }
+    }
+
     public func recentSessions(limit: Int = 200) throws -> [SessionRecord] {
         try queue.read { db in
             try SessionRecord
@@ -394,24 +403,39 @@ public final class Database: @unchecked Sendable {
         detectedOS: OSKind?,
         updateFacts: Bool
     ) async throws {
+        try await recordPoll(serverID: serverID, snapshot: snapshot, detectedOS: detectedOS,
+                             updateFacts: updateFacts, validity: nil)
+    }
+
+    func recordPoll(
+        serverID: UUID,
+        snapshot: MetricSnapshot,
+        detectedOS: OSKind?,
+        updateFacts: Bool,
+        validity: PollWriteValidity?
+    ) async throws {
         try await queue.write { db in
-            _ = try MetricSample(serverID: serverID, snapshot: snapshot).inserted(db)
-            guard updateFacts || detectedOS != nil,
-                  var server = try Server.fetchOne(db, key: ["id": serverID])
-            else { return }
-            var changed = false
-            if updateFacts {
-                server.cores = snapshot.cores
-                server.memoryTotal = snapshot.memoryTotal
-                server.diskTotal = snapshot.diskTotal
-                server.dockerVersion = snapshot.dockerVersion
-                changed = true
+            let write = {
+                _ = try MetricSample(serverID: serverID, snapshot: snapshot).inserted(db)
+                guard updateFacts || detectedOS != nil,
+                      var server = try Server.fetchOne(db, key: ["id": serverID])
+                else { return }
+                var changed = false
+                if updateFacts {
+                    server.cores = snapshot.cores
+                    server.memoryTotal = snapshot.memoryTotal
+                    server.diskTotal = snapshot.diskTotal
+                    server.dockerVersion = snapshot.dockerVersion
+                    changed = true
+                }
+                if let detectedOS, server.osKind == .auto {
+                    server.osKind = detectedOS
+                    changed = true
+                }
+                if changed { try server.update(db) }
             }
-            if let detectedOS, server.osKind == .auto {
-                server.osKind = detectedOS
-                changed = true
-            }
-            if changed { try server.update(db) }
+            if let validity { try validity.withValidWrite(write) }
+            else { try write() }
         }
     }
 

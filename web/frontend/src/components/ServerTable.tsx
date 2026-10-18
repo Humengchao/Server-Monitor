@@ -7,7 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { PHONE_QUERY, useMediaQuery } from '../hooks/useMediaQuery';
 import { useNavigate } from 'react-router-dom';
 import { Server } from '../api/servers';
-import { AlertEvent } from '../api/alerts';
+import { ServerAlertSummary } from '../api/alerts';
 import { availabilityColor } from '../api/uptime';
 import { formatBytes, formatUptime, formatDateTime, getExpirationInfo, severityColor } from '../utils/format';
 import { resourcePercent, serverStatus } from '../utils/fleet';
@@ -26,8 +26,8 @@ interface Props {
   onSelectionChange?: (ids: string[]) => void;
   /** Observed 24h availability keyed by server ID. */
   availability?: Map<string, number | undefined>;
-  /** Currently-firing alert events keyed by server ID. */
-  firing?: Map<string, AlertEvent[]>;
+  /** Active alert counts and rule names keyed by server ID. */
+  firing?: Map<string, ServerAlertSummary>;
 }
 
 function MiniBar({ percent, hue, label }: { percent: number | null; hue: 'blue' | 'green' | 'violet'; label?: string }) {
@@ -77,10 +77,10 @@ export default function ServerTable({
           <div>
             <strong title={server.name}>
               {server.name}
-              {!!firing?.get(server.id)?.length && (
-                <Tooltip title={firing.get(server.id)!.map((e) => e.rule_name).filter(Boolean).join('\n') || undefined}>
+              {!!firing?.get(server.id)?.active && (
+                <Tooltip title={firing.get(server.id)!.rule_names.filter(Boolean).join('\n') || undefined}>
                   <span className="alert-pill table-alert-pill">
-                    <AlertOutlined />&nbsp;{firing.get(server.id)!.length}
+                    <AlertOutlined />&nbsp;{firing.get(server.id)!.active}
                   </span>
                 </Tooltip>
               )}

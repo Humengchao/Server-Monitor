@@ -6,16 +6,21 @@ collectors:
 | Consumer | How it reads these |
 |---|---|
 | `windows/src/ServerMonitor.Core` | `EmbeddedResource`, read by `Probes.cs` |
-| `web/backend` (Go) | `//go:embed` — not wired up yet |
-| `macos/Sources/ServerMonitorKit` (Swift) | SwiftPM `resources:` — not wired up yet |
+| `web/backend` (Go) | Generated `probes_generated.go`, compiled into the binary |
+| `macos/Sources/ServerMonitorKit` (Swift) | Generated `SharedProbes.generated.swift`, compiled into the app |
 
-Three copies of the same script had already drifted (plan §2, F11): the Go one
-was missing the `$ProgressPreference` fix that keeps PowerShell's progress
-stream out of stdout on Server 2016, sampled CPU from a single
-`Win32_Processor.LoadPercentage` instead of two `PerfRawData` reads, and had
-neither the `ident` nor the `ips` line. The version here is the Swift one,
-which had all of them. Wiring Go and Swift to this directory — and deleting
-their copies — is a task for the macOS machine.
+Edit the files here, then run `node shared/scripts/generate-probes.mjs` from
+the repository root. Commit both generated files with the source change.
+All three CI workflows run `node shared/scripts/generate-probes.mjs --check`
+and reject stale generated copies. Node is needed only when updating probes;
+ordinary Go/Swift builds and the backend Docker context remain self-contained.
+
+All three Windows collectors now use the same two-sample PerfRawData script,
+UTF-8 output, suppressed progress stream, and raw-DEFLATE delivery. The additive
+`dockerpresent` key distinguishes installation from an unavailable daemon.
+The native Linux clients consume all 15 sections; Go selects the common core
+sections and the explicitly named web root-disk/Docker-presence variants in
+`probes.txt`. Section order is validated by the generator and parser tests.
 
 ## Files
 
@@ -33,7 +38,7 @@ adding one does not shift the section numbering.
 
 The reader joins the lines with `; echo ---SM-SECTION---; ` so the whole thing
 is a single SSH round trip, which is what makes this affordable on a
-high-latency link. Two placeholders are substituted before sending:
+high-latency link. Three placeholders are substituted before sending:
 
 - `%PROCESSES%` — the `ps` line, or `true` when no machine screen is open.
   `ps` over every process costs the host ~30 ms per poll.

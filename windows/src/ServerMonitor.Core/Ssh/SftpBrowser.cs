@@ -129,6 +129,29 @@ public static class SftpPath
         return name.Length > 255 ? name[..255] : name;
     }
 
+    /// <summary>Reserves distinct Windows names without overwriting existing files.</summary>
+    public static List<string> LocalDownloadPaths(string directory, IEnumerable<string> remoteNames)
+    {
+        var used = new HashSet<string>(Directory.EnumerateFileSystemEntries(directory)
+            .Select(Path.GetFileName)!, StringComparer.OrdinalIgnoreCase);
+        var result = new List<string>();
+        foreach (var remote in remoteNames)
+        {
+            var original = LocalNameFor(remote);
+            var name = original;
+            for (var suffix = 2; !used.Add(name); suffix++)
+            {
+                var extension = Path.GetExtension(original);
+                if (extension.Length > 100) extension = extension[..100];
+                var stem = Path.GetFileNameWithoutExtension(original);
+                var tail = $" ({suffix}){extension}";
+                name = stem[..Math.Min(stem.Length, 255 - tail.Length)] + tail;
+            }
+            result.Add(Path.Combine(directory, name));
+        }
+        return result;
+    }
+
     private static readonly HashSet<string> ReservedNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "CON", "PRN", "AUX", "NUL",
@@ -168,12 +191,13 @@ public static class SftpPath
 /// with everything else the app holds for that host and closed by the same
 /// idle sweep.
 /// </remarks>
-public sealed class SftpBrowser(Func<SshTarget, CancellationToken, Task<SftpClient>> lease)
+public sealed class SftpBrowser(Func<SshTarget, CancellationToken, Task<SftpLease>> lease)
 {
     /// <summary>Where a host puts you when you log in.</summary>
     public async Task<string> HomeAsync(SshTarget target, CancellationToken cancellationToken = default)
     {
-        var client = await lease(target, cancellationToken).ConfigureAwait(false);
+        using var operation = await lease(target, cancellationToken).ConfigureAwait(false);
+        var client = operation.Client;
         // WorkingDirectory is what the server reported at connect; on a host
         // where it is somehow empty, "/" is a directory that always exists.
         var home = client.WorkingDirectory;
@@ -194,7 +218,8 @@ public sealed class SftpBrowser(Func<SshTarget, CancellationToken, Task<SftpClie
         bool showHidden = false,
         CancellationToken cancellationToken = default)
     {
-        var client = await lease(target, cancellationToken).ConfigureAwait(false);
+        using var operation = await lease(target, cancellationToken).ConfigureAwait(false);
+        var client = operation.Client;
         var listing = await client.ListDirectoryAsync(path, cancellationToken)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -225,12 +250,13 @@ public sealed class SftpBrowser(Func<SshTarget, CancellationToken, Task<SftpClie
     public async Task<bool> IsDirectoryAsync(
         SshTarget target, string path, CancellationToken cancellationToken = default)
     {
-        var client = await lease(target, cancellationToken).ConfigureAwait(false);
+        using var operation = await lease(target, cancellationToken).ConfigureAwait(false);
+        var client = operation.Client;
         try
         {
-            return client.GetAttributes(path).IsDirectory;
+            return (await client.GetAttributesAsync(path, cancellationToken).ConfigureAwait(false)).IsDirectory;
         }
-        catch (Exception)
+        catch (Exception error) when (error is not OperationCanceledException)
         {
             return false;
         }
@@ -249,32 +275,33 @@ public sealed class SftpBrowser(Func<SshTarget, CancellationToken, Task<SftpClie
         string remotePath,
         string localPath,
         IProgress<TransferProgress>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool overwrite = true)
     {
-        var client = await lease(target, cancellationToken).ConfigureAwait(false);
-        var total = client.GetAttributes(remotePath).Size;
+        using var operation = await lease(target, cancellationToken).ConfigureAwait(false);
+        var client = operation.Client;
+        var total = (await client.GetAttributesAsync(remotePath, cancellationToken).ConfigureAwait(false)).Size;
         var name = SftpPath.Name(remotePath);
-        var temporary = localPath + ".part";
+        var temporary = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(localPath))!, $".sm-download-{Guid.NewGuid():N}.part");
+        var created = false;
 
         try
         {
-            await using (var file = File.Create(temporary))
+            await using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                64 * 1024, FileOptions.Asynchronous))
             {
-                await Task.Factory.FromAsync(
-                    client.BeginDownloadFile(
-                        remotePath,
-                        file,
-                        null,
-                        null,
-                        downloaded => progress?.Report(
-                            new TransferProgress(name, (long)downloaded, total))),
-                    client.EndDownloadFile).ConfigureAwait(false);
+                created = true;
+                await client.DownloadFileAsync(remotePath, file,
+                    new InlineProgress<DownloadFileProgressReport>(report => progress?.Report(
+                        new TransferProgress(name, (long)report.TotalBytesDownloaded, total))),
+                    cancellationToken).ConfigureAwait(false);
             }
-            File.Move(temporary, localPath, overwrite: true);
+            cancellationToken.ThrowIfCancellationRequested();
+            File.Move(temporary, localPath, overwrite);
         }
         catch
         {
-            try { File.Delete(temporary); } catch (Exception) { /* nothing to clean up */ }
+            if (created) try { File.Delete(temporary); } catch (IOException) { /* preserve original failure */ }
             throw;
         }
     }
@@ -286,35 +313,98 @@ public sealed class SftpBrowser(Func<SshTarget, CancellationToken, Task<SftpClie
         IProgress<TransferProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        var client = await lease(target, cancellationToken).ConfigureAwait(false);
+        using var operation = await lease(target, cancellationToken).ConfigureAwait(false);
+        var client = operation.Client;
         var info = new FileInfo(localPath);
         var name = info.Name;
 
-        await using var file = File.OpenRead(localPath);
-        await Task.Factory.FromAsync(
-            client.BeginUploadFile(
-                file,
-                remotePath,
-                true,
-                null,
-                null,
-                uploaded => progress?.Report(
-                    new TransferProgress(name, (long)uploaded, info.Length))),
-            client.EndUploadFile).ConfigureAwait(false);
+        var temporary = SftpPath.Combine(SftpPath.Parent(remotePath), $".sm-upload-{Guid.NewGuid():N}.part");
+        var created = false;
+        try
+        {
+            SftpFileAttributes? original = null;
+            try { original = await client.GetAttributesAsync(remotePath, cancellationToken).ConfigureAwait(false); }
+            catch (Renci.SshNet.Common.SftpPathNotFoundException) { /* A new destination starts private. */ }
+
+            await using (var file = new FileStream(localPath, FileMode.Open, FileAccess.Read, FileShare.Read,
+                64 * 1024, FileOptions.Asynchronous))
+            {
+                await using (var empty = await client.OpenAsync(temporary, FileMode.CreateNew, FileAccess.Write,
+                    cancellationToken).ConfigureAwait(false))
+                {
+                    created = true;
+                    // SSH.NET 2026 exposes SetAttributes only synchronously. Do
+                    // not write content until the empty temporary is owner-only.
+                    var privateAttributes = await client.GetAttributesAsync(temporary, cancellationToken).ConfigureAwait(false);
+                    privateAttributes.SetPermissions(600);
+                    await Task.Run(() => client.SetAttributes(temporary, privateAttributes), cancellationToken).ConfigureAwait(false);
+                }
+                // The native upload truncates this existing private inode; it
+                // retains cancellable writes/progress without SftpFileStream's
+                // uncancellable DisposeAsync retry of a failed buffered flush.
+                await client.UploadFileAsync(file, temporary, canOverride: true,
+                    new InlineProgress<UploadFileProgressReport>(report => progress?.Report(
+                        new TransferProgress(name, (long)report.TotalBytesUploaded, info.Length))),
+                    cancellationToken).ConfigureAwait(false);
+            }
+            if (original is not null)
+            {
+                // Start with the completed temporary's attributes: copying the
+                // old Size/timestamps would truncate or misdate the new file.
+                var attributes = await client.GetAttributesAsync(temporary, cancellationToken).ConfigureAwait(false);
+                attributes.UserId = original.UserId;
+                attributes.GroupId = original.GroupId;
+                var mode = (short)((original.IsUIDBitSet ? 4000 : 0) + (original.IsGroupIDBitSet ? 2000 : 0)
+                    + (original.IsStickyBitSet ? 1000 : 0) + (original.OwnerCanRead ? 400 : 0)
+                    + (original.OwnerCanWrite ? 200 : 0) + (original.OwnerCanExecute ? 100 : 0)
+                    + (original.GroupCanRead ? 40 : 0) + (original.GroupCanWrite ? 20 : 0)
+                    + (original.GroupCanExecute ? 10 : 0) + (original.OthersCanRead ? 4 : 0)
+                    + (original.OthersCanWrite ? 2 : 0) + (original.OthersCanExecute ? 1 : 0));
+                attributes.SetPermissions(mode);
+                // Failure to preserve metadata must leave the original intact.
+                await Task.Run(() => client.SetAttributes(temporary, attributes), cancellationToken).ConfigureAwait(false);
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            // SSH.NET exposes the POSIX atomic-replace extension synchronously.
+            // Keep it off the dispatcher, and finish the commit once sent.
+            try
+            {
+                await Task.Run(() => client.RenameFile(temporary, remotePath, isPosix: true), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception error) when (error is Renci.SshNet.Common.SshException or NotSupportedException)
+            {
+                // A server lacking atomic replacement can still accept a new
+                // file. Never implement overwrite as delete-then-rename.
+                if (await client.ExistsAsync(remotePath, cancellationToken).ConfigureAwait(false))
+                    throw new IOException("The server could not atomically replace the destination. The original file was kept.", error);
+                await client.RenameFileAsync(temporary, remotePath, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch
+        {
+            if (created)
+            {
+                using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                try { await client.DeleteFileAsync(temporary, cleanup.Token).ConfigureAwait(false); }
+                catch (Exception) { /* Connection loss can leave the uniquely named partial, never the destination. */ }
+            }
+            throw;
+        }
     }
 
     public async Task CreateDirectoryAsync(
         SshTarget target, string path, CancellationToken cancellationToken = default)
     {
-        var client = await lease(target, cancellationToken).ConfigureAwait(false);
-        client.CreateDirectory(path);
+        using var operation = await lease(target, cancellationToken).ConfigureAwait(false);
+        await operation.Client.CreateDirectoryAsync(path, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task RenameAsync(
         SshTarget target, string from, string to, CancellationToken cancellationToken = default)
     {
-        var client = await lease(target, cancellationToken).ConfigureAwait(false);
-        client.RenameFile(from, to);
+        using var operation = await lease(target, cancellationToken).ConfigureAwait(false);
+        await operation.Client.RenameFileAsync(from, to, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -329,20 +419,20 @@ public sealed class SftpBrowser(Func<SshTarget, CancellationToken, Task<SftpClie
     public async Task DeleteAsync(
         SshTarget target, string path, CancellationToken cancellationToken = default)
     {
-        var client = await lease(target, cancellationToken).ConfigureAwait(false);
-        await DeleteAsync(client, path, cancellationToken).ConfigureAwait(false);
+        using var operation = await lease(target, cancellationToken).ConfigureAwait(false);
+        await DeleteAsync(operation.Client, path, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task DeleteAsync(
-        SftpClient client, string path, CancellationToken cancellationToken)
+        ISftpClient client, string path, CancellationToken cancellationToken)
     {
-        var attributes = client.GetAttributes(path);
+        var attributes = await client.GetAttributesAsync(path, cancellationToken).ConfigureAwait(false);
         // A symlink to a directory is deleted as a link: following it would
         // delete the target's contents, which is not what "delete this link"
         // means anywhere else.
         if (!attributes.IsDirectory || attributes.IsSymbolicLink)
         {
-            client.DeleteFile(path);
+            await client.DeleteFileAsync(path, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -355,6 +445,11 @@ public sealed class SftpBrowser(Func<SshTarget, CancellationToken, Task<SftpClie
             await DeleteAsync(client, SftpPath.Combine(path, child.Name), cancellationToken)
                 .ConfigureAwait(false);
         }
-        client.DeleteDirectory(path);
+        await client.DeleteDirectoryAsync(path, cancellationToken).ConfigureAwait(false);
     }
+}
+
+internal sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
+{
+    public void Report(T value) => report(value);
 }

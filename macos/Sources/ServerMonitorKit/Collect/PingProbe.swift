@@ -101,4 +101,5 @@ actor HostResolutionCache {
 
     func value(for alias: String) -> String? { entries[alias] }
     func store(_ address: String, for alias: String) { entries[alias] = address }
+    func remove(_ alias: String) { entries.removeValue(forKey: alias) }
 }

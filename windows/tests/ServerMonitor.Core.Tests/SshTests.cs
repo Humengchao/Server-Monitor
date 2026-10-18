@@ -410,7 +410,8 @@ public class KnownHostsTests
             // throws the way a concurrent appender would make it throw.
             using (File.Open(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
             {
-                Assert.Equal(HostKeyVerdict.Unknown, known.Check("host", "ssh-ed25519", [1, 2, 3]));
+                Assert.Equal(HostKeyVerdict.Unavailable, known.Check("host", "ssh-ed25519", [1, 2, 3]));
+                Assert.False(known.Add("host", "ssh-ed25519", [9, 9, 9]));
                 Assert.NotEmpty(errors);
             }
 

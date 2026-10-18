@@ -14,13 +14,16 @@ import (
 	"github.com/google/uuid"
 )
 
-// A small SQL driver keeps collector regressions runnable without PostgreSQL.
+// A small SQL driver keeps server regressions runnable without PostgreSQL.
 // It records queries and can fail midway through a streamed result set.
 type collectorConnector struct {
-	rows    [][]driver.Value
-	rowErr  error
-	queries []string
-	closed  bool
+	rows      [][]driver.Value
+	columns   []string
+	rowErr    error
+	queries   []string
+	args      [][]driver.NamedValue
+	queryHook func(context.Context) error
+	closed    bool
 }
 
 func (c *collectorConnector) Connect(context.Context) (driver.Conn, error) {
@@ -41,8 +44,14 @@ func (*collectorConnection) Close() error { return nil }
 func (*collectorConnection) Begin() (driver.Tx, error) {
 	return nil, errors.New("unexpected transaction")
 }
-func (c *collectorConnection) QueryContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Rows, error) {
+func (c *collectorConnection) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
 	c.fixture.queries = append(c.fixture.queries, query)
+	c.fixture.args = append(c.fixture.args, args)
+	if c.fixture.queryHook != nil {
+		if err := c.fixture.queryHook(ctx); err != nil {
+			return nil, err
+		}
+	}
 	return &collectorRows{fixture: c.fixture}, nil
 }
 
@@ -51,7 +60,10 @@ type collectorRows struct {
 	index   int
 }
 
-func (*collectorRows) Columns() []string {
+func (r *collectorRows) Columns() []string {
+	if r.fixture.columns != nil {
+		return r.fixture.columns
+	}
 	return []string{"id", "user_id", "name", "host", "port", "ssh_username", "ssh_password", "ssh_key",
 		"ssh_host_key", "credential_id", "server_type", "credential_username", "credential_password", "credential_key"}
 }

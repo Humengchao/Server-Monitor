@@ -68,6 +68,7 @@ func main() {
 	notifier := services.NewWebhookNotifier(cfg.AllowPrivateWebhooks)
 	alertEngine := services.NewAlertEngine(db, time.Duration(cfg.AlertInterval)*time.Second, notifier)
 	alertEngine.Start()
+	webhookDispatcher := services.StartWebhookDispatcher(db, notifier)
 
 	// Shared SSH connection cache for interactive API calls (Docker management).
 	sshCache := services.NewSSHConnCache()
@@ -115,6 +116,7 @@ func main() {
 	log.Println("Shutting down server...")
 	collector.Stop()
 	alertEngine.Stop()
+	webhookDispatcher.Stop()
 	sshCache.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

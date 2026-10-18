@@ -386,11 +386,12 @@ private struct RenameSheet: View {
                 Spacer()
                 Button(loc.t("common.cancel")) { dismiss() }.keyboardShortcut(.cancelAction)
                 Button(loc.t("common.save")) {
-                    onRename(name.trimmingCharacters(in: .whitespaces))
+                    onRename(name)
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
+                .disabled(!SFTPClient.isFileName(name))
             }
         }
         .padding(16)

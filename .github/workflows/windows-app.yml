@@ -56,6 +56,12 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check shared probes
+        run: node ../shared/scripts/generate-probes.mjs --check
+
       - name: Cache NuGet
         uses: actions/cache@v4
         with:

@@ -22,9 +22,9 @@ public struct RemoteFile: Identifiable, Hashable, Sendable {
 
 /// Remote file browsing and transfer over the system ssh/scp clients.
 ///
-/// Listing goes through `ls` rather than the sftp subsystem because it reuses
-/// the same multiplexed connection the metric polls already hold open, so
-/// opening a directory costs no new handshake.
+/// Listing uses NUL-separated records over the pooled SSH connection. Display
+/// text from `ls` cannot identify files safely: whitespace and link arrows are
+/// legal parts of a filename.
 public struct SFTPClient: Sendable {
     private let runner: SSHRunner
 
@@ -35,11 +35,15 @@ public struct SFTPClient: Sendable {
     public enum Failure: LocalizedError {
         case notADirectory(String)
         case transferFailed(String)
+        case invalidListing
+        case invalidPath
 
         public var errorDescription: String? {
             switch self {
             case .notADirectory(let path): return "Not a directory: \(path)"
             case .transferFailed(let message): return message
+            case .invalidListing: return "The host returned an unsupported or incomplete directory listing."
+            case .invalidPath: return "The file path cannot be represented safely."
             }
         }
     }
@@ -53,55 +57,57 @@ public struct SFTPClient: Sendable {
 
     public func home(on target: SSHTarget) async throws -> String {
         let output = try await runner.run("printf %s \"$HOME\"", on: target)
-        let path = output.trimmingCharacters(in: .whitespacesAndNewlines)
-        return path.isEmpty ? "/" : path
+        guard output.hasPrefix("/"), !output.contains("\u{FFFD}"), !output.contains("\0") else {
+            throw Failure.invalidPath
+        }
+        return output
     }
 
     public func list(_ path: String, on target: SSHTarget) async throws -> [RemoteFile] {
-        // -A hides . and .. but keeps dotfiles; long-iso makes the timestamp
-        // parseable regardless of the host's locale.
-        let command = "ls -lA --time-style=long-iso -- \(Self.quote(path)) 2>/dev/null || ls -lA -- \(Self.quote(path))"
-        let output = try await runner.run(command, on: target)
-        return Self.parseListing(output, parent: path)
+        guard Self.isAbsolutePath(path) else { throw Failure.invalidPath }
+        let output = try await runner.run(Self.listCommand(path), on: target)
+        return try Self.parseListing(output, parent: path)
     }
 
-    static func parseListing(_ output: String, parent: String) -> [RemoteFile] {
+    static func listCommand(_ path: String) -> String {
+        // GNU find is present on the supported Linux hosts. Unsupported hosts
+        // fail closed instead of falling back to a lossy human-readable list.
+        // Markers also reject a partially successful command: SSHRunner may
+        // return stdout when the remote exit status was nonzero.
+        "LC_ALL=C; export LC_ALL; cd -- \(quote(path)) && "
+            + "printf 'SM-FILES-V1\\0' && "
+            + "find . -mindepth 1 -maxdepth 1 -printf '%f\\0%y\\0%s\\0%T@\\0%M\\0%u\\0' && "
+            + "printf 'SM-FILES-END\\0'"
+    }
+
+    static func parseListing(_ output: String, parent: String) throws -> [RemoteFile] {
+        guard isAbsolutePath(parent), !output.contains("\u{FFFD}") else { throw Failure.invalidListing }
+        var fields = output.components(separatedBy: "\0")
+        guard fields.count >= 3, fields.first == "SM-FILES-V1",
+              fields.last == "", fields[fields.count - 2] == "SM-FILES-END"
+        else { throw Failure.invalidListing }
+        fields.removeLast(2)
+        fields.removeFirst()
+        guard fields.count.isMultiple(of: 6) else { throw Failure.invalidListing }
         var files: [RemoteFile] = []
-        // A directory can contain thousands of entries. DateFormatter is
-        // expensive to construct, so create one per listing instead of one per
-        // row; keeping it local also avoids sharing a mutable formatter across
-        // concurrent SFTP sessions.
-        let formatter = makeDateFormatter()
-        for rawLine in output.lines() {
-            let line = String(rawLine)
-            if line.hasPrefix("total ") { continue }
-            let fields = line.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
-            // mode links owner group size date time name…
-            guard fields.count >= 8, fields[0].count >= 10 else { continue }
-
-            let mode = fields[0]
-            let isDirectory = mode.hasPrefix("d")
-            let isSymlink = mode.hasPrefix("l")
-            let size = Int64(fields[4]) ?? 0
-            let modified = parseDate(fields[5], fields[6], formatter: formatter)
-
-            // The name is everything after the timestamp, so spaces survive.
-            var name = fields[7...].joined(separator: " ")
-            if isSymlink, let arrow = name.range(of: " -> ") {
-                name = String(name[..<arrow.lowerBound])
-            }
-            guard name != ".", name != ".." else { continue }
-
-            let base = parent.hasSuffix("/") ? String(parent.dropLast()) : parent
+        var names: Set<String> = []
+        for index in stride(from: 0, to: fields.count, by: 6) {
+            let name = fields[index]
+            guard isFileName(name), names.insert(name).inserted,
+                  let size = Int64(fields[index + 2]), size >= 0,
+                  let epoch = Double(fields[index + 3]), epoch.isFinite,
+                  fields[index + 1].count == 1, fields[index + 4].count == 10
+            else { throw Failure.invalidListing }
+            let type = fields[index + 1]
             files.append(RemoteFile(
                 name: name,
-                path: "\(base)/\(name)",
+                path: parent + (parent.hasSuffix("/") ? "" : "/") + name,
                 size: size,
-                modified: modified,
-                isDirectory: isDirectory,
-                isSymlink: isSymlink,
-                mode: mode,
-                owner: fields[2]
+                modified: Date(timeIntervalSince1970: epoch),
+                isDirectory: type == "d",
+                isSymlink: type == "l",
+                mode: fields[index + 4],
+                owner: fields[index + 5]
             ))
         }
         // Directories first, then case-insensitive by name.
@@ -112,15 +118,21 @@ public struct SFTPClient: Sendable {
         }
     }
 
-    private static func makeDateFormatter() -> DateFormatter {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd HH:mm"
-        return formatter
+    static func isFileName(_ name: String) -> Bool {
+        !name.isEmpty && name != "." && name != ".."
+            && !name.contains("/") && !name.contains("\0") && !name.contains("\u{FFFD}")
     }
 
-    private static func parseDate(_ day: String, _ time: String, formatter: DateFormatter) -> Date? {
-        formatter.date(from: "\(day) \(time)")
+    private static func isAbsolutePath(_ path: String) -> Bool {
+        path.hasPrefix("/") && !path.contains("\0") && !path.contains("\u{FFFD}")
+            && !path.split(separator: "/").contains(where: { $0 == "." || $0 == ".." })
+    }
+
+    static func removeCommand(_ file: RemoteFile) throws -> String {
+        guard isFileName(file.name), isAbsolutePath(file.path), file.path.hasSuffix("/" + file.name) else {
+            throw Failure.invalidPath
+        }
+        return (file.isDirectory ? "rm -rf -- " : "rm -f -- ") + quote(file.path)
     }
 
     // MARK: - Mutations
@@ -131,13 +143,13 @@ public struct SFTPClient: Sendable {
 
     public func remove(_ file: RemoteFile, on target: SSHTarget) async throws {
         // Recursive only for directories, and only ever on an explicit path.
-        let command = file.isDirectory
-            ? "rm -rf -- \(Self.quote(file.path))"
-            : "rm -f -- \(Self.quote(file.path))"
+        let command = try Self.removeCommand(file)
         _ = try await runner.run(command, on: target)
     }
 
     public func rename(_ file: RemoteFile, to newName: String, on target: SSHTarget) async throws {
+        guard Self.isFileName(newName) else { throw Failure.invalidPath }
+        _ = try Self.removeCommand(file) // Validate the source without touching it.
         let parent = (file.path as NSString).deletingLastPathComponent
         let destination = "\(parent)/\(newName)"
         _ = try await runner.run(
@@ -200,10 +212,13 @@ public struct SFTPClient: Sendable {
         arguments.append("-r")
         arguments.append("\(target.sshDestination):\(file.path)")
         arguments.append(localURL.path)
+        let askpass = try SSHRunner.makeAskpass(for: target)
+        defer { askpass?.cleanUp() }
         _ = try await SSHRunner.execute(
             executable: "/usr/bin/scp",
             arguments: arguments,
-            timeout: 600
+            timeout: 600,
+            environment: askpass?.environment
         )
     }
 
@@ -253,10 +268,13 @@ public struct SFTPClient: Sendable {
         arguments.append("-r")
         arguments.append(localURL.path)
         arguments.append("\(target.sshDestination):\(remoteDirectory)")
+        let askpass = try SSHRunner.makeAskpass(for: target)
+        defer { askpass?.cleanUp() }
         _ = try await SSHRunner.execute(
             executable: "/usr/bin/scp",
             arguments: arguments,
-            timeout: 600
+            timeout: 600,
+            environment: askpass?.environment
         )
     }
 }

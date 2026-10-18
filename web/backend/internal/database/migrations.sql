@@ -255,7 +255,26 @@ CREATE TABLE IF NOT EXISTS alert_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_alert_events_user_time ON alert_events(user_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_alert_events_page ON alert_events(user_id, started_at DESC, id DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_alert_events_open ON alert_events(rule_id, server_id) WHERE resolved_at IS NULL;
+
+-- Durable delivery queue, committed in the event transaction.
+CREATE TABLE IF NOT EXISTS alert_webhooks (
+    id BIGSERIAL PRIMARY KEY,
+    event_id BIGINT NOT NULL REFERENCES alert_events(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    rule_id UUID NOT NULL REFERENCES alert_rules(id) ON DELETE CASCADE,
+    server_id UUID NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    transition TEXT NOT NULL,
+    target TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    attempts INT NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    delivered_at TIMESTAMPTZ,
+    UNIQUE(event_id, transition)
+);
+CREATE INDEX IF NOT EXISTS idx_alert_webhooks_due ON alert_webhooks(next_attempt_at,id) WHERE delivered_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_alert_webhooks_order ON alert_webhooks(rule_id,server_id,id) WHERE delivered_at IS NULL;
 
 -- last_seen_at was never written; liveness comes from
 -- server_latest_metrics.recorded_at instead.

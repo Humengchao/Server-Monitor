@@ -41,10 +41,12 @@ func NewContainerFiles(ctx context.Context, client *ssh.Client, containerID, ser
 	}
 	command := "docker"
 	probe := " inspect --format '{{.State.Status}}' " + containerID
-	output, _, err := RunCmdBounded(client, command+probe, 10*time.Second, 1024)
-	if err != nil {
+	probeContext, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	output, _, err := runCmdContext(probeContext, client, command+probe, 1024)
+	if err != nil && probeContext.Err() == nil {
 		command = "sudo -n docker"
-		output, _, err = RunCmdBounded(client, command+probe, 10*time.Second, 1024)
+		output, _, err = runCmdContext(probeContext, client, command+probe, 1024)
 	}
 	if err != nil {
 		return nil, err
@@ -82,7 +84,7 @@ func (store *containerFiles) run(script string, arguments []string, input io.Rea
 	if err := store.context.Err(); err != nil {
 		return err
 	}
-	session, err := store.client.NewSession()
+	session, err := newSSHSession(store.context, store.client)
 	if err != nil {
 		return err
 	}

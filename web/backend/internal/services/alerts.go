@@ -177,7 +177,9 @@ func (e *AlertEngine) applyRule(rule models.AlertRule, snap models.AlertSnapshot
 		if !wasFiring {
 			return
 		}
-		resolved, err := models.ResolveAlertEvent(e.db, rule.ID, snap.ServerID, now)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		_, err := models.ResolveAlertEventWithNotification(ctx, e.db, rule.ID, snap.ServerID, now, alertNotification(rule, snap, "resolved", value, now))
+		cancel()
 		if err != nil {
 			// Keep the key in `firing` so the next tick retries. Dropping it here
 			// would leave the event open in the database forever, because the
@@ -188,9 +190,6 @@ func (e *AlertEngine) applyRule(rule models.AlertRule, snap models.AlertSnapshot
 		e.mu.Lock()
 		delete(e.firing, key)
 		e.mu.Unlock()
-		if resolved {
-			e.notifier.Send(rule, snap, "resolved", value, now)
-		}
 		return
 	}
 
@@ -216,14 +215,16 @@ func (e *AlertEngine) applyRule(rule models.AlertRule, snap models.AlertSnapshot
 	}
 
 	message := FormatAlertMessage(rule, snap, value)
-	id, err := models.OpenAlertEvent(e.db, &models.AlertEvent{
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	id, err := models.OpenAlertEventWithNotification(ctx, e.db, &models.AlertEvent{
 		RuleID:    rule.ID,
 		ServerID:  snap.ServerID,
 		UserID:    rule.UserID,
 		Value:     value,
 		Message:   message,
 		StartedAt: now,
-	})
+	}, alertNotification(rule, snap, "firing", value, now))
+	cancel()
 	if err != nil {
 		log.Printf("alerts: open %s on %s: %v", rule.Name, snap.ServerName, err)
 		return
@@ -234,7 +235,6 @@ func (e *AlertEngine) applyRule(rule models.AlertRule, snap models.AlertSnapshot
 	e.mu.Unlock()
 	if id != 0 {
 		log.Printf("alerts: firing %q on %s (%s)", rule.Name, snap.ServerName, message)
-		e.notifier.Send(rule, snap, "firing", value, now)
 	}
 }
 
@@ -390,7 +390,6 @@ type webhookPinnedIPs struct{}
 func NewWebhookNotifier(allowPrivate bool) *WebhookNotifier {
 	n := &WebhookNotifier{
 		dialer:       &net.Dialer{Timeout: webhookTimeout},
-		lookupIP:     net.LookupIP,
 		allowPrivate: allowPrivate,
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
@@ -427,37 +426,14 @@ type webhookPayload struct {
 	Timestamp  time.Time `json:"timestamp"`
 }
 
-// Send posts the transition asynchronously; delivery failures are logged and
-// never block or fail the evaluation loop.
-func (n *WebhookNotifier) Send(rule models.AlertRule, snap models.AlertSnapshot, status string, value float64, at time.Time) {
-	target := strings.TrimSpace(rule.WebhookURL)
-	if target == "" {
-		return
-	}
-	message := FormatAlertMessage(rule, snap, value)
-	if status == "resolved" {
-		message = FormatRecoveryMessage(rule, snap, value)
-	}
-	payload := webhookPayload{
-		Status:     status,
-		Rule:       rule.Name,
-		Server:     snap.ServerName,
-		Metric:     rule.Metric,
-		Value:      value,
-		Threshold:  rule.Threshold,
-		Comparator: rule.Comparator,
-		Message:    message,
-		Timestamp:  at,
-	}
-	go func() {
-		if err := n.Post(context.Background(), target, payload); err != nil {
-			log.Printf("alerts: webhook for %q failed: %v", rule.Name, err)
-		}
-	}()
+func (n *WebhookNotifier) Post(ctx context.Context, target string, payload any) error {
+	return n.postWithID(ctx, target, payload, "")
 }
 
-func (n *WebhookNotifier) Post(ctx context.Context, target string, payload any) error {
-	ips, err := n.validateTarget(target)
+func (n *WebhookNotifier) postWithID(ctx context.Context, target string, payload any, deliveryID string) error {
+	ctx, cancel := context.WithTimeout(ctx, webhookTimeout)
+	defer cancel()
+	ips, err := n.validateTargetContext(ctx, target)
 	if err != nil {
 		return err
 	}
@@ -465,8 +441,6 @@ func (n *WebhookNotifier) Post(ctx context.Context, target string, payload any) 
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(ctx, webhookTimeout)
-	defer cancel()
 	// Dial only the addresses just validated, never a fresh DNS answer.
 	if len(ips) > 0 {
 		ctx = context.WithValue(ctx, webhookPinnedIPs{}, ips)
@@ -477,6 +451,9 @@ func (n *WebhookNotifier) Post(ctx context.Context, target string, payload any) 
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "server-monitor-alerts/1")
+	if deliveryID != "" {
+		req.Header.Set("X-Server-Monitor-Delivery", deliveryID)
+	}
 	resp, err := n.client.Do(req)
 	if err != nil {
 		return err
@@ -495,6 +472,12 @@ func (n *WebhookNotifier) Post(ctx context.Context, target string, payload any) 
 // rebinding window between this check and the actual connection. A nil list
 // (allowPrivate, or nothing resolved) leaves dialing to the system resolver.
 func (n *WebhookNotifier) validateTarget(target string) ([]net.IP, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), webhookTimeout)
+	defer cancel()
+	return n.validateTargetContext(ctx, target)
+}
+
+func (n *WebhookNotifier) validateTargetContext(ctx context.Context, target string) ([]net.IP, error) {
 	parsed, err := url.Parse(target)
 	if err != nil {
 		return nil, fmt.Errorf("invalid webhook URL: %w", err)
@@ -509,9 +492,17 @@ func (n *WebhookNotifier) validateTarget(target string) ([]net.IP, error) {
 	if n.allowPrivate {
 		return nil, nil
 	}
-	ips, err := n.lookupIP(host)
+	var ips []net.IP
+	if n.lookupIP != nil { // injected test resolver
+		ips, err = n.lookupIP(host)
+	} else {
+		ips, err = net.DefaultResolver.LookupIP(ctx, "ip", host)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("resolve webhook host: %w", err)
+	}
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("webhook host has no validated addresses")
 	}
 	for _, ip := range ips {
 		if isRestrictedIP(ip) {

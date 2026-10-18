@@ -16,8 +16,8 @@ export function responseClock(dateHeader: unknown): ResponseClock {
 }
 
 /** Keep samples aging while requests fail or wait for a response. */
-export function useResponseClock(clock: ResponseClock | null): number {
+export function useResponseClock(clock: ResponseClock | null, intervalMs = 1000): number {
   const [elapsedAt, setElapsedAt] = useState(() => performance.now());
-  usePolling(() => { setElapsedAt(performance.now()); }, 1000, { enabled: clock !== null });
+  usePolling(() => { setElapsedAt(performance.now()); }, intervalMs, { enabled: clock !== null });
   return clock ? clock.serverTime + Math.max(0, elapsedAt - clock.receivedAt) : 0;
 }

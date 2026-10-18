@@ -1,7 +1,9 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"regexp"
 	"strconv"
@@ -51,7 +53,8 @@ func RunDockerCmdBounded(client *ssh.Client, args string, timeout time.Duration,
 	// A timeout is a transport/remote execution failure, not a permissions
 	// failure. Retrying the same command through sudo would double the wait and
 	// can outlive the HTTP request without improving the result.
-	if strings.Contains(err.Error(), "timed out after") {
+	// Truncated output also cannot be repaired by executing the command again.
+	if truncated || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return out, truncated, err
 	}
 	out, truncated, sudoErr := RunCmdBounded(client, "sudo -n docker "+args, timeout, limit)

@@ -266,6 +266,39 @@ public class TickBarrierTests
     }
 
     [Fact]
+    public async Task HiddenPollingUpdatesTheTrayWithoutPublishingTheMainWindow()
+    {
+        using var harness = new Harness();
+        var server = harness.AddServer("web-1");
+        harness.Transport.Handlers[server.Id] = FakeTransport.LinuxHost(cpu: 12);
+        var first = harness.Service.PollAllAsync();
+        Assert.True(await harness.Pump.PumpUntilAsync(() => first.IsCompleted));
+        await first;
+        harness.Service.SetUiVisible(false);
+        harness.CountPublishes();
+        var observed = 0;
+        harness.Service.StatusUpdated += () => observed++;
+
+        harness.Transport.Handlers[server.Id] = FakeTransport.LinuxHost(cpu: 83);
+        harness.Service.PollDue(ignoringBackoff: true);
+        Assert.True(await harness.Pump.PumpUntilAsync(() => harness.Service.InFlight.Count == 0));
+        Assert.Equal(83, harness.Service.PeakCpu!.Value.Percent, 1);
+        Assert.Equal(12, harness.Service.Latest[server.Id].CpuPercent, 1);
+
+        harness.Transport.Handlers[server.Id] = _ => Task.FromException<string>(SshException.Failed("offline"));
+        harness.Service.PollDue(ignoringBackoff: true);
+        Assert.True(await harness.Pump.PumpUntilAsync(() => harness.Service.InFlight.Count == 0));
+        Assert.Single(harness.Service.OfflineServers);
+        Assert.Equal(StatusKind.Offline, harness.Service.ObservedStatus[server.Id].Kind);
+        Assert.Equal(0, harness.PublishCount);
+        Assert.True(observed >= 2);
+
+        harness.Service.SetUiVisible(true);
+        Assert.Equal(1, harness.PublishCount);
+        Assert.Equal(StatusKind.Offline, harness.Service.Status[server.Id].Kind);
+    }
+
+    [Fact]
     public async Task HeldResultsAreReplacedNotQueued()
     {
         // With the window hidden, an append-only queue grew by one closure

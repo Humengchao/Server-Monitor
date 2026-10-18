@@ -35,6 +35,20 @@ export interface AlertEvent {
   resolved_at: string | null;
 }
 
+export type AlertEventState = 'active' | 'resolved' | 'all';
+export interface AlertEventPage { events: AlertEvent[]; next_cursor?: string }
+
+export interface ServerAlertSummary {
+  server_id: string;
+  active: number;
+  rule_names: string[];
+}
+
+export interface ActiveAlertSummary {
+  active: number;
+  servers: ServerAlertSummary[];
+}
+
 export interface AlertRulePayload {
   name: string;
   server_id: string | null;
@@ -60,12 +74,16 @@ export const METRIC_UNITS: Record<AlertMetric, string> = {
 };
 
 export const alertsApi = {
-  listRules: () => client.get<AlertRule[]>('/alerts/rules'),
+  listRules: (signal?: AbortSignal) => client.get<AlertRule[]>('/alerts/rules', { signal }),
   createRule: (data: AlertRulePayload) => client.post<AlertRule>('/alerts/rules', data),
   updateRule: (id: string, data: AlertRulePayload) => client.put<AlertRule>(`/alerts/rules/${id}`, data),
   deleteRule: (id: string) => client.delete(`/alerts/rules/${id}`),
-  listEvents: (activeOnly = false, limit = 100) =>
-    client.get<AlertEvent[]>('/alerts/events', { params: { active: activeOnly ? 1 : undefined, limit } }),
-  summary: () => client.get<{ active: number }>('/alerts/summary'),
+  listEvents: (activeOnly = false, limit = 100, signal?: AbortSignal) =>
+    client.get<AlertEvent[]>('/alerts/events', { params: { active: activeOnly ? 1 : undefined, limit }, signal }),
+  eventPage: (state: AlertEventState, cursor = '', signal?: AbortSignal) =>
+    client.get<AlertEventPage>('/alerts/events/page', { params: { state, limit: 100, cursor: cursor || undefined }, signal }),
+  summary: (signal?: AbortSignal) => client.get<{ active: number }>('/alerts/summary', { signal }),
+  serverSummary: (signal?: AbortSignal) =>
+    client.get<ActiveAlertSummary>('/alerts/summary', { params: { by_server: 1 }, signal }),
   testWebhook: (webhook_url: string) => client.post('/alerts/test', { webhook_url }),
 };

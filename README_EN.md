@@ -67,7 +67,7 @@ Rules are evaluated by a dedicated backend loop (every 30s by default, `ALERT_IN
 - **Sustained duration**: a threshold must hold for the configured window before an alert opens, so transient spikes don't page you. Offline rules never fire sooner than 2 minutes, matching the dashboard's online window.
 - **Scope**: target one server, or leave it empty to cover every server you own, including ones added later.
 - **Notifications**: a JSON payload is POSTed to the configured webhook on both firing and recovery (see [docs/API.md](docs/API.md)); "Send test" verifies the endpoint before you save.
-- **Durable state**: active alerts live in the database, so a restart neither re-notifies nor loses a pending recovery. If a host disappears for good, threshold alerts resolve instead of hanging open forever.
+- **Durable state**: event transitions and pending webhook deliveries commit together. Failed deliveries retry with backoff after restarts, in order per rule/host. A lost response can cause redelivery; the stable `X-Server-Monitor-Delivery` header lets receivers deduplicate. If a host disappears for good, threshold alerts resolve instead of hanging open forever.
 
 ### Availability
 

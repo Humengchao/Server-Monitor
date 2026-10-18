@@ -1,11 +1,12 @@
 package handlers
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"math"
 	"net/http"
-	"sync"
 	"time"
 
 	"server-monitor/internal/models"
@@ -23,12 +24,12 @@ const publicStatusCacheTTL = 2 * time.Second
 const minPublicAvailabilityBuckets = 16
 
 type PublicStatusHandler struct {
-	mu      sync.Mutex
-	cached  gin.H
-	expires time.Time
+	cache *services.RequestCache[gin.H]
 }
 
-func NewPublicStatusHandler() *PublicStatusHandler { return &PublicStatusHandler{} }
+func NewPublicStatusHandler() *PublicStatusHandler {
+	return &PublicStatusHandler{cache: services.NewRequestCache[gin.H](1)}
+}
 
 type publicNode struct {
 	Alias             string             `json:"alias"`
@@ -83,25 +84,29 @@ type publicSummary struct {
 }
 
 func (h *PublicStatusHandler) Get(c *gin.Context) {
-	h.mu.Lock()
-	if h.cached != nil && time.Now().Before(h.expires) {
-		cached := h.cached
-		h.mu.Unlock()
-		c.JSON(http.StatusOK, cached)
+	db := c.MustGet("db").(*models.DB)
+	response, err := h.cache.Get(c.Request.Context(), "public", publicStatusCacheTTL, func(ctx context.Context) (gin.H, error) {
+		// One caller leaving must not cancel a refresh shared by other visitors.
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		return buildPublicStatus(ctx, db.Raw)
+	})
+	if err != nil {
+		log.Printf("public status error: %v", err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "status temporarily unavailable"})
 		return
 	}
-	h.mu.Unlock()
+	c.JSON(http.StatusOK, response)
+}
 
+func buildPublicStatus(ctx context.Context, db *sql.DB) (gin.H, error) {
 	now := time.Now().UTC()
 	// Snapped to the fifteen-minute tier the SLA figure is counted from, so the
 	// still-open bucket is excluded from both the count and the expectation.
 	availabilityEnd := services.TierEnd(now, models.DailyStripBucketSeconds)
-	db := c.MustGet("db").(*models.DB)
-	metrics, err := models.GetPublicServerMetrics(db.Raw, availabilityEnd.Add(-30*24*time.Hour), availabilityEnd)
+	metrics, err := models.GetPublicServerMetricsContext(ctx, db, availabilityEnd.Add(-30*24*time.Hour), availabilityEnd)
 	if err != nil {
-		log.Printf("public status error: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "status temporarily unavailable"})
-		return
+		return nil, err
 	}
 
 	nodes := make([]publicNode, 0, len(metrics))
@@ -186,14 +191,7 @@ func (h *PublicStatusHandler) Get(c *gin.Context) {
 		},
 	}
 
-	// The response is read-only once built, so it is safe to share between
-	// requests until the TTL expires.
-	h.mu.Lock()
-	h.cached = response
-	h.expires = time.Now().Add(publicStatusCacheTTL)
-	h.mu.Unlock()
-
-	c.JSON(http.StatusOK, response)
+	return response, nil
 }
 
 func percent(used, total int64) int {

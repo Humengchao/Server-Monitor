@@ -130,7 +130,11 @@ export default function PublicStatus() {
     const controller = new AbortController();
     const requestId = ++requestIdRef.current;
     requestRef.current = controller;
-    const timeout = window.setTimeout(() => controller.abort(), STATUS_REQUEST_TIMEOUT_MS);
+    let timedOut = false;
+    const timeout = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, STATUS_REQUEST_TIMEOUT_MS);
     if (showLoading) setLoading(true);
     try {
       const response = await fetch(apiURL, {
@@ -147,7 +151,9 @@ export default function PublicStatus() {
       setError(false);
       setStale(false);
     } catch {
-      if (controller.signal.aborted || requestId !== requestIdRef.current) return;
+      // Superseded/unmounted requests are silent, but reaching our deadline is
+      // a failed refresh and must mark any retained snapshot as stale.
+      if (requestId !== requestIdRef.current || (controller.signal.aborted && !timedOut)) return;
       setError(true);
       // Keep the last good snapshot visible. It is much more useful than
       // replacing a transient network failure with an alarming outage state.
@@ -163,7 +169,11 @@ export default function PublicStatus() {
 
   // A public page can have many concurrent visitors; 10s keeps the status
   // fresh enough without each open tab eating into the per-IP rate limit.
-  usePolling(() => loadStatus(), 10000, { leading: false });
+  usePolling(() => {
+    // The initial/manual fetch is outside usePolling's own serialization.
+    // Give it its full timeout instead of aborting it at the next timer tick.
+    if (!requestRef.current) return loadStatus();
+  }, 10000, { leading: false });
 
   useEffect(() => {
     const initial = window.setTimeout(() => loadStatus(true), 0);

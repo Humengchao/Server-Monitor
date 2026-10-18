@@ -14,9 +14,14 @@ public final class TerminalSession: ObservableObject {
     @Published public private(set) var state: State = .starting
     @Published public private(set) var title: String = ""
     /// The live view, so a snippet can be typed into the running shell.
-    fileprivate weak var view: LocalProcessTerminalView?
+    fileprivate var view: LocalProcessTerminalView?
+    fileprivate var coordinator: SSHTerminalView.Coordinator?
+    fileprivate var connectionID = UUID()
+    fileprivate let persistent: Bool
+    var onEnded: ((Int32?) -> Void)?
+    private(set) var isClosed = false
 
-    public init() {}
+    public init(persistent: Bool = false) { self.persistent = persistent }
 
     /// Types text into the shell exactly as if the user had typed it.
     public func send(text: String) {
@@ -24,8 +29,33 @@ public final class TerminalSession: ObservableObject {
     }
 
     fileprivate func began() { state = .running }
-    fileprivate func ended(code: Int32?) { state = .ended(code: code) }
+    fileprivate func ended(code: Int32?) {
+        state = .ended(code: code)
+        onEnded?(code)
+    }
     fileprivate func retitled(_ value: String) { title = value }
+
+    /// Navigation detaches the view, whereas an explicit close owns cleanup.
+    public func close() {
+        isClosed = true
+        onEnded = nil
+        discardConnection()
+    }
+
+    func reconnect() {
+        discardConnection()
+        state = .starting
+        title = ""
+    }
+
+    private func discardConnection() {
+        // Ignore a termination callback queued by the connection being replaced.
+        connectionID = UUID()
+        let previous = view
+        view = nil
+        coordinator = nil
+        previous?.terminate()
+    }
 }
 
 /// A real SSH shell: SwiftTerm driving `/usr/bin/ssh` over a pseudo-terminal.
@@ -65,12 +95,17 @@ public struct SSHTerminalView: NSViewRepresentable {
     }
 
     public func makeCoordinator() -> Coordinator {
-        Coordinator(session: session)
+        session.coordinator ?? Coordinator(session: session, connectionID: session.connectionID)
     }
 
     public func makeNSView(context: Context) -> LocalProcessTerminalView {
+        if let existing = session.view {
+            existing.font = resolvedFont()
+            return existing
+        }
         let view = LocalProcessTerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 480))
         view.processDelegate = context.coordinator
+        session.coordinator = context.coordinator
         view.getTerminal().silentLog = true
         view.font = resolvedFont()
         session.view = view
@@ -110,15 +145,20 @@ public struct SSHTerminalView: NSViewRepresentable {
     }
 
     public static func dismantleNSView(_ nsView: LocalProcessTerminalView, coordinator: Coordinator) {
-        // Closing the view must not leave an orphaned ssh process behind.
-        nsView.terminate()
+        // Sidebar sessions outlive their selected page. Standalone terminals
+        // (machine detail / Docker sheets) are still scoped to their view.
+        guard let session = coordinator.session, !session.persistent,
+              session.connectionID == coordinator.connectionID else { return }
+        session.close()
     }
 
     public final class Coordinator: NSObject, LocalProcessTerminalViewDelegate {
-        private let session: TerminalSession
+        fileprivate weak var session: TerminalSession?
+        fileprivate let connectionID: UUID
 
-        init(session: TerminalSession) {
+        init(session: TerminalSession, connectionID: UUID) {
             self.session = session
+            self.connectionID = connectionID
         }
 
         public func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
@@ -129,14 +169,22 @@ public struct SSHTerminalView: NSViewRepresentable {
         // would-be data race into a crash. `session` is main-actor state.
         public func setTerminalTitle(source: LocalProcessTerminalView, title: String) {
             let session = session
-            Task { @MainActor in session.retitled(title) }
+            let connectionID = connectionID
+            Task { @MainActor in
+                guard let session, session.connectionID == connectionID else { return }
+                session.retitled(title)
+            }
         }
 
         public func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
 
         public func processTerminated(source: TerminalView, exitCode: Int32?) {
             let session = session
-            Task { @MainActor in session.ended(code: exitCode) }
+            let connectionID = connectionID
+            Task { @MainActor in
+                guard let session, session.connectionID == connectionID else { return }
+                session.ended(code: exitCode)
+            }
         }
     }
 }

@@ -1,6 +1,7 @@
 package models
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
@@ -139,7 +140,7 @@ func SaveMetric(db *sql.DB, serverID uuid.UUID, m *MetricPoint) error {
 // MaxMetricsPoints limits data points returned to keep charts responsive.
 const MaxMetricsPoints = 500
 
-func GetMetrics(db *sql.DB, serverID uuid.UUID, since, until time.Time) ([]MetricPoint, error) {
+func GetMetrics(ctx context.Context, db *sql.DB, serverID uuid.UUID, since, until time.Time) ([]MetricPoint, error) {
 	// Calculate bucket size so that total points ≤ MaxMetricsPoints.
 	bucketSecs := int(until.Sub(since).Seconds()) / MaxMetricsPoints
 	if bucketSecs < 1 {
@@ -149,7 +150,7 @@ func GetMetrics(db *sql.DB, serverID uuid.UUID, since, until time.Time) ([]Metri
 	now := time.Now()
 	rawCutoff := now.Add(-24 * time.Hour)
 	minuteCutoff := now.AddDate(0, 0, -30)
-	rows, err := db.Query(
+	rows, err := db.QueryContext(ctx,
 		`WITH source AS (
 			SELECT cpu_percent, load_1, load_5, load_15, memory_used, memory_total, disk_used_bytes,
 				network_rx_bytes, network_tx_bytes, network_rx_total_bytes, network_tx_total_bytes,
@@ -192,15 +193,18 @@ func GetMetrics(db *sql.DB, serverID uuid.UUID, since, until time.Time) ([]Metri
 		}
 		points = append(points, m)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	if points == nil {
 		points = []MetricPoint{}
 	}
 	return points, nil
 }
 
-func GetLatestMetric(db *sql.DB, serverID uuid.UUID) (*MetricPoint, error) {
+func GetLatestMetric(ctx context.Context, db *sql.DB, serverID uuid.UUID) (*MetricPoint, error) {
 	m := &MetricPoint{}
-	err := db.QueryRow(
+	err := db.QueryRowContext(ctx,
 		`SELECT cpu_percent, load_1, load_5, load_15, memory_used, memory_total, disk_used_bytes,
 		 network_rx_bytes, network_tx_bytes, network_rx_total_bytes, network_tx_total_bytes,
 		 disk_rx_bytes, disk_tx_bytes, uptime_seconds, latency_ms, recorded_at

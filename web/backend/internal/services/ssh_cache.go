@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"errors"
 	"net"
 	"sync"
@@ -63,8 +64,16 @@ func NewSSHConnCache() *SSHConnCache {
 // Returned clients are shared: callers may open sessions concurrently but must
 // never Close them.
 func (c *SSHConnCache) Get(s *models.Server) (*ssh.Client, error) {
+	return c.GetContext(context.Background(), s)
+}
+
+// GetContext also bounds time queued behind another request for this host.
+func (c *SSHConnCache) GetContext(ctx context.Context, s *models.Server) (*ssh.Client, error) {
 	fingerprint := serverPollFingerprint(s)
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		c.mu.Lock()
 		if c.isClosed() {
 			c.mu.Unlock()
@@ -77,7 +86,9 @@ func (c *SSHConnCache) Get(s *models.Server) (*ssh.Client, error) {
 		}
 		c.mu.Unlock()
 
-		e.mu.Lock()
+		if err := lockSSHEntry(ctx, &e.mu); err != nil {
+			return nil, err
+		}
 		if c.isClosed() {
 			e.mu.Unlock()
 			return nil, ErrSSHCacheClosed
@@ -88,7 +99,7 @@ func (c *SSHConnCache) Get(s *models.Server) (*ssh.Client, error) {
 			e.mu.Unlock()
 			continue
 		}
-		client, err := c.ensureLive(e, s, fingerprint)
+		client, err := c.ensureLive(ctx, e, s, fingerprint)
 		e.mu.Unlock()
 		if c.isClosed() {
 			// Close owns this entry and waits for its mutex before closing any
@@ -99,11 +110,35 @@ func (c *SSHConnCache) Get(s *models.Server) (*ssh.Client, error) {
 	}
 }
 
+func lockSSHEntry(ctx context.Context, mu *sync.Mutex) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if mu.TryLock() {
+		return nil
+	}
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if mu.TryLock() {
+				return nil
+			}
+		}
+	}
+}
+
 // ensureLive returns the entry's connection, redialing when it is missing,
 // stale, or unresponsive. Callers must hold e.mu.
-func (c *SSHConnCache) ensureLive(e *sshCacheEntry, s *models.Server, fingerprint [32]byte) (*ssh.Client, error) {
+func (c *SSHConnCache) ensureLive(ctx context.Context, e *sshCacheEntry, s *models.Server, fingerprint [32]byte) (*ssh.Client, error) {
 	if e.client != nil {
 		if e.fingerprint == fingerprint && keepaliveOK(e.client, e.conn) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			e.lastUsed = time.Now()
 			return e.client, nil
 		}
@@ -111,7 +146,10 @@ func (c *SSHConnCache) ensureLive(e *sshCacheEntry, s *models.Server, fingerprin
 		e.client = nil
 		e.conn = nil
 	}
-	client, conn, err := dialSSHClientConn(s.Host, s.Port, s.SSHUsername, s.SSHPassword, s.SSHKey, s.SSHHostKey, sshDialTimeout)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	client, conn, err := dialSSHClientConnContext(ctx, s.Host, s.Port, s.SSHUsername, s.SSHPassword, s.SSHKey, s.SSHHostKey, sshDialTimeout)
 	if err != nil {
 		return nil, err
 	}

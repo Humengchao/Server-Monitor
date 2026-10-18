@@ -1,6 +1,7 @@
 package models
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -200,8 +201,12 @@ func GetServerSummary(db *sql.DB, id, userID uuid.UUID) (*Server, error) {
 }
 
 func ServerOwnedByUser(db *sql.DB, id, userID uuid.UUID) (bool, error) {
+	return ServerOwnedByUserContext(context.Background(), db, id, userID)
+}
+
+func ServerOwnedByUserContext(ctx context.Context, db *sql.DB, id, userID uuid.UUID) (bool, error) {
 	var owned bool
-	err := db.QueryRow(
+	err := db.QueryRowContext(ctx,
 		`SELECT EXISTS(SELECT 1 FROM servers WHERE id=$1 AND user_id=$2)`,
 		id, userID,
 	).Scan(&owned)
@@ -490,16 +495,79 @@ func CountOwnedServers(db *sql.DB, serverIDs []uuid.UUID, userID uuid.UUID) (int
 // SSH settings, in the order the IDs were given. IDs the user does not own are
 // omitted, so callers must compare lengths if that matters.
 func GetServersByIDsAndUser(db *DB, ids []uuid.UUID, userID uuid.UUID) ([]*Server, error) {
+	return GetServersByIDsAndUserContext(context.Background(), db, ids, userID)
+}
+
+func GetServersByIDsAndUserContext(ctx context.Context, db *DB, ids []uuid.UUID, userID uuid.UUID) ([]*Server, error) {
 	servers := make([]*Server, 0, len(ids))
-	for _, id := range ids {
-		s, err := GetServerByIDAndUser(db, id, userID)
-		if err == sql.ErrNoRows {
-			continue
-		}
-		if err != nil {
+	if len(ids) == 0 {
+		return servers, nil
+	}
+	// Fetch all targets and their effective credentials in one owner-scoped
+	// query, instead of opening one or two queries for every selected server.
+	rows, err := db.Raw.QueryContext(ctx, `SELECT s.id, s.user_id, s.name, s.host, s.port,
+		s.ssh_username, COALESCE(s.ssh_password, ''), COALESCE(s.ssh_key, ''), COALESCE(s.ssh_host_key, ''),
+		s.credential_id, s.created_at, COALESCE(s.server_type, 'linux'), s.expires_at, COALESCE(s.notes, ''),
+		COALESCE(s.billing_price, 0), COALESCE(s.billing_currency, 'CNY'), COALESCE(s.billing_cycle, 'year'),
+		COALESCE(s.traffic_limit_bytes, 0), COALESCE(s.public_location, ''),
+		c.ssh_username, COALESCE(c.ssh_password, ''), COALESCE(c.ssh_key, '')
+		FROM servers s
+		LEFT JOIN credentials c ON c.id = s.credential_id AND c.user_id = s.user_id
+		WHERE s.id = ANY($1) AND s.user_id = $2`, pq.Array(ids), userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	byID := make(map[uuid.UUID]Server, len(ids))
+	for rows.Next() {
+		var s Server
+		var encPassword, encKey string
+		var credID, credentialUsername sql.NullString
+		var credentialPassword, credentialKey string
+		var expiresAt sql.NullTime
+		if err := rows.Scan(&s.ID, &s.UserID, &s.Name, &s.Host, &s.Port,
+			&s.SSHUsername, &encPassword, &encKey, &s.SSHHostKey, &credID, &s.CreatedAt, &s.ServerType, &expiresAt, &s.Notes,
+			&s.BillingPrice, &s.BillingCurrency, &s.BillingCycle, &s.TrafficLimit, &s.PublicLocation,
+			&credentialUsername, &credentialPassword, &credentialKey); err != nil {
 			return nil, err
 		}
-		servers = append(servers, s)
+		if expiresAt.Valid {
+			s.ExpiresAt = &expiresAt.Time
+		}
+		if credID.Valid {
+			id, err := uuid.Parse(credID.String)
+			if err != nil {
+				return nil, fmt.Errorf("resolve credentials for server %s: %w", s.Name, err)
+			}
+			s.CredentialID = &id
+			// An unresolved link must fail the batch, never fall back to
+			// stale inline secrets or authorize another owner's credential.
+			if !credentialUsername.Valid {
+				return nil, fmt.Errorf("resolve credentials for server %s: %w", s.Name, sql.ErrNoRows)
+			}
+			s.SSHUsername = credentialUsername.String
+			encPassword, encKey = credentialPassword, credentialKey
+		}
+		if s.SSHPassword, err = crypto.Decrypt(encPassword, db.EncryptionKey); err != nil {
+			return nil, fmt.Errorf("decrypt password for server %s: %w", s.Name, err)
+		}
+		if s.SSHKey, err = crypto.Decrypt(encKey, db.EncryptionKey); err != nil {
+			return nil, fmt.Errorf("decrypt key for server %s: %w", s.Name, err)
+		}
+		byID[s.ID] = s
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// ANY does not preserve order or duplicates. Restore both to retain the
+	// model's existing behavior; the batch handler deduplicates its own input.
+	for _, id := range ids {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if s, ok := byID[id]; ok {
+			servers = append(servers, &s)
+		}
 	}
 	return servers, nil
 }

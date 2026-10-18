@@ -16,7 +16,7 @@ import {
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { Server } from '../api/servers';
-import { AlertEvent } from '../api/alerts';
+import { ServerAlertSummary } from '../api/alerts';
 import { availabilityColor } from '../api/uptime';
 import { useNavigate } from 'react-router-dom';
 import { formatBytes, formatGB, formatUptime, formatDateTime, getExpirationInfo, severityColor } from '../utils/format';
@@ -35,7 +35,7 @@ interface Props {
   /** Observed 24h availability; undefined until the census loads. */
   availability?: number;
   /** Rules currently firing on this host. */
-  firing?: AlertEvent[];
+  firing?: ServerAlertSummary;
 }
 
 function ServerCard({
@@ -80,9 +80,9 @@ function ServerCard({
       <div className="server-card-header">
         <div className={`server-platform ${server.server_type === 'windows' ? 'windows' : 'linux'}`}>
           {server.server_type === 'windows' ? <WindowsOutlined /> : <CloudServerOutlined />}
-          {!!firing?.length && (
-            <Tooltip title={firing.map((e) => e.rule_name).filter(Boolean).join('\n') || undefined}>
-              <span className="alert-pill">{firing.length}</span>
+          {!!firing?.active && (
+            <Tooltip title={firing.rule_names.filter(Boolean).join('\n') || undefined}>
+              <span className="alert-pill">{firing.active}</span>
             </Tooltip>
           )}
         </div>
@@ -180,30 +180,22 @@ function ServerCard({
   );
 }
 
-// Memoized: the dashboard replaces the whole servers array every poll, so we
-// only re-render a card when its own displayed data (or online state) changes.
+// The dashboard shares unchanged snapshots, so checks here need no serialization.
 export default React.memo(ServerCard, (prev, next) => {
   const a = prev.server;
   const b = next.server;
+  if (a !== b) return false;
+  const oldExpiry = getExpirationInfo(a.expires_at, 'en', prev.observedAt);
+  const newExpiry = getExpirationInfo(b.expires_at, 'en', next.observedAt);
   return (
-    a.id === b.id &&
-    a.name === b.name &&
-    a.host === b.host &&
-    a.server_type === b.server_type &&
-    a.expires_at === b.expires_at &&
-    JSON.stringify(getExpirationInfo(a.expires_at, 'en', prev.observedAt)) === JSON.stringify(getExpirationInfo(b.expires_at, 'en', next.observedAt)) &&
-    a.cpu_cores === b.cpu_cores &&
-    a.memory_total === b.memory_total &&
-    a.disk_total === b.disk_total &&
-    a.public_location === b.public_location &&
-    a.last_error_kind === b.last_error_kind && a.last_error === b.last_error && a.last_error_at === b.last_error_at &&
+    oldExpiry?.text === newExpiry?.text && oldExpiry?.color === newExpiry?.color &&
     prev.selectable === next.selectable &&
     prev.selected === next.selected &&
     prev.onToggleSelect === next.onToggleSelect &&
     prev.availability === next.availability &&
-    JSON.stringify(prev.firing || []) === JSON.stringify(next.firing || []) &&
-    serverStatus(a, prev.observedAt) === serverStatus(b, next.observedAt) &&
-    JSON.stringify(a.tags || []) === JSON.stringify(b.tags || []) &&
-    JSON.stringify(a.latest_metrics) === JSON.stringify(b.latest_metrics)
+    prev.firing?.active === next.firing?.active &&
+    (prev.firing?.rule_names.length ?? 0) === (next.firing?.rule_names.length ?? 0) &&
+    (prev.firing?.rule_names.every((name, index) => name === next.firing?.rule_names[index]) ?? true) &&
+    serverStatus(a, prev.observedAt) === serverStatus(b, next.observedAt)
   );
 });

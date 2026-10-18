@@ -38,6 +38,7 @@ public final class MonitorService {
     /// Newest snapshot per server, for the dashboard tiles.
     public private(set) var latest: [UUID: MetricSnapshot] = [:]
     public private(set) var status: [UUID: ServerStatus] = [:]
+    public let live = MonitorSummary()
 
     public let database: Database
     public let settings: AppSettings
@@ -55,10 +56,18 @@ public final class MonitorService {
 
     private let runner: SSHRunner
     private let collector: MetricsCollector
+    /// Injection for lifecycle tests; production always uses the collector.
+    @ObservationIgnored var collectOverride: (@Sendable (SSHTarget, OSKind, Bool) async throws -> MetricSnapshot)?
+    @ObservationIgnored private var pollTasks: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var resetTasks: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var generations: [UUID: UInt64] = [:]
+    @ObservationIgnored private var writeValidity: [UUID: PollWriteValidity] = [:]
+    /// Application wiring owns session cleanup; collection does not depend on UI sessions.
+    @ObservationIgnored public var serverDidDelete: ((UUID) -> Void)?
     @ObservationIgnored private var pollTask: Task<Void, Never>?
     @ObservationIgnored private var maintenanceTask: Task<Void, Never>?
     @ObservationIgnored private var pathMonitor: NWPathMonitor?
-    @ObservationIgnored private var wakeTask: Task<Void, Never>?
+    @ObservationIgnored private var wakeObserver: NSObjectProtocol?
     /// Nil until the first path update, so starting up is not mistaken for a
     /// network that just came back.
     @ObservationIgnored private var networkWasSatisfied: Bool?
@@ -109,13 +118,11 @@ public final class MonitorService {
     }
 
     public func updateServer(_ server: Server) throws {
-        let previous = try? target(for: server)
-        try database.save(server)
+        let previous = self.server(id: server.id).flatMap { try? target(for: $0) }
         // Address or credential may have changed; drop the multiplexed
         // connection so the next poll reconnects with the new settings.
-        if let previous {
-            Task { await collector.forget(target: previous) }
-        }
+        invalidate(serverID: server.id, previous: previous)
+        try database.save(server)
         // Editing a failing host is usually the fix for it. Sitting out a
         // five-minute backoff afterwards would look like the edit did nothing.
         noteSuccess(serverID: server.id)
@@ -142,10 +149,9 @@ public final class MonitorService {
 
     public func deleteServer(_ server: Server) throws {
         let target = try? target(for: server)
+        invalidate(serverID: server.id, previous: target)
         try database.deleteServer(id: server.id)
-        if let target {
-            Task { await collector.forget(target: target) }
-        }
+        serverDidDelete?(server.id)
         alerts?.forget(serverID: server.id)
         latest.removeValue(forKey: server.id)
         status.removeValue(forKey: server.id)
@@ -224,13 +230,48 @@ public final class MonitorService {
     }
 
     public func save(_ identity: Identity) throws {
+        let previous = servers.filter { $0.identityID == identity.id }.compactMap { try? target(for: $0) }
+        for target in previous { invalidate(serverID: target.serverID, previous: target) }
         try database.save(identity)
         reload()
     }
 
     public func deleteIdentity(id: UUID) throws {
+        let previous = servers.filter { $0.identityID == id }.compactMap { try? target(for: $0) }
+        for target in previous { invalidate(serverID: target.serverID, previous: target) }
         try database.deleteIdentity(id: id)
         reload()
+    }
+
+    /// Invalidate before allowing another poll to start. A cancelled SSH task
+    /// can still finish, so its generation is checked at every publish boundary.
+    private func invalidate(serverID: UUID, previous: SSHTarget?) {
+        // Revoke queued writes before saving edited connection fields. A write
+        // already executing completes before this returns; a queued one cannot
+        // populate the new target with the previous target's facts.
+        writeValidity.removeValue(forKey: serverID)?.invalidate()
+        generations[serverID, default: 0] &+= 1
+        pollTasks.removeValue(forKey: serverID)?.cancel()
+        inFlight.remove(serverID)
+        tickMembers.remove(serverID)
+        pending.removeAll { $0.serverID == serverID }
+        latest.removeValue(forKey: serverID)
+        status.removeValue(forKey: serverID)
+        dockerSummaries.removeValue(forKey: serverID)
+        live.forget(serverID)
+        noteSuccess(serverID: serverID)
+        if let previous {
+            let preceding = resetTasks[serverID]
+            resetTasks[serverID] = Task { [collector] in
+                await preceding?.value
+                await collector.forget(target: previous)
+            }
+        }
+        if tickOpen && tickMembers.isEmpty { closeTick(reason: "invalidated") }
+    }
+
+    private func isCurrent(_ serverID: UUID, generation: UInt64) -> Bool {
+        hasServer(serverID) && generations[serverID, default: 0] == generation && !Task.isCancelled
     }
 
     public func serverCount(usingIdentity id: UUID) -> Int {
@@ -279,23 +320,26 @@ public final class MonitorService {
     /// too.
     public func refreshDockerSummary(for server: Server) async {
         guard server.hasDocker, let target = try? target(for: server) else { return }
+        let generation = generations[server.id, default: 0]
         guard let summary = try? await docker.summary(target: target) else { return }
+        guard isCurrent(server.id, generation: generation) else { return }
         dockerSummaries[server.id] = summary
     }
 
     /// Refreshes the engine summary for every host that reports Docker.
     public func refreshDockerSummaries() async {
         let hosts = servers.filter(\.hasDocker)
-        await withTaskGroup(of: (UUID, DockerSummary?).self) { group in
+        await withTaskGroup(of: (UUID, UInt64, DockerSummary?).self) { group in
             for host in hosts {
+                let generation = generations[host.id, default: 0]
                 group.addTask { [weak self] in
                     guard let self, let target = try? await self.target(for: host) else {
-                        return (host.id, nil)
+                        return (host.id, generation, nil)
                     }
-                    return (host.id, try? await self.docker.summary(target: target))
+                    return (host.id, generation, try? await self.docker.summary(target: target))
                 }
             }
-            for await (id, summary) in group {
+            for await (id, generation, summary) in group where isCurrent(id, generation: generation) {
                 if let summary { dockerSummaries[id] = summary }
             }
         }
@@ -361,6 +405,12 @@ public final class MonitorService {
     }
 
     public func stop() {
+        for validity in writeValidity.values { validity.invalidate() }
+        writeValidity.removeAll()
+        for server in servers { generations[server.id, default: 0] &+= 1 }
+        for task in pollTasks.values { task.cancel() }
+        pollTasks.removeAll()
+        inFlight.removeAll()
         pollTask?.cancel()
         maintenanceTask?.cancel()
         pollTask = nil
@@ -368,8 +418,8 @@ public final class MonitorService {
         pathMonitor?.cancel()
         pathMonitor = nil
         networkWasSatisfied = nil
-        wakeTask?.cancel()
-        wakeTask = nil
+        if let wakeObserver { Self.wakeNotificationCenter.removeObserver(wakeObserver) }
+        wakeObserver = nil
         tickCapTask?.cancel()
         tickCapTask = nil
         tickMembers.removeAll()
@@ -413,11 +463,21 @@ public final class MonitorService {
     @discardableResult
     func pollNow(_ serverID: UUID) -> Task<Void, Never>? {
         guard let server = server(id: serverID), !inFlight.contains(serverID) else { return nil }
-        inFlight.insert(serverID)
-        return Task { [weak self] in
-            await self?.poll(server)
-            self?.pollFinished(serverID)
+        return launchPoll(server)
+    }
+
+    private func launchPoll(_ server: Server) -> Task<Void, Never> {
+        let generation = generations[server.id, default: 0]
+        inFlight.insert(server.id)
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.poll(server, generation: generation)
+            guard self.generations[server.id, default: 0] == generation else { return }
+            self.pollTasks[server.id] = nil
+            self.pollFinished(server.id)
         }
+        pollTasks[server.id] = task
+        return task
     }
 
     static let log = Logger(subsystem: "com.hmchxd.ServerMonitor", category: "polling")
@@ -555,15 +615,18 @@ public final class MonitorService {
     /// clear the backoff they build. Waking is its own signal: the fleet
     /// almost certainly did not go down while the lid was shut.
     private func watchWake() {
-        guard wakeTask == nil else { return }
-        wakeTask = Task { [weak self] in
-            let wakes = NotificationCenter.default.notifications(named: NSWorkspace.didWakeNotification)
-            for await _ in wakes {
-                guard let self else { return }
+        guard wakeObserver == nil else { return }
+        wakeObserver = Self.wakeNotificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: nil
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.wakeObserver != nil else { return }
                 self.systemDidWake()
             }
         }
     }
+
+    static var wakeNotificationCenter: NotificationCenter { NSWorkspace.shared.notificationCenter }
 
     /// Forgets every backoff and polls at once, so the dashboard is current a
     /// few seconds after the lid opens rather than after the longest backoff
@@ -596,12 +659,8 @@ public final class MonitorService {
             if !ignoringBackoff, let due = retryAfter[server.id], isStillWaiting(until: due, now: now) {
                 return nil
             }
-            inFlight.insert(server.id)
             launched.insert(server.id)
-            return Task { [weak self] in
-                await self?.poll(server)
-                self?.pollFinished(server.id)
-            }
+            return launchPoll(server)
         }
         // The tasks above start at the next suspension point, so the tick is
         // open before the first of them can report.
@@ -624,22 +683,35 @@ public final class MonitorService {
     }
 
     public func poll(_ server: Server) async {
+        await poll(server, generation: generations[server.id, default: 0])
+    }
+
+    private func poll(_ server: Server, generation: UInt64) async {
         // A task created by `pollDue` starts at the next suspension point, so a
         // server can be deleted between the tick and this line; without the
         // check it came back as a `.polling` entry for a row that no longer
         // exists.
-        guard hasServer(server.id) else { return }
+        guard isCurrent(server.id, generation: generation) else { return }
+        let validity = writeValidity[server.id] ?? PollWriteValidity()
+        writeValidity[server.id] = validity
+        await resetTasks[server.id]?.value
+        guard isCurrent(server.id, generation: generation) else { return }
         if status[server.id] == nil || status[server.id] == .unknown {
             commit(for: server.id) { self.status[server.id] = .polling }
         }
         do {
             let target = try target(for: server)
-            let snapshot = try await collector.collect(
-                target: target, osKind: server.osKind, processes: detailedServers.contains(server.id)
-            )
+            let snapshot: MetricSnapshot
+            if let collectOverride {
+                snapshot = try await collectOverride(target, server.osKind, detailedServers.contains(server.id))
+            } else {
+                snapshot = try await collector.collect(
+                    target: target, osKind: server.osKind, processes: detailedServers.contains(server.id)
+                )
+            }
             // Deleted while this poll was in flight: nothing to record, and the
             // sample insert would fail its foreign key anyway.
-            guard hasServer(server.id) else { return }
+            guard isCurrent(server.id, generation: generation) else { return }
 
             // Remember a probed OS so later polls skip straight to the right
             // script instead of trying Linux every time. Decided against the
@@ -658,15 +730,18 @@ public final class MonitorService {
             // actor: three separate writes per host per poll were running on
             // the thread that draws.
             try await database.recordPoll(
-                serverID: server.id, snapshot: snapshot, detectedOS: detected, updateFacts: factsChanged
+                serverID: server.id, snapshot: snapshot, detectedOS: detected, updateFacts: factsChanged,
+                validity: validity
             )
             // The write suspended us; the server may be gone by now.
-            guard hasServer(server.id) else { return }
+            guard isCurrent(server.id, generation: generation) else { return }
 
             // Everything the UI observes, in one batch.
             let now = Date()
             noteSuccess(serverID: server.id)
+            live.update(serverID: server.id, status: .online(at: now), snapshot: snapshot)
             commit(for: server.id) {
+                guard self.generations[server.id, default: 0] == generation else { return }
                 self.latest[server.id] = snapshot
                 self.status[server.id] = .online(at: now)
                 // Free with the poll, so the machine screen and the Docker page
@@ -700,11 +775,15 @@ public final class MonitorService {
         } catch {
             // A cancelled poll says nothing about the host.
             if error is CancellationError { return }
-            guard hasServer(server.id) else { return }
+            guard isCurrent(server.id, generation: generation) else { return }
             noteFailure(serverID: server.id)
             Self.log.info("\(server.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
             let failure = ServerStatus.offline(reason: error.localizedDescription)
-            commit(for: server.id) { self.status[server.id] = failure }
+            live.update(serverID: server.id, status: failure, snapshot: nil)
+            commit(for: server.id) {
+                guard self.generations[server.id, default: 0] == generation else { return }
+                self.status[server.id] = failure
+            }
             let currentForAlert = self.server(id: server.id) ?? server
             alerts?.evaluate(server: currentForAlert, status: failure, snapshot: nil)
         }
@@ -785,7 +864,7 @@ public final class MonitorService {
     /// Servers that failed their last poll, for the menu bar summary.
     public var offlineServers: [Server] {
         servers.filter {
-            if case .offline = status[$0.id] ?? .unknown { return true }
+            if case .offline = live.readings[$0.id]?.status ?? .unknown { return true }
             return false
         }
     }
@@ -793,13 +872,16 @@ public final class MonitorService {
     /// Highest CPU currently reported, or nil when nothing has reported yet.
     public var peakCPU: (server: Server, percent: Double)? {
         servers
-            .compactMap { server in latest[server.id].map { (server, $0.cpuPercent) } }
+            .compactMap { server -> (server: Server, percent: Double)? in
+                guard let percent = live.readings[server.id]?.cpuPercent else { return nil }
+                return (server, percent)
+            }
             .max { $0.1 < $1.1 }
     }
 
     /// One-shot connectivity check for the editor's "test connection" button.
-    public func testConnection(osKind: OSKind = .auto, target: SSHTarget) async throws {
-        _ = try await collector.collect(target: target, osKind: osKind)
+    public func testConnection(osKind: OSKind = .auto, target: SSHTarget, password: String? = nil) async throws {
+        try await runner.testConnection(on: target, password: password)
     }
 
     public func history(serverID: UUID, since: Date) -> [MetricSample] {

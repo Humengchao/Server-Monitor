@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Alert, App, Button, Empty, Input, Result, Segmented, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import {
   CaretRightOutlined, PauseOutlined, ReloadOutlined, SearchOutlined,
@@ -6,15 +6,17 @@ import {
 import { useTranslation } from 'react-i18next';
 import { PHONE_QUERY, useMediaQuery } from '../hooks/useMediaQuery';
 import {
-  hostOpsApi, ServiceAction, ServiceManager, ServiceUnit, serviceStateColor,
+  hostOpsApi, ServiceAction, ServiceUnit, serviceStateColor,
 } from '../api/hostops';
 import { usePolling } from '../hooks/usePolling';
+import { useHostPanel } from '../hooks/useHostPanel';
 
 const { Text } = Typography;
 
 // Services change far more slowly than processes, and each read costs two SSH
 // sessions on a systemd host. Refresh accordingly.
 const REFRESH_MS = 20000;
+const NO_UNITS: ServiceUnit[] = [];
 
 interface Props {
   serverId: string;
@@ -27,45 +29,19 @@ export default function ServiceTable({ serverId, serverType }: Props) {
   const { t } = useTranslation();
   const phone = useMediaQuery(PHONE_QUERY);
   const { message, modal } = App.useApp();
-  const [units, setUnits] = useState<ServiceUnit[]>([]);
-  const [manager, setManager] = useState<ServiceManager | undefined>(undefined);
-  const [unsupported, setUnsupported] = useState<{ code: string; detail: string } | null>(null);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data, loading, error: loadError, load, scheduleReload, isActive } = useHostPanel(serverId, hostOpsApi.services);
+  const units = data?.services || NO_UNITS;
+  const manager = data?.manager;
+  const total = data?.total || 0;
+  const unsupported = data?.supported === false
+    ? { code: data.reason_code || 'absent', detail: data.reason || '' }
+    : null;
+  const error = loadError === null ? null : loadError || t('service.loadFailed');
   const [query, setQuery] = useState('');
   const [stateFilter, setStateFilter] = useState<StateFilter>('all');
   const [live, setLive] = useState(true);
-  const [busy, setBusy] = useState<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-
-  const load = useCallback(async (showLoading = true) => {
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-    if (showLoading) setLoading(true);
-    try {
-      const res = await hostOpsApi.services(serverId, controller.signal);
-      setUnits(res.data.services || []);
-      setManager(res.data.manager);
-      setTotal(res.data.total || 0);
-      setUnsupported(res.data.supported === false
-        ? { code: res.data.reason_code || 'absent', detail: res.data.reason || '' }
-        : null);
-      setError(null);
-    } catch (err: unknown) {
-      if ((err as { code?: string })?.code === 'ERR_CANCELED') return;
-      const detail = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
-      setError(detail || t('service.loadFailed'));
-    } finally {
-      if (!controller.signal.aborted) setLoading(false);
-    }
-  }, [serverId, t]);
-
-  useEffect(() => {
-    const initial = window.setTimeout(() => load(), 0);
-    return () => { window.clearTimeout(initial); abortRef.current?.abort(); };
-  }, [load]);
+  const [busyAction, setBusyAction] = useState<{ scope: typeof isActive; key: string } | null>(null);
+  const busy = busyAction?.scope === isActive ? busyAction.key : null;
 
   // Nothing to poll for on a host with no service manager.
   usePolling(() => load(false), REFRESH_MS, { leading: false, enabled: live && !unsupported });
@@ -88,20 +64,23 @@ export default function ServiceTable({ serverId, serverType }: Props) {
 
   const runAction = (unit: ServiceUnit, action: ServiceAction) => {
     const confirmAction = async () => {
-      setBusy(`${unit.name}:${action}`);
+      if (!isActive()) return;
+      setBusyAction({ scope: isActive, key: `${unit.name}:${action}` });
       try {
         await hostOpsApi.controlService(serverId, unit.name, action);
+        if (!isActive()) return;
         message.success(t('service.actionSent', { action: t(`service.action.${action}`), name: unit.name }));
         // systemd returns before the unit has finished transitioning; re-read
         // once it has had a moment to settle, or the row still shows the old state.
-        window.setTimeout(() => load(false), 1200);
+        scheduleReload(1200);
       } catch (err: unknown) {
+        if (!isActive()) return;
         const detail = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
         // The host's own words ("Access denied", "Unit not found") say far more
         // than any message this component could compose.
         message.error(detail || t('service.actionFailed'));
       } finally {
-        setBusy(null);
+        if (isActive()) setBusyAction(null);
       }
     };
 

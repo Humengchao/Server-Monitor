@@ -2,6 +2,8 @@ package services
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -13,15 +15,17 @@ import (
 )
 
 const (
-	// BatchMaxTargets bounds one request. Fifty hosts at the concurrency below
-	// is already a few seconds of wall clock; more belongs in a real
-	// configuration-management tool.
+	// BatchMaxTargets bounds one request and its worst-case time budget.
 	BatchMaxTargets = 50
 	// BatchConcurrency limits simultaneous SSH sessions so a wide batch cannot
 	// exhaust the process's file descriptors or the hosts' MaxSessions.
 	BatchConcurrency = 8
 	// BatchCommandTimeout is per host, not for the batch as a whole.
 	BatchCommandTimeout = 60 * time.Second
+	// Seven waves of 50 targets, each with at most 10 seconds connecting and
+	// 60 seconds executing, fit inside nine minutes. Proxy/client budgets are
+	// longer so successful results reach the operator before those time out.
+	BatchTimeout = 9 * time.Minute
 	// BatchOutputLimit caps each host's captured output. A runaway command
 	// (`yes`, `cat /dev/urandom`) must not stream gigabytes into memory.
 	BatchOutputLimit = 64 * 1024
@@ -80,45 +84,59 @@ func (w *syncLimitedWriter) result() (string, bool) {
 // RunCmdBounded runs a command capturing combined output, giving up after
 // timeout and never buffering more than limit bytes.
 func RunCmdBounded(client *ssh.Client, cmd string, timeout time.Duration, limit int) (string, bool, error) {
-	sess, err := client.NewSession()
-	if err != nil {
-		return "", false, err
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	output, truncated, err := runCmdContext(ctx, client, cmd, limit)
+	if errors.Is(err, context.DeadlineExceeded) {
+		// Preserve the existing API message while exposing a typed timeout to
+		// callers deciding whether retrying the command is appropriate.
+		err = &sshCommandTimeoutError{timeout: timeout}
 	}
-	writer := &syncLimitedWriter{limit: limit}
-	sess.Stdout = writer
-	sess.Stderr = writer
-
-	// Buffered so the goroutine can always deliver its result and exit, even
-	// when nobody is left reading after a timeout.
-	done := make(chan error, 1)
-	go func() { done <- sess.Run(cmd) }()
-
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	select {
-	case runErr := <-done:
-		sess.Close()
-		output, truncated := writer.result()
-		return output, truncated, runErr
-	case <-timer.C:
-		// Close our side and return immediately. Waiting for Run to unwind here
-		// would defeat the timeout: closing the channel does not make the
-		// remote command exit, so a `sleep 90` under a 60s limit would still
-		// hold this concurrency slot for the full 90 seconds.
-		//
-		// The abandoned goroutine finishes whenever the remote command does and
-		// then exits; reading the writer is safe because it is mutex-guarded
-		// and result() takes a snapshot.
-		sess.Close()
-		output, truncated := writer.result()
-		return output, truncated, fmt.Errorf("timed out after %s", timeout)
-	}
+	return output, truncated, err
 }
+
+type sshCommandTimeoutError struct{ timeout time.Duration }
+
+func (err *sshCommandTimeoutError) Error() string {
+	return fmt.Sprintf("timed out after %s", err.timeout)
+}
+
+func (*sshCommandTimeoutError) Unwrap() error { return context.DeadlineExceeded }
 
 // RunBatchCommand executes cmd on every server concurrently and returns one
 // result per server, in the same order as the input. Individual failures never
 // abort the batch: a host that is unreachable simply reports its error.
 func RunBatchCommand(cache *SSHConnCache, servers []*models.Server, cmd string) []BatchResult {
+	return RunBatchCommandContext(context.Background(), cache, servers, cmd)
+}
+
+func RunBatchCommandContext(ctx context.Context, cache *SSHConnCache, servers []*models.Server, cmd string) []BatchResult {
+	return runBatch(ctx, servers, func(ctx context.Context, s *models.Server) BatchResult {
+		started := time.Now()
+		result := BatchResult{ServerID: s.ID, ServerName: s.Name}
+		client, err := cache.GetContext(ctx, s)
+		if err != nil {
+			result.Error = "SSH connection failed: " + cleanCommandError(err.Error())
+			result.DurationMS = time.Since(started).Milliseconds()
+			return result
+		}
+		commandContext, cancel := context.WithTimeout(ctx, BatchCommandTimeout)
+		defer cancel()
+		result.Output, result.Truncated, err = runCmdContext(commandContext, client, cmd, BatchOutputLimit)
+		result.DurationMS = time.Since(started).Milliseconds()
+		if err != nil {
+			result.Error = cleanCommandError(err.Error())
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				result.Error += "; remote completion is unknown; check the host before retrying"
+			}
+		} else {
+			result.OK = true
+		}
+		return result
+	})
+}
+
+func runBatch(ctx context.Context, servers []*models.Server, run func(context.Context, *models.Server) BatchResult) []BatchResult {
 	results := make([]BatchResult, len(servers))
 	slots := make(chan struct{}, BatchConcurrency)
 	var wg sync.WaitGroup
@@ -127,29 +145,18 @@ func RunBatchCommand(cache *SSHConnCache, servers []*models.Server, cmd string) 
 		wg.Add(1)
 		go func(index int, s *models.Server) {
 			defer wg.Done()
-			slots <- struct{}{}
+			results[index] = BatchResult{ServerID: s.ID, ServerName: s.Name, Error: "not started: request canceled"}
+			select {
+			case <-ctx.Done():
+				return
+			case slots <- struct{}{}:
+			}
 			defer func() { <-slots }()
-
-			started := time.Now()
-			result := BatchResult{ServerID: s.ID, ServerName: s.Name}
-
-			client, err := cache.Get(s)
-			if err != nil {
-				result.Error = "SSH connection failed: " + cleanCommandError(err.Error())
-				result.DurationMS = time.Since(started).Milliseconds()
-				results[index] = result
+			// If both cases were ready, cancellation still wins before executing.
+			if ctx.Err() != nil {
 				return
 			}
-			output, truncated, runErr := RunCmdBounded(client, cmd, BatchCommandTimeout, BatchOutputLimit)
-			result.Output = output
-			result.Truncated = truncated
-			result.DurationMS = time.Since(started).Milliseconds()
-			if runErr != nil {
-				result.Error = runErr.Error()
-			} else {
-				result.OK = true
-			}
-			results[index] = result
+			results[index] = run(ctx, s)
 		}(i, server)
 	}
 	wg.Wait()
