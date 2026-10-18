@@ -221,13 +221,19 @@ npm install && npm run dev
 
 ## 效果图
 
+2026-10-18 更新，截取自实际运行的 Web 界面；连接地址和凭据名称已遮盖。
+
 | 主页 / 仪表盘 |
 |:---:|
-| ![dashboard](docs/screenshots/dashboard.png) |
+| ![服务器总览：实时指标、资源汇总、快捷筛选与服务器卡片](docs/screenshots/dashboard.png) |
 
 | 机器详情 | SSH 终端 |
 |:---:|:---:|
-| ![server-detail](docs/screenshots/server-detail.png) | ![ssh-terminal](docs/screenshots/ssh-terminal.png) |
+| ![机器详情：资源指标、历史曲线与运维标签页](docs/screenshots/server-detail.png) | ![已连接的 SSH 终端：运行时间、内存、磁盘与操作系统信息](docs/screenshots/ssh-terminal.png) |
+
+| 公开探针 / 服务状态页 |
+|:---:|
+| ![公开状态页：全站概览与真实服务器健康指标](docs/screenshots/public-status.png) |
 
 
 ---

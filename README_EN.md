@@ -220,13 +220,19 @@ Add the following secrets in **Settings -> Secrets and variables -> actions**:
 
 ## Screenshots
 
+Updated 2026-10-18 from the running web application. Connection addresses and credential names are masked.
+
 | Dashboard |
 |:---:|
-| ![dashboard](docs/screenshots/dashboard.png) |
+| ![Server overview with live metrics, resource totals, quick filters, and server cards](docs/screenshots/dashboard.png) |
 
 | Server Detail | SSH Terminal |
 |:---:|:---:|
-| ![server-detail](docs/screenshots/server-detail.png) | ![ssh-terminal](docs/screenshots/ssh-terminal.png) |
+| ![Server detail with resource metrics, historical charts, and management tabs](docs/screenshots/server-detail.png) | ![Connected SSH terminal showing uptime, memory, disk, and operating system information](docs/screenshots/ssh-terminal.png) |
+
+| Public Status Page |
+|:---:|
+| ![Public status page with fleet totals and live server health metrics](docs/screenshots/public-status.png) |
 
 ---
 
