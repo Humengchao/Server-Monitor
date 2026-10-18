@@ -9,6 +9,7 @@ import {
   WindowsOutlined, CopyOutlined, DownloadOutlined, CloudServerOutlined,
   ClockCircleOutlined, ThunderboltOutlined, ArrowDownOutlined, ArrowUpOutlined, DashboardOutlined,
   DatabaseOutlined, HddOutlined, LineChartOutlined, FolderOpenOutlined,
+  RobotOutlined, ApiOutlined, FileSearchOutlined,
 } from '@ant-design/icons';
 import { DatePicker } from 'antd';
 import dayjs, { Dayjs } from 'dayjs';
@@ -375,23 +376,27 @@ export default function ServerDetail() {
             )}
           </div>
         </div>
-        <Space wrap className="detail-actions">
-          <Button onClick={() => navigate('/ai?server=' + id)}>{t('title', { ns: 'ai' })}</Button>
-          <Button onClick={() => navigate('/network?server=' + id)}>{t('networkLink', { ns: 'networkLogs' })}</Button>
-          <Button onClick={() => navigate('/logs?server=' + id)}>{t('openLogs', { ns: 'networkLogs' })}</Button>
-          <Button icon={<FolderOpenOutlined />} onClick={() => navigate('/files?server=' + id)}>{t('nav.files')}</Button>
-          <Tooltip title={dockerInstalled === true ? '' : t('docker.noServers')}>
-            <Button
-              icon={<DockerOutlined />}
-              disabled={dockerInstalled !== true}
-              onClick={() => navigate(`/docker?server=${id}&expand=true`)}
-            >
-              {t('server.docker')}
-            </Button>
-          </Tooltip>
-          <Button icon={<EditOutlined />} onClick={handleEdit}>{t('common.edit')}</Button>
-          <Button danger icon={<DeleteOutlined />} onClick={handleDelete}>{t('common.delete')}</Button>
-        </Space>
+        <div className="detail-actions">
+          <div className="detail-action-tools">
+            <Button type="primary" className="detail-action-ai" icon={<RobotOutlined />} onClick={() => navigate('/ai?server=' + id)}>{t('title', { ns: 'ai' })}</Button>
+            <Button icon={<ApiOutlined />} onClick={() => navigate('/network?server=' + id)}>{t('networkLink', { ns: 'networkLogs' })}</Button>
+            <Button icon={<FileSearchOutlined />} onClick={() => navigate('/logs?server=' + id)}>{t('openLogs', { ns: 'networkLogs' })}</Button>
+            <Button icon={<FolderOpenOutlined />} onClick={() => navigate('/files?server=' + id)}>{t('nav.files')}</Button>
+            <Tooltip title={dockerInstalled === true ? '' : t('docker.noServers')}>
+              <Button
+                icon={<DockerOutlined />}
+                disabled={dockerInstalled !== true}
+                onClick={() => navigate(`/docker?server=${id}&expand=true`)}
+              >
+                {t('server.docker')}
+              </Button>
+            </Tooltip>
+          </div>
+          <div className="detail-action-manage">
+            <Button icon={<EditOutlined />} onClick={handleEdit}>{t('common.edit')}</Button>
+            <Button danger icon={<DeleteOutlined />} onClick={handleDelete}>{t('common.delete')}</Button>
+          </div>
+        </div>
       </div>
 
       <PollErrorNotice server={server} onRetried={() => { void loadServer(); }} />

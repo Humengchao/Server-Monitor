@@ -656,7 +656,71 @@ button, input, textarea, select { font: inherit; }
   box-shadow: var(--shadow-sm);
 }
 .detail-hero-main { flex: 1 1 480px; min-width: 0; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-.detail-actions { flex: 0 0 auto; }
+.detail-actions {
+  --detail-action-accent: #4e65d4;
+  --detail-action-danger: #c64755;
+  flex: 1 1 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+:root[data-theme='dark'] .detail-actions {
+  --detail-action-accent: #a1afff;
+  --detail-action-danger: #ff929e;
+}
+.detail-action-tools, .detail-action-manage { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.detail-action-tools { flex: 1 1 auto; }
+.detail-action-manage { margin-left: auto; padding-left: 12px; border-left: 1px solid var(--border); }
+.detail-actions .ant-btn {
+  height: 40px;
+  padding: 0 14px;
+  gap: 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: var(--text);
+  background: var(--surface-soft);
+  box-shadow: none;
+  font-size: 13px;
+  font-weight: 550;
+  transition: color .18s ease, background .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+.detail-actions .ant-btn .ant-btn-icon { color: var(--detail-action-accent); font-size: 16px; }
+.detail-actions .ant-btn:not(:disabled):hover {
+  color: var(--detail-action-accent);
+  border-color: color-mix(in srgb, var(--detail-action-accent) 24%, var(--border));
+  background: color-mix(in srgb, var(--detail-action-accent) 9%, var(--surface));
+}
+.detail-actions .ant-btn:not(:disabled):active { background: color-mix(in srgb, var(--detail-action-accent) 15%, var(--surface)); }
+.detail-actions .ant-btn:focus-visible { outline: 2px solid var(--detail-action-accent); outline-offset: 3px; }
+.detail-actions .detail-action-ai {
+  color: #fff;
+  background: linear-gradient(120deg, #536ee8, #7158d9);
+  box-shadow: 0 3px 9px rgba(83, 110, 232, .2), inset 0 1px rgba(255, 255, 255, .12);
+}
+.detail-actions .detail-action-ai .ant-btn-icon { color: inherit; }
+.detail-actions .detail-action-ai:not(:disabled):hover {
+  color: #fff;
+  border-color: transparent;
+  background: linear-gradient(120deg, #4962d4, #644ac8);
+  box-shadow: 0 4px 12px rgba(83, 110, 232, .3);
+}
+.detail-actions .detail-action-ai:not(:disabled):active { background: #544bc1; box-shadow: none; }
+.detail-action-manage .ant-btn { background: transparent; border-color: var(--border); }
+.detail-action-manage .ant-btn .ant-btn-icon { color: inherit; }
+.detail-actions .ant-btn-dangerous { color: var(--detail-action-danger); border-color: transparent; background: color-mix(in srgb, var(--detail-action-danger) 8%, var(--surface)); }
+.detail-actions .ant-btn-dangerous:not(:disabled):hover,
+.detail-actions .ant-btn-dangerous:not(:disabled):active {
+  color: var(--detail-action-danger);
+  border-color: color-mix(in srgb, var(--detail-action-danger) 30%, var(--border));
+  background: color-mix(in srgb, var(--detail-action-danger) 14%, var(--surface));
+}
+.detail-actions .ant-btn-dangerous:focus-visible { outline-color: var(--detail-action-danger); }
+.detail-actions .ant-btn:disabled { color: var(--muted); background: var(--surface-soft); border-color: transparent; opacity: .55; box-shadow: none; }
+.detail-actions .ant-btn:disabled .ant-btn-icon { color: inherit; }
 .detail-back.ant-btn { box-shadow: none; }
 .detail-avatar { width: 52px; height: 52px; flex: 0 0 52px; display: grid; place-items: center; border-radius: 16px; font-size: 23px; }
 .detail-avatar.linux { color: #526ff0; background: rgba(82, 111, 240, .12); }
@@ -676,7 +740,6 @@ button, input, textarea, select { font: inherit; }
 .stat-tile-grid.is-stale .stat-tile { opacity: .8; }
 .detail-tags { display: flex; gap: 5px; flex-wrap: wrap; }
 .detail-tags .ant-tag { margin: 0; border-radius: 6px; font-size: 10px; }
-.detail-actions .ant-btn { box-shadow: none; }
 
 /* Stat tiles */
 /* Eight tiles. Fixed to four columns rather than auto-fill: auto-fill at
@@ -922,8 +985,11 @@ button, input, textarea, select { font: inherit; }
   .detail-hero { padding: 16px; }
   .detail-hero-main { width: 100%; }
   .detail-actions { width: 100%; }
-  .detail-actions .ant-space-item { flex: 1; }
-  .detail-actions .ant-btn { width: 100%; }
+  .detail-action-tools { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .detail-action-ai { grid-column: 1 / -1; }
+  .detail-action-manage { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px 0 0; border-left: 0; border-top: 1px solid var(--border); }
+  .detail-actions .ant-btn { width: 100%; min-width: 0; height: auto; min-height: 42px; padding: 10px; }
+  .detail-actions .ant-btn > span:not(.ant-btn-icon) { white-space: normal; overflow-wrap: anywhere; }
   .stat-tile-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .stat-tile { padding: 12px; gap: 9px; }
   .stat-tile-icon { width: 32px; height: 32px; flex-basis: 32px; font-size: 14px; }
