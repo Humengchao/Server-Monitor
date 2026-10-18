@@ -1,6 +1,6 @@
 import { Alert, Col, DatePicker, Form, Input, InputNumber, Row, Select, Switch, Typography } from 'antd';
 import type { FormInstance } from 'antd';
-import { DesktopOutlined, WindowsOutlined } from '@ant-design/icons';
+import { DesktopOutlined, QuestionCircleOutlined, WindowsOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import CredentialSelect from './CredentialSelect';
 import TagSelect from './TagSelect';
@@ -33,6 +33,11 @@ export default function ServerForm({ form, editing, credentialId, onCredentialCh
   const serverType = Form.useWatch('server_type', form) || 'linux';
   const sshHostKey = Form.useWatch('ssh_host_key', form);
   const windows = serverType === 'windows';
+  const autoRenewHelp = <div>
+    {['autoRenewHelpConditions', 'autoRenewHelpCalendar', 'autoRenewHelpLimits'].map(key =>
+      <p key={key} style={{ margin: '0 0 8px' }}>{op(key)}</p>)}
+    <p style={{ margin: 0 }}>{op('autoRenewHelpScope')}</p>
+  </div>;
 
   return (
     <Form form={form} layout="vertical" onFinish={onFinish} disabled={disabled} className="server-form">
@@ -157,9 +162,13 @@ export default function ServerForm({ form, editing, credentialId, onCredentialCh
 
       <div className="form-section-title">{t('server.sectionDisplay')}</div>
       <Row gutter={12}>
-        <Col xs={24} sm={12}><Form.Item name="is_public" label={op('public')} valuePropName="checked" initialValue={false}><Switch /></Form.Item></Col>
-        <Col xs={24} sm={12}><Form.Item name="monitoring_enabled" label={op('monitoring')} valuePropName="checked" initialValue={true}><Switch /></Form.Item></Col>
-        <Col xs={24}><Form.Item name="auto_renew_enabled" label={op('autoRenew')} valuePropName="checked" initialValue={true}><Switch /></Form.Item></Col>
+        <Col xs={24} sm={12}><Form.Item name="is_public" label={op('public')} htmlFor="" valuePropName="checked" initialValue={true}><Switch aria-label={op('public')} /></Form.Item></Col>
+        <Col xs={24} sm={12}><Form.Item name="monitoring_enabled" label={op('monitoring')} htmlFor="" valuePropName="checked" initialValue={true}><Switch aria-label={op('monitoring')} /></Form.Item></Col>
+        <Col xs={24}><Form.Item name="auto_renew_enabled" label={op('autoRenew')} htmlFor="" valuePropName="checked" initialValue={true}
+          tooltip={{ title: autoRenewHelp, trigger: ['hover', 'focus'], styles: { root: { maxWidth: 'min(420px, calc(100vw - 24px))' } },
+            icon: <QuestionCircleOutlined aria-label={op('autoRenewHelpLabel')} tabIndex={0} /> }}>
+          <Switch aria-label={op('autoRenew')} />
+        </Form.Item></Col>
       </Row>
       <Row gutter={12}>
         <Col xs={24} sm={12}>

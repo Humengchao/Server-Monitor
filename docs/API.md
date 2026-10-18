@@ -1198,12 +1198,12 @@ Token 本身是无状态的 JWT（HS256，有效期 72 小时），但 `users.to
 | 字段 | 默认值 | 含义 |
 | --- | --- | --- |
 | `connection_mode` | `ssh` | `ssh` 或 `agent`；创建后不能切换 |
-| `is_public` | `false` | 是否包含在匿名 `/api/public/status` 中 |
+| `is_public` | `true` | 是否包含在匿名 `/api/public/status` 中，可显式设为 `false` |
 | `monitoring_enabled` | `true` | 是否参与自动指标采集、告警及网络检查 |
 | `auto_renew_enabled` | `true` | 是否允许自动顺延该服务器的到期日期 |
 
 `agent` 模式无需 SSH 认证字段，`host` 可省略，OS 在登记时由 Agent 上报；登记后的系统类型不能手动改写。
-更新时省略三个布尔字段会保留已保存值。升级数据库保留既有服务器的公开状态，新建服务器则默认私有。
+更新时省略三个布尔字段会保留已保存值。升级数据库保留既有服务器的公开状态，新建服务器默认公开，可显式传入 `is_public: false` 关闭公开显示。
 公开丢包字段 `packet_loss_percent` 来自近期真实的面板来源 ICMP 检查，没有有效测量时为 `null`。
 
 ## Agent 登记与连接（Web）

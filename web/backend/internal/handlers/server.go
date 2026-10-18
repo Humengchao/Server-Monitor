@@ -307,7 +307,7 @@ func (h *ServerHandler) Create(c *gin.Context) {
 		return
 	}
 	s := &models.Server{
-		ConnectionMode: req.ConnectionMode, IsPublic: boolDefault(req.IsPublic, false), MonitoringEnabled: boolDefault(req.MonitoringEnabled, true), AutoRenewEnabled: boolDefault(req.AutoRenewEnabled, true),
+		ConnectionMode: req.ConnectionMode, IsPublic: boolDefault(req.IsPublic, true), MonitoringEnabled: boolDefault(req.MonitoringEnabled, true), AutoRenewEnabled: boolDefault(req.AutoRenewEnabled, true),
 		UserID:          userID,
 		Name:            req.Name,
 		Host:            req.Host,

@@ -47,12 +47,55 @@ func operationsRequest(t *testing.T, r *gin.Engine, method, path string, body an
 	return response
 }
 
+func TestServerCreateDefaultsPublicAndHonorsExplicitPrivate(t *testing.T) {
+	r, db, user := operationsRouter(t)
+	h := NewServerHandler(nil, nil)
+	r.POST("/servers", h.Create)
+	for _, mode := range []string{"ssh", "agent"} {
+		for _, explicitPrivate := range []bool{false, true} {
+			name := "default public " + mode
+			if explicitPrivate {
+				name = "explicit private " + mode
+			}
+			request := gin.H{"name": name, "host": "192.0.2.1", "connection_mode": mode, "ssh_password": "fixture-password"}
+			if explicitPrivate {
+				request["is_public"] = false
+			}
+			response := operationsRequest(t, r, "POST", "/servers", request)
+			var created models.Server
+			if response.Code != 201 || json.Unmarshal(response.Body.Bytes(), &created) != nil {
+				t.Fatalf("create %s: %d %s", name, response.Code, response.Body)
+			}
+			if created.IsPublic != !explicitPrivate || !created.MonitoringEnabled || !created.AutoRenewEnabled {
+				t.Fatalf("unexpected create defaults for %s: %+v", name, created)
+			}
+			stored, err := models.GetServerByIDAndUser(db, created.ID, user)
+			if err != nil || stored.IsPublic != !explicitPrivate {
+				t.Fatalf("stored visibility for %s: %+v %v", name, stored, err)
+			}
+			public, err := models.GetPublicServerMetrics(db.Raw, time.Now().Add(-30*24*time.Hour), time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, item := range public {
+				if item.Name == name {
+					found = true
+				}
+			}
+			if found != !explicitPrivate {
+				t.Fatalf("public listing for %s: present=%v", name, found)
+			}
+		}
+	}
+}
+
 func TestServerVisibilityAndAgentConfigurationThroughHTTP(t *testing.T) {
 	r, db, user := operationsRouter(t)
 	h := NewServerHandler(nil, nil)
 	r.POST("/servers", h.Create)
 	r.PUT("/servers/:id", h.Update)
-	created := operationsRequest(t, r, "POST", "/servers", gin.H{"name": "private windows", "connection_mode": "agent", "server_type": "windows", "ssh_password": "discard-me", "ssh_key": "discard-me"})
+	created := operationsRequest(t, r, "POST", "/servers", gin.H{"name": "private windows", "connection_mode": "agent", "server_type": "windows", "ssh_password": "discard-me", "ssh_key": "discard-me", "is_public": false})
 	if created.Code != 201 {
 		t.Fatalf("create: %d %s", created.Code, created.Body)
 	}

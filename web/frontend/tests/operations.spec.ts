@@ -71,13 +71,13 @@ for (const platform of ['linux', 'windows'] as const) {
     await choose(page, 'Connection method', 'Install Agent');
     if (platform === 'windows') await choose(page, en['server.type'], 'Windows');
     await dialog.getByLabel(en['server.serverName'], { exact: true }).fill(`${platform}-agent`);
-    await expect(dialog.getByRole('switch', { name: 'Show on public status page' })).not.toBeChecked();
+    await expect(dialog.getByRole('switch', { name: 'Show on public status page' })).toBeChecked();
     await expect(dialog.getByLabel(en['server.sshPort'], { exact: true })).toHaveCount(0);
     await expect(dialog.getByLabel(en['server.password'], { exact: true })).toHaveCount(0);
     await expect(dialog.getByLabel(en['server.sshPassword'], { exact: true })).toHaveCount(0);
     await dialog.getByRole('button', { name: 'OK', exact: true }).click();
     await expect.poll(() => state.created.length).toBe(1);
-    expect(state.created[0]).toMatchObject({ connection_mode: 'agent', server_type: platform, is_public: false, monitoring_enabled: true });
+    expect(state.created[0]).toMatchObject({ connection_mode: 'agent', server_type: platform, is_public: true, monitoring_enabled: true });
     for (const key of ['ssh_password', 'ssh_key', 'ssh_host_key', 'ssh_username', 'port']) expect(state.created[0]).not.toHaveProperty(key);
     await expect(page).toHaveURL(/servers\/new-agent$/);
     await page.getByRole('button', { name: 'Generate installation command', exact: true }).click();

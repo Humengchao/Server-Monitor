@@ -67,6 +67,31 @@ test('adding a Windows host keeps the dialog buttons on screen and sends only Wi
   const box = (await ok.boundingBox())!;
   expect(box.y + box.height).toBeLessThanOrEqual(page.viewportSize()!.height);
 
+  for (const name of ['Show on public status page', 'Enable monitoring', 'Automatically extend eligible expiry dates']) {
+    const toggle = dialog.getByRole('switch', { name, exact: true });
+    const label = dialog.locator('.ant-form-item-label label').filter({ hasText: name });
+    await expect(toggle).toBeChecked();
+    await label.click();
+    await expect(toggle).toBeChecked();
+    await toggle.click();
+    await expect(toggle).not.toBeChecked();
+    await label.click();
+    await expect(toggle).not.toBeChecked();
+    await toggle.focus();
+    await toggle.press('Space');
+    await expect(toggle).toBeChecked();
+  }
+  const renewalHelp = dialog.getByRole('img', { name: 'How automatic expiry extension works', exact: true });
+  await renewalHelp.hover();
+  const explanation = page.getByRole('tooltip');
+  await expect(explanation).toContainText('every 10 minutes');
+  await expect(explanation).toContainText('more than 10 days overdue');
+  await expect(explanation).toContainText('at least 99%');
+  await expect(explanation).toContainText('one calendar month');
+  await expect(explanation).toContainText('does not pay for or renew the server');
+  await renewalHelp.click();
+  await expect(dialog.getByRole('switch', { name: 'Automatically extend eligible expiry dates', exact: true })).toBeChecked();
+
   await dialog.getByLabel(en['server.serverName']).fill('  win-01  ');
   await dialog.getByLabel(en['server.host']).fill('198.51.100.7');
   await expect(dialog.getByLabel(en['server.sshPort'])).toHaveValue('22');
@@ -88,7 +113,7 @@ test('adding a Windows host keeps the dialog buttons on screen and sends only Wi
   await dialog.getByLabel(en['server.password']).fill('secret');
   await ok.click();
   await expect.poll(() => state.created.length).toBe(1);
-  expect(state.created[0]).toMatchObject({ name: 'win-01', host: '198.51.100.7', server_type: 'windows', ssh_username: 'Administrator', ssh_password: 'secret', credential_id: null });
+  expect(state.created[0]).toMatchObject({ name: 'win-01', host: '198.51.100.7', server_type: 'windows', ssh_username: 'Administrator', ssh_password: 'secret', credential_id: null, is_public: true });
   expect(state.created[0].port).toBeUndefined();
   expect(state.created[0].ssh_key).toBeUndefined();
   expect(state.created[0].ssh_host_key).toBeUndefined();

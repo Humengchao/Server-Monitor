@@ -12,7 +12,7 @@ Built with Claude Code & DeepSeek-v4-pro
 
 - 🌐 [Public Probe / Service Status](http://svr.hmchxd.com/status)
 
-The public probe refreshes every 10 seconds and displays real names, manually configured public locations, tags, availability, and rounded health metrics for servers marked “Show on public status page.” New servers are private until explicitly published in the edit form. Servers can be searched by name. Connection fields (IP addresses / hostnames, ports, and SSH users), credentials, notes, and database IDs remain omitted.
+The public probe refreshes every 10 seconds and displays real names, manually configured public locations, tags, availability, and rounded health metrics for servers marked “Show on public status page.” New servers are public by default; turn off “Show on public status page” in the create or edit form to keep them private. Servers can be searched by name. Connection fields (IP addresses / hostnames, ports, and SSH users), credentials, notes, and database IDs remain omitted.
 
 > **Security note:** Management features handle login tokens and SSH credentials. Use them only after the domain has a valid HTTPS certificate and HTTP is forcibly redirected to HTTPS. The link above points only to the public status page.
 
