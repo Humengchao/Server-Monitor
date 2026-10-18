@@ -402,6 +402,7 @@ func (c *Collector) pruneServerState(active map[uuid.UUID]struct{}) {
 func serverPollFingerprint(server *models.Server) [32]byte {
 	hash := sha256.New()
 	for _, field := range []string{
+		server.ConnectionMode,
 		server.Host,
 		strconv.Itoa(server.Port),
 		server.SSHUsername,
@@ -528,7 +529,9 @@ func (c *Collector) getClient(s *models.Server, fingerprint [32]byte) (*pooledCl
 		c.dropClient(s.ID, pc)
 	}
 
-	client, conn, err := dialSSHClientConn(s.Host, s.Port, s.SSHUsername, s.SSHPassword, s.SSHKey, s.SSHHostKey, sshDialTimeout)
+	dialContext, cancel := context.WithTimeout(context.Background(), sshDialTimeout)
+	defer cancel()
+	client, conn, err := DialServer(dialContext, s)
 	if err != nil {
 		return nil, err
 	}

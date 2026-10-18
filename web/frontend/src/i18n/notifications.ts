@@ -1,0 +1,43 @@
+import i18n from './index';
+const en = {
+  title: 'Notification center', hint: 'Send alerts through one or more channels and inspect each delivery.', channels: 'Channels', deliveries: 'Delivery history',
+  add: 'Add channel', edit: 'Edit channel', name: 'Name', type: 'Type', enabled: 'Enabled', paused: 'Disabled', save: 'Save', cancel: 'Cancel', remove: 'Delete',
+  deleteConfirm: 'Delete this channel? Queued deliveries will be canceled; delivery history is retained.', refresh: 'Refresh', test: 'Send test',
+  testQueued: 'Test queued. Open delivery history to check the result.', saved: 'Channel saved', deleted: 'Channel deleted', failed: 'Request failed',
+  telegram: 'Telegram', wecom: 'Enterprise WeChat', dingtalk: 'DingTalk', email: 'SMTP email', webhook: 'Generic webhook',
+  bot_token: 'Bot token', chat_id: 'Chat ID', message_thread_id: 'Topic ID (optional)', webhook_url: 'Webhook URL', secret: 'Signing secret (optional)', bearer_token: 'Bearer token (optional)',
+  smtp_host: 'SMTP host', smtp_port: 'SMTP port', tls_mode: 'Encryption', username: 'SMTP username', password: 'SMTP password', from: 'Sender address', to: 'Recipients',
+  starttls: 'Required STARTTLS (usually port 587)', tls: 'Implicit TLS (usually port 465)',
+  secretHint: 'Secrets are encrypted and never displayed again. Leave a secret field blank to keep its saved value.', kept: 'Saved; leave blank to keep',
+  clearSecrets: 'Remove optional saved secrets', smtpHint: 'TLS certificate verification is required. Plaintext SMTP is not supported. Enter each recipient separately.',
+  robotHint: 'Enterprise WeChat authenticates with the key in its robot URL. DingTalk can additionally use the signing secret from its robot security settings.',
+  docs: 'Provider documentation', status: 'Status', channel: 'Channel', attempts: 'Attempts', created: 'Queued at', lastAttempt: 'Last attempt', nextAttempt: 'Next attempt', error: 'Last error',
+  pending: 'Queued', sending: 'Sending', retry: 'Waiting to retry', succeeded: 'Delivered', failedStatus: 'Failed', canceled: 'Canceled', all: 'All',
+  resend: 'Resend', resendTitle: 'Send this notification again?', resendConfirm: 'A new delivery will be created. The recipient may already have received the original, so this can produce a duplicate.',
+  resendQueued: 'A new delivery was queued', retryOf: 'Retry of #{{id}}', previous: 'Previous', next: 'Next', page: 'Page {{number}}',
+  noChannels: 'No channels yet', noDeliveries: 'No delivery records', loadFailed: 'Could not refresh. Any displayed records may be outdated.',
+  deliveryHint: 'Delivery is retried after failures. A remote service can accept a message before a connection fails, so retries may produce duplicates. Disabling a channel cancels queued deliveries.',
+  ruleChannels: 'Notification channels', ruleHint: 'Select multiple channels. When none are selected, the legacy webhook below is used.', manage: 'Manage notification channels', required: 'This field is required', subject: 'Notification',
+};
+const zh: typeof en = {
+  title: '通知中心', hint: '通过一个或多个渠道发送告警，并查看每次投递结果。', channels: '通知渠道', deliveries: '投递记录',
+  add: '添加渠道', edit: '编辑渠道', name: '名称', type: '类型', enabled: '启用', paused: '已停用', save: '保存', cancel: '取消', remove: '删除',
+  deleteConfirm: '删除此渠道？排队中的通知会被取消，已有投递记录会保留。', refresh: '刷新', test: '发送测试',
+  testQueued: '测试已加入队列，请在投递记录中查看结果。', saved: '渠道已保存', deleted: '渠道已删除', failed: '请求失败',
+  telegram: 'Telegram', wecom: '企业微信', dingtalk: '钉钉', email: 'SMTP 邮件', webhook: '通用 Webhook',
+  bot_token: 'Bot Token', chat_id: 'Chat ID', message_thread_id: '话题 ID（可选）', webhook_url: 'Webhook 地址', secret: '加签密钥（可选）', bearer_token: 'Bearer Token（可选）',
+  smtp_host: 'SMTP 主机', smtp_port: 'SMTP 端口', tls_mode: '加密方式', username: 'SMTP 用户名', password: 'SMTP 密码', from: '发件地址', to: '收件地址',
+  starttls: '强制 STARTTLS（通常为 587 端口）', tls: '隐式 TLS（通常为 465 端口）',
+  secretHint: '秘密字段加密保存且不会再次显示。编辑时留空即保留原值。', kept: '已保存，留空保留',
+  clearSecrets: '移除已保存的可选秘密', smtpHint: '必须通过 TLS 证书验证，不支持明文 SMTP。每个收件地址分别输入。',
+  robotHint: '企业微信使用机器人地址中的 key 鉴权；钉钉还可填写机器人安全设置中的加签密钥。',
+  docs: '平台官方文档', status: '状态', channel: '渠道', attempts: '尝试次数', created: '入队时间', lastAttempt: '最近尝试', nextAttempt: '下次尝试', error: '最近错误',
+  pending: '等待投递', sending: '正在投递', retry: '等待重试', succeeded: '已投递', failedStatus: '失败', canceled: '已取消', all: '全部',
+  resend: '重新发送', resendTitle: '再次发送此通知？', resendConfirm: '将创建一条新的投递记录。接收方可能已经收到原通知，再次发送可能造成重复。',
+  resendQueued: '新投递已加入队列', retryOf: '重发自 #{{id}}', previous: '上一页', next: '下一页', page: '第 {{number}} 页',
+  noChannels: '暂无通知渠道', noDeliveries: '暂无投递记录', loadFailed: '刷新失败，当前显示的记录可能已经过时。',
+  deliveryHint: '失败的通知会自动重试。远端可能已接收消息但连接随后断开，因此重试可能产生重复。停用渠道会取消排队通知。',
+  ruleChannels: '通知渠道', ruleHint: '可选择多个渠道。未选择时使用下方兼容旧配置的 Webhook。', manage: '管理通知渠道', required: '请填写此项', subject: '通知内容',
+};
+i18n.addResourceBundle('en', 'notifications', en, true, true);
+i18n.addResourceBundle('zh', 'notifications', zh, true, true);

@@ -348,7 +348,7 @@ func (h *DockerHandler) ContainerExec(c *gin.Context) {
 	// Exec sessions intentionally bypass the connection cache: they live as
 	// long as the websocket and TerminalSession.Close closes the whole client,
 	// which would kill a shared cached connection for everyone else.
-	client, err := services.DialSSH(server.Host, server.Port, server.SSHUsername, server.SSHPassword, server.SSHKey, server.SSHHostKey)
+	client, _, err := services.DialServer(c.Request.Context(), server)
 	if err != nil {
 		conn.WriteMessage(websocket.TextMessage, []byte("SSH connection failed: "+err.Error()))
 		return

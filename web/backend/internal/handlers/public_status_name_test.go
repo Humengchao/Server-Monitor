@@ -22,13 +22,13 @@ func TestPublicStatusPublishesDisplayNameWithoutConnectionFields(t *testing.T) {
 		displayName, "Hong Kong", "[]", "linux", int64(4), int64(1000), nil,
 		float64(0), "CNY", "year", int64(0), float64(20), float64(0), float64(0), float64(0),
 		int64(50), int64(100), int64(200), int64(1), int64(2), int64(3), int64(4),
-		int64(3600), int64(10), time.Now(), int64(100), int64(100),
+		int64(3600), int64(10), time.Now(), int64(100), int64(100), nil,
 	}
 	db := sql.OpenDB(&metricsConnector{query: func(_ context.Context, query string, _ []driver.NamedValue) (driver.Rows, error) {
 		if !strings.Contains(query, "SELECT s.name,") {
 			t.Error("public query omitted the configured display name")
 		}
-		for _, privateField := range []string{"s.host", "s.port", "s.ssh_", "s.notes", "s.user_id"} {
+		for _, privateField := range []string{"s.host", "s.port", "s.ssh_", "s.notes"} {
 			if strings.Contains(query, privateField) {
 				t.Errorf("public query selected %s", privateField)
 			}

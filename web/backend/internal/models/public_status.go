@@ -16,31 +16,32 @@ type PublicTag struct {
 // manually configured locations and tags are public; connection settings,
 // credentials, ownership, notes and database IDs are excluded.
 type PublicServerMetric struct {
-	Name            string
-	PublicLocation  string
-	Tags            []PublicTag
-	ServerType      string
-	CPUCores        int
-	DiskTotal       int64
-	ExpiresAt       *time.Time
-	BillingPrice    float64
-	BillingCurrency string
-	BillingCycle    string
-	TrafficLimit    int64
-	CPUPercent      float64
-	Load1           float64
-	Load5           float64
-	Load15          float64
-	MemoryUsed      int64
-	MemoryTotal     int64
-	DiskUsed        int64
-	NetworkRxBytes  int64
-	NetworkTxBytes  int64
-	NetworkRxTotal  int64
-	NetworkTxTotal  int64
-	UptimeSeconds   int64
-	LatencyMS       int
-	RecordedAt      *time.Time
+	Name              string
+	PublicLocation    string
+	Tags              []PublicTag
+	ServerType        string
+	CPUCores          int
+	DiskTotal         int64
+	ExpiresAt         *time.Time
+	BillingPrice      float64
+	BillingCurrency   string
+	BillingCycle      string
+	TrafficLimit      int64
+	CPUPercent        float64
+	Load1             float64
+	Load5             float64
+	Load15            float64
+	MemoryUsed        int64
+	MemoryTotal       int64
+	DiskUsed          int64
+	NetworkRxBytes    int64
+	NetworkTxBytes    int64
+	NetworkRxTotal    int64
+	NetworkTxTotal    int64
+	UptimeSeconds     int64
+	LatencyMS         int
+	PacketLossPercent *float64
+	RecordedAt        *time.Time
 	// Observed 30-day availability, derived from the fifteen-minute rollup.
 	// Availability30dObserved/Expected are bucket counts; the handler turns them
 	// into a percentage so the arithmetic lives in one place.
@@ -81,9 +82,13 @@ func GetPublicServerMetricsContext(ctx context.Context, db *sql.DB, since30d, un
 			-- whenever created_at is not itself aligned, and the count above
 			-- would then exceed it.
 			GREATEST(0, (CEIL(EXTRACT(EPOCH FROM $2) / 900)
-				- CEIL(EXTRACT(EPOCH FROM GREATEST($1, s.created_at)) / 900))::INT)
+				- CEIL(EXTRACT(EPOCH FROM GREATEST($1, s.created_at)) / 900))::INT),
+			(SELECT (n.sample->>'loss_percent')::float8 FROM network_samples n JOIN network_checks c ON c.id=n.check_id
+			 WHERE c.target_server_id=s.id AND c.user_id=s.user_id AND c.source_server_id IS NULL AND c.enabled
+			 AND n.recorded_at>NOW()-INTERVAL '2 minutes' ORDER BY n.recorded_at DESC,n.id DESC LIMIT 1)
 		FROM servers s
 		LEFT JOIN server_latest_metrics sm ON sm.server_id = s.id
+		WHERE s.is_public
 		ORDER BY s.created_at ASC, s.id ASC`, since30d, until)
 	if err != nil {
 		return nil, err
@@ -94,6 +99,7 @@ func GetPublicServerMetricsContext(ctx context.Context, db *sql.DB, since30d, un
 	for rows.Next() {
 		var item PublicServerMetric
 		var expiresAt, recordedAt sql.NullTime
+		var packetLoss sql.NullFloat64
 		var tagsJSON string
 		if err := rows.Scan(
 			&item.Name, &item.PublicLocation, &tagsJSON,
@@ -104,6 +110,7 @@ func GetPublicServerMetricsContext(ctx context.Context, db *sql.DB, since30d, un
 			&item.NetworkRxBytes, &item.NetworkTxBytes, &item.NetworkRxTotal, &item.NetworkTxTotal,
 			&item.UptimeSeconds, &item.LatencyMS, &recordedAt,
 			&item.Availability30dObserved, &item.Availability30dExpected,
+			&packetLoss,
 		); err != nil {
 			return nil, err
 		}
@@ -115,6 +122,9 @@ func GetPublicServerMetricsContext(ctx context.Context, db *sql.DB, since30d, un
 		}
 		if recordedAt.Valid {
 			item.RecordedAt = &recordedAt.Time
+		}
+		if packetLoss.Valid {
+			item.PacketLossPercent = &packetLoss.Float64
 		}
 		metrics = append(metrics, item)
 	}

@@ -20,12 +20,17 @@ import (
 )
 
 type ServerHandler struct {
-	sshCache  *services.SSHConnCache
-	collector *services.Collector
+	sshCache         *services.SSHConnCache
+	collector        *services.Collector
+	invalidatePublic func()
 }
 
-func NewServerHandler(sshCache *services.SSHConnCache, collector *services.Collector) *ServerHandler {
-	return &ServerHandler{sshCache: sshCache, collector: collector}
+func NewServerHandler(sshCache *services.SSHConnCache, collector *services.Collector, invalidate ...func()) *ServerHandler {
+	h := &ServerHandler{sshCache: sshCache, collector: collector}
+	if len(invalidate) > 0 {
+		h.invalidatePublic = invalidate[0]
+	}
+	return h
 }
 
 // PollRetry lets the operator retry a failed host immediately instead of
@@ -76,28 +81,36 @@ func (h *ServerHandler) PollRetry(c *gin.Context) {
 }
 
 type CreateServerRequest struct {
-	Name            string     `json:"name" binding:"required"`
-	Host            string     `json:"host" binding:"required"`
-	Port            int        `json:"port"`
-	SSHUsername     string     `json:"ssh_username"`
-	SSHPassword     string     `json:"ssh_password"`
-	SSHKey          string     `json:"ssh_key"`
-	SSHHostKey      string     `json:"ssh_host_key"`
-	CredentialID    *uuid.UUID `json:"credential_id"`
-	ServerType      string     `json:"server_type"`
-	ExpiresAt       *time.Time `json:"expires_at"`
-	Notes           string     `json:"notes"`
-	BillingPrice    float64    `json:"billing_price"`
-	BillingCurrency string     `json:"billing_currency"`
-	BillingCycle    string     `json:"billing_cycle"`
-	TrafficLimit    int64      `json:"traffic_limit_bytes"`
-	PublicLocation  string     `json:"public_location"`
+	ConnectionMode    string     `json:"connection_mode"`
+	IsPublic          *bool      `json:"is_public"`
+	MonitoringEnabled *bool      `json:"monitoring_enabled"`
+	AutoRenewEnabled  *bool      `json:"auto_renew_enabled"`
+	Name              string     `json:"name" binding:"required"`
+	Host              string     `json:"host"`
+	Port              int        `json:"port"`
+	SSHUsername       string     `json:"ssh_username"`
+	SSHPassword       string     `json:"ssh_password"`
+	SSHKey            string     `json:"ssh_key"`
+	SSHHostKey        string     `json:"ssh_host_key"`
+	CredentialID      *uuid.UUID `json:"credential_id"`
+	ServerType        string     `json:"server_type"`
+	ExpiresAt         *time.Time `json:"expires_at"`
+	Notes             string     `json:"notes"`
+	BillingPrice      float64    `json:"billing_price"`
+	BillingCurrency   string     `json:"billing_currency"`
+	BillingCycle      string     `json:"billing_cycle"`
+	TrafficLimit      int64      `json:"traffic_limit_bytes"`
+	PublicLocation    string     `json:"public_location"`
 }
 
 type UpdateServerRequest struct {
+	ConnectionMode    string          `json:"connection_mode"`
+	IsPublic          *bool           `json:"is_public"`
+	MonitoringEnabled *bool           `json:"monitoring_enabled"`
+	AutoRenewEnabled  *bool           `json:"auto_renew_enabled"`
 	ExpectedExpiresAt json.RawMessage `json:"expected_expires_at"`
 	Name              string          `json:"name" binding:"required"`
-	Host              string          `json:"host" binding:"required"`
+	Host              string          `json:"host"`
 	Port              int             `json:"port"`
 	SSHUsername       string          `json:"ssh_username"`
 	SSHPassword       string          `json:"ssh_password"`
@@ -237,6 +250,25 @@ func (h *ServerHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if req.ConnectionMode == "" {
+		req.ConnectionMode = "ssh"
+	}
+	if req.ConnectionMode != "ssh" && req.ConnectionMode != "agent" {
+		c.JSON(400, gin.H{"error": "invalid connection mode"})
+		return
+	}
+	if req.ConnectionMode == "agent" {
+		req.SSHPassword = ""
+		req.SSHKey = ""
+		req.SSHHostKey = ""
+		req.CredentialID = nil
+		if req.Host == "" {
+			req.Host = "agent"
+		}
+		if req.SSHUsername == "" {
+			req.SSHUsername = "agent"
+		}
+	}
 	name, host, username, port, err := normalizeServerConnection(req.Name, req.Host, req.SSHUsername, req.Port)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -259,7 +291,9 @@ func (h *ServerHandler) Create(c *gin.Context) {
 		req.BillingCycle = "year"
 	}
 	db := c.MustGet("db").(*models.DB)
-	if req.CredentialID != nil {
+	if req.ConnectionMode == "agent" {
+		// Enrollment establishes machine identity; no SSH secret is needed.
+	} else if req.CredentialID != nil {
 		credential, err := models.GetCredentialByID(db, *req.CredentialID, userID)
 		if err != nil || credential.CredType != req.ServerType {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid credential"})
@@ -273,6 +307,7 @@ func (h *ServerHandler) Create(c *gin.Context) {
 		return
 	}
 	s := &models.Server{
+		ConnectionMode: req.ConnectionMode, IsPublic: boolDefault(req.IsPublic, false), MonitoringEnabled: boolDefault(req.MonitoringEnabled, true), AutoRenewEnabled: boolDefault(req.AutoRenewEnabled, true),
 		UserID:          userID,
 		Name:            req.Name,
 		Host:            req.Host,
@@ -295,6 +330,9 @@ func (h *ServerHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create server"})
 		return
 	}
+	if h.invalidatePublic != nil {
+		h.invalidatePublic()
+	}
 	c.JSON(http.StatusCreated, s)
 }
 
@@ -310,6 +348,35 @@ func (h *ServerHandler) Update(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	db := c.MustGet("db").(*models.DB)
+	var mode, actualPlatform, actualUser string
+	if err := db.Raw.QueryRowContext(c.Request.Context(), `SELECT connection_mode,COALESCE(server_type,'linux'),ssh_username FROM servers WHERE id=$1 AND user_id=$2`, id, userID).Scan(&mode, &actualPlatform, &actualUser); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(404, gin.H{"error": "server not found"})
+		} else {
+			c.JSON(500, gin.H{"error": "failed to load server"})
+		}
+		return
+	}
+	if req.ConnectionMode != "" && req.ConnectionMode != mode {
+		c.JSON(400, gin.H{"error": "connection mode cannot be changed; enroll a new server"})
+		return
+	}
+	if mode == "agent" {
+		if req.ServerType != "" && req.ServerType != actualPlatform {
+			c.JSON(400, gin.H{"error": "Agent platform is detected on enrollment and cannot be changed here"})
+			return
+		}
+		req.ServerType = actualPlatform
+		req.SSHPassword = ""
+		req.SSHKey = ""
+		req.SSHHostKey = ""
+		req.CredentialID = nil
+		if req.Host == "" {
+			req.Host = "agent"
+		}
+		req.SSHUsername = actualUser
+	}
 	var expected *models.ExpiryExpectation
 	if len(req.ExpectedExpiresAt) > 0 {
 		expected = &models.ExpiryExpectation{}
@@ -318,10 +385,19 @@ func (h *ServerHandler) Update(c *gin.Context) {
 			return
 		}
 	}
-	name, host, username, port, err := normalizeServerConnection(req.Name, req.Host, req.SSHUsername, req.Port)
+	// Agent users are detected metadata, not SSH login input. Windows service
+	// accounts can legitimately contain spaces (NT AUTHORITY\SYSTEM).
+	loginForValidation := req.SSHUsername
+	if mode == "agent" {
+		loginForValidation = "agent"
+	}
+	name, host, username, port, err := normalizeServerConnection(req.Name, req.Host, loginForValidation, req.Port)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+	if mode == "agent" {
+		username = actualUser
 	}
 	serverType, err := normalizeServerType(req.ServerType)
 	if err != nil {
@@ -339,8 +415,8 @@ func (h *ServerHandler) Update(c *gin.Context) {
 	if req.BillingCycle == "" {
 		req.BillingCycle = "year"
 	}
-	db := c.MustGet("db").(*models.DB)
-	if req.CredentialID != nil {
+	if mode == "agent" {
+	} else if req.CredentialID != nil {
 		credential, err := models.GetCredentialByID(db, *req.CredentialID, userID)
 		if err != nil || credential.CredType != req.ServerType {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid credential"})
@@ -381,7 +457,7 @@ func (h *ServerHandler) Update(c *gin.Context) {
 		TrafficLimit:    req.TrafficLimit,
 		PublicLocation:  req.PublicLocation,
 	}
-	if err := models.UpdateServerWithExpiryExpectation(c.Request.Context(), db, s, expected); err != nil {
+	if err := models.UpdateServerWithExpiryExpectation(c.Request.Context(), db, s, expected, models.ServerOptions{IsPublic: req.IsPublic, MonitoringEnabled: req.MonitoringEnabled, AutoRenewEnabled: req.AutoRenewEnabled}); err != nil {
 		if errors.Is(err, models.ErrServerExpiryChanged) {
 			c.JSON(http.StatusConflict, gin.H{"error": "server expiry changed; reload before saving", "error_code": "expiry_changed"})
 			return
@@ -392,6 +468,13 @@ func (h *ServerHandler) Update(c *gin.Context) {
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update server"})
 		return
+	}
+	s.ConnectionMode = mode
+	if h.invalidatePublic != nil {
+		h.invalidatePublic()
+	}
+	if h.sshCache != nil {
+		h.sshCache.Drop(id)
 	}
 	c.JSON(http.StatusOK, s)
 }
@@ -405,13 +488,30 @@ func (h *ServerHandler) Delete(c *gin.Context) {
 	}
 	db := c.MustGet("db").(*models.DB)
 	if err := models.DeleteServer(db.Raw, id, userID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete server"})
 		return
 	}
+	if h.invalidatePublic != nil {
+		h.invalidatePublic()
+	}
 	// Close any cached Docker-API connection so nothing stays connected to a
 	// host that was just removed from the panel.
-	h.sshCache.Drop(id)
+	if h.sshCache != nil {
+		h.sshCache.Drop(id)
+	}
+	services.DisconnectAgent(id)
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
+}
+
+func boolDefault(value *bool, fallback bool) bool {
+	if value != nil {
+		return *value
+	}
+	return fallback
 }
 
 func (h *ServerHandler) SetTags(c *gin.Context) {

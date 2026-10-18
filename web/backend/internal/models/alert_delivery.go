@@ -16,7 +16,7 @@ type AlertNotification struct {
 }
 
 func enqueueAlertNotification(ctx context.Context, tx *sql.Tx, eventID int64, userID, ruleID, serverID uuid.UUID, notification *AlertNotification) error {
-	if notification == nil || notification.URL == "" {
+	if notification == nil {
 		return nil
 	}
 	var target string
@@ -26,7 +26,13 @@ func enqueueAlertNotification(ctx context.Context, tx *sql.Tx, eventID int64, us
 	if err := tx.QueryRowContext(ctx, `SELECT webhook_url,enabled FROM alert_rules WHERE id=$1 AND user_id=$2 FOR SHARE`, ruleID, userID).Scan(&target, &enabled); err != nil {
 		return err
 	}
-	if !enabled || target == "" {
+	if !enabled {
+		return nil
+	}
+	if associated, err := enqueueChannelNotifications(ctx, tx, eventID, userID, ruleID, serverID, notification); err != nil || associated {
+		return err
+	}
+	if target == "" {
 		return nil
 	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO alert_webhooks(event_id,user_id,rule_id,server_id,transition,target,payload)

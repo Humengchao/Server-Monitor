@@ -1,10 +1,11 @@
-import { Col, DatePicker, Form, Input, InputNumber, Row, Select, Typography } from 'antd';
+import { Alert, Col, DatePicker, Form, Input, InputNumber, Row, Select, Switch, Typography } from 'antd';
 import type { FormInstance } from 'antd';
 import { DesktopOutlined, WindowsOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import CredentialSelect from './CredentialSelect';
 import TagSelect from './TagSelect';
 import type { ServerFormValues } from '../utils/serverForm';
+import '../i18n/operations';
 
 const { Text } = Typography;
 
@@ -27,6 +28,8 @@ interface Props {
  */
 export default function ServerForm({ form, editing, credentialId, onCredentialChange, tagIds, onTagsChange, disabled, onFinish }: Props) {
   const { t } = useTranslation();
+  const { t: op } = useTranslation('operations');
+  const agent = Form.useWatch('connection_mode', form) === 'agent';
   const serverType = Form.useWatch('server_type', form) || 'linux';
   const sshHostKey = Form.useWatch('ssh_host_key', form);
   const windows = serverType === 'windows';
@@ -34,6 +37,13 @@ export default function ServerForm({ form, editing, credentialId, onCredentialCh
   return (
     <Form form={form} layout="vertical" onFinish={onFinish} disabled={disabled} className="server-form">
       <div className="form-section-title">{t('server.sectionConnection')}</div>
+      <Form.Item name="connection_mode" label={op('connectionMode')} initialValue="ssh">
+        <Select disabled={editing} options={[{ value: 'ssh', label: op('sshMode') }, { value: 'agent', label: op('agentMode') }]} onChange={(mode) => {
+          onCredentialChange(undefined);
+          form.setFieldsValue({ ssh_username: undefined, ssh_password: undefined, ssh_key: undefined, ssh_host_key: undefined, port: mode === 'ssh' && !windows ? 22 : undefined });
+        }} />
+      </Form.Item>
+      {agent && <Alert type="info" showIcon title={op('agentHint')} style={{ marginBottom: 16 }} />}
       <Row gutter={12}>
         <Col xs={24} sm={14}>
           <Form.Item name="name" label={t('server.serverName')} rules={[{ required: true }]}>
@@ -43,11 +53,12 @@ export default function ServerForm({ form, editing, credentialId, onCredentialCh
         <Col xs={24} sm={10}>
           <Form.Item name="server_type" label={t('server.type')} initialValue="linux">
             <Select
+              disabled={editing && agent}
               onChange={(value) => {
                 onCredentialChange(undefined);
                 form.setFieldsValue(value === 'windows'
-                  ? { port: undefined, ssh_key: undefined, ssh_host_key: undefined }
-                  : { port: form.getFieldValue('port') || 22 });
+                  ? { port: undefined, ssh_username: undefined, ssh_password: undefined, ssh_key: undefined, ssh_host_key: undefined }
+                  : { port: agent ? undefined : form.getFieldValue('port') || 22, ssh_username: undefined, ssh_password: undefined, ssh_key: undefined, ssh_host_key: undefined });
               }}
               options={[
                 { value: 'linux', label: <><DesktopOutlined /> Linux</> },
@@ -59,11 +70,11 @@ export default function ServerForm({ form, editing, credentialId, onCredentialCh
       </Row>
       <Row gutter={12}>
         <Col xs={24} sm={windows ? 24 : 16}>
-          <Form.Item name="host" label={t('server.host')} rules={[{ required: true }]}>
+          <Form.Item name="host" label={t('server.host')} rules={[{ required: !agent }]}>
             <Input placeholder={t('server.hostPlaceholder')} />
           </Form.Item>
         </Col>
-        {!windows && (
+        {!windows && !agent && (
           <Col xs={24} sm={8}>
             <Form.Item name="port" label={t('server.sshPort')} initialValue={22}>
               <InputNumber min={1} max={65535} style={{ width: '100%' }} />
@@ -72,7 +83,7 @@ export default function ServerForm({ form, editing, credentialId, onCredentialCh
         )}
       </Row>
 
-      <div className="form-section-title">{t('server.sectionAuth')}</div>
+      {!agent && <><div className="form-section-title">{t('server.sectionAuth')}</div>
       <Form.Item label={t('server.credential')}>
         <CredentialSelect value={credentialId} onChange={onCredentialChange} serverType={serverType} />
       </Form.Item>
@@ -107,6 +118,7 @@ export default function ServerForm({ form, editing, credentialId, onCredentialCh
         </Form.Item>
       )}
 
+      </>}
       <div className="form-section-title">{t('server.sectionBilling')}</div>
       <Row gutter={12}>
         <Col xs={24} sm={12}>
@@ -144,6 +156,11 @@ export default function ServerForm({ form, editing, credentialId, onCredentialCh
       </Row>
 
       <div className="form-section-title">{t('server.sectionDisplay')}</div>
+      <Row gutter={12}>
+        <Col xs={24} sm={12}><Form.Item name="is_public" label={op('public')} valuePropName="checked" initialValue={false}><Switch /></Form.Item></Col>
+        <Col xs={24} sm={12}><Form.Item name="monitoring_enabled" label={op('monitoring')} valuePropName="checked" initialValue={true}><Switch /></Form.Item></Col>
+        <Col xs={24}><Form.Item name="auto_renew_enabled" label={op('autoRenew')} valuePropName="checked" initialValue={true}><Switch /></Form.Item></Col>
+      </Row>
       <Row gutter={12}>
         <Col xs={24} sm={12}>
           <Form.Item name="public_location" label={t('server.publicLocation')}>

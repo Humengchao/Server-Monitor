@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import '../i18n/networkLogs';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Collapse, Table, Tag, Button, Space, Typography, Spin, Empty, Drawer, App, Card, Tooltip, Result, Progress, Select, Switch } from 'antd';
 import {
@@ -151,6 +152,7 @@ function LogsModal({ serverId, containerId, containerName, onClose }: {
   onClose: () => void;
 }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { message } = App.useApp();
   const [logs, setLogs] = useState('');
   const [loading, setLoading] = useState(true);
@@ -201,6 +203,7 @@ function LogsModal({ serverId, containerId, containerName, onClose }: {
       styles={{ body: { padding: 0, background: '#1e1e2e' }, wrapper: { width: '80vw' } }}
       extra={(
         <Space size={8} className="docker-logs-tools">
+          <Button size="small" onClick={() => navigate('/logs?' + new URLSearchParams({ server: serverId, container: containerId }))}>{t('openLogs', { ns: 'networkLogs' })}</Button>
           <Select size="small" value={tail} onChange={setTail} aria-label={t('docker.logsTail', { count: tail })} options={LOG_TAILS.map((count) => ({ value: count, label: t('docker.logsTail', { count }) }))} />
           <Tooltip title={t('docker.logsWrap')}><Switch size="small" checked={wrap} onChange={setWrap} aria-label={t('docker.logsWrap')} /></Tooltip>
           <Button size="small" icon={<CopyOutlined />} disabled={loading} onClick={() => { void copy(); }}>{t('docker.logsCopy')}</Button>

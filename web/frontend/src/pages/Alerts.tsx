@@ -9,9 +9,14 @@ import {
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
+import { incidentLogsURL } from '../utils/logs';
+import '../i18n/networkLogs';
 import { alertsApi, AlertEvent, AlertMetric, AlertRule, METRIC_UNITS, PERCENT_METRICS } from '../api/alerts';
 import type { AlertEventState } from '../api/alerts';
 import { serversApi, Server } from '../api/servers';
+import { notificationsApi } from '../api/notifications';
+import type { NotificationChannel } from '../api/notifications';
+import '../i18n/notifications';
 import { usePolling } from '../hooks/usePolling';
 import { formatDateTime } from '../utils/format';
 
@@ -32,6 +37,7 @@ interface RuleFormValues {
   duration_seconds: number;
   enabled?: boolean;
   webhook_url?: string;
+  channel_ids?: string[];
 }
 
 /** Reads the human-readable error the API returns, falling back to a label. */
@@ -97,6 +103,7 @@ export default function Alerts() {
   const [activeCount, setActiveCount] = useState<number | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [servers, setServers] = useState<Server[]>([]);
+  const [notificationChannels, setNotificationChannels] = useState<NotificationChannel[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<'events' | 'rules'>('events');
   const [modalOpen, setModalOpen] = useState(false);
@@ -179,6 +186,15 @@ export default function Alerts() {
     return () => controller.abort();
   }, []);
 
+  useEffect(() => {
+    if (!modalOpen) return;
+    const controller = new AbortController();
+    notificationsApi.channels(controller.signal)
+      .then(response => { if (!controller.signal.aborted) setNotificationChannels(response.data); })
+      .catch(() => { if (!controller.signal.aborted) message.error(t('failed', { ns: 'notifications' })); });
+    return () => controller.abort();
+  }, [modalOpen, message, t]);
+
   // Rules a reader needs to act on come first: currently firing, then armed,
   // then paused. Creation order buries a firing rule under paused ones.
   const sortedRules = useMemo(() => {
@@ -196,7 +212,7 @@ export default function Alerts() {
     setEditingRule(null);
     form.resetFields();
     form.setFieldsValue({
-      metric: 'cpu', comparator: '>', threshold: 90, duration_seconds: 300, enabled: true, server_id: null,
+      metric: 'cpu', comparator: '>', threshold: 90, duration_seconds: 300, enabled: true, server_id: null, channel_ids: [],
     });
     setModalOpen(true);
   };
@@ -213,6 +229,7 @@ export default function Alerts() {
       duration_seconds: rule.duration_seconds,
       enabled: rule.enabled,
       webhook_url: rule.webhook_url,
+      channel_ids: rule.channel_ids || [],
     });
     setModalOpen(true);
   };
@@ -227,6 +244,7 @@ export default function Alerts() {
       duration_seconds: Number(values.duration_seconds) || 300,
       enabled: values.enabled !== false,
       webhook_url: String(values.webhook_url || '').trim(),
+      channel_ids: values.channel_ids || [],
     };
     setSavingRule(true);
     beginMutation();
@@ -269,6 +287,7 @@ export default function Alerts() {
         duration_seconds: rule.duration_seconds,
         enabled,
         webhook_url: rule.webhook_url,
+        channel_ids: rule.channel_ids,
       });
     } catch {
       if (mountedRef.current) {
@@ -361,7 +380,9 @@ export default function Alerts() {
       key: 'webhook',
       width: 110,
       render: (_: unknown, rule: AlertRule) => (
-        rule.webhook_url
+        rule.channel_ids?.length
+          ? <Tag color="blue"><BellOutlined /> {rule.channel_ids.length}</Tag>
+          : rule.webhook_url
           ? <Tooltip title={rule.webhook_url}><Tag color="blue" variant="filled"><ApiOutlined /> Webhook</Tag></Tooltip>
           : <Text type="secondary">—</Text>
       ),
@@ -479,6 +500,7 @@ export default function Alerts() {
       ) : (
         <div className="alert-timeline">
           {shownEvents.map((event) => (
+            <div key={event.id}>
             <button
               type="button"
               key={event.id}
@@ -506,6 +528,8 @@ export default function Alerts() {
                 </small>
               </span>
             </button>
+            <Button type="link" size="small" onClick={() => navigate(incidentLogsURL(event.server_id, event.started_at))}>{t('openLogs', { ns: 'networkLogs' })}</Button>
+            </div>
           ))}
         </div>
       )}
@@ -581,6 +605,12 @@ export default function Alerts() {
           >
             <Select options={DURATION_OPTIONS.map((value) => ({ value, label: formatDuration(value, t) }))} />
           </Form.Item>
+          <Form.Item name="channel_ids" label={t('ruleChannels', { ns: 'notifications' })} extra={t('ruleHint', { ns: 'notifications' })}>
+            <Select mode="multiple" allowClear options={notificationChannels.map(channel => ({
+              value: channel.id, label: `${channel.name}${channel.enabled ? '' : ` (${t('paused', { ns: 'notifications' })})`}`,
+            }))} />
+          </Form.Item>
+          <Button type="link" onClick={() => navigate('/notifications')}>{t('manage', { ns: 'notifications' })}</Button>
           <Form.Item name="webhook_url" label={t('alerts.webhook')} tooltip={t('alerts.webhookHint')}>
             <Input placeholder="https://hooks.example.com/alerts" allowClear />
           </Form.Item>

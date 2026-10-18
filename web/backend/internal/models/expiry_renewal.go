@@ -27,7 +27,7 @@ type ExpiryRenewalCandidate struct {
 func GetExpiryRenewalCandidates(ctx context.Context, db *sql.DB, now, windowEnd time.Time) ([]ExpiryRenewalCandidate, error) {
 	rows, err := db.QueryContext(ctx, `SELECT s.id,s.user_id,s.expires_at
 		FROM servers s JOIN server_latest_metrics m ON m.server_id=s.id
-		WHERE s.expires_at<$1 AND s.created_at<=$2
+		WHERE s.auto_renew_enabled AND s.monitoring_enabled AND s.expires_at<$1 AND s.created_at<=$2
 		AND m.recorded_at>$3 AND m.recorded_at<=$4 AND s.last_error_kind=''
 		AND NOT EXISTS(SELECT 1 FROM server_expiry_renewals r WHERE r.server_id=s.id
 		 AND (r.previous_expires_at=s.expires_at OR (r.new_expires_at=s.expires_at AND r.renewed_at-r.new_expires_at>INTERVAL '10 days')))
@@ -64,7 +64,7 @@ func RenewServerExpiry(ctx context.Context, db *sql.DB, candidate ExpiryRenewalC
 	  (SELECT COUNT(*) FROM server_metrics_1m h WHERE h.server_id=s.id
 	   AND h.recorded_at>=$6 AND h.recorded_at<$7 AND h.sample_count>0) AS observed
 	 FROM servers s JOIN server_latest_metrics m ON m.server_id=s.id
-	 WHERE s.id=$1 AND s.user_id=$2 AND s.expires_at=$3 AND s.expires_at<$5
+	 WHERE s.auto_renew_enabled AND s.monitoring_enabled AND s.id=$1 AND s.user_id=$2 AND s.expires_at=$3 AND s.expires_at<$5
 	 AND s.created_at<=$6 AND m.recorded_at>$8 AND m.recorded_at<=$9 AND s.last_error_kind=''
 	 AND NOT EXISTS(SELECT 1 FROM server_expiry_renewals r WHERE r.server_id=s.id
 	  AND (r.previous_expires_at=s.expires_at OR (r.new_expires_at=s.expires_at AND r.renewed_at-r.new_expires_at>INTERVAL '10 days')))

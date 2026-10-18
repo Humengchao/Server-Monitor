@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"server-monitor/internal/agenttransport"
 	"server-monitor/internal/config"
 	"server-monitor/internal/handlers"
 	"server-monitor/internal/middleware"
@@ -17,7 +18,16 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type Features struct {
+	AgentHub *agenttransport.Hub
+	Network  *services.NetworkMonitor
+}
+
 func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, notifier *services.WebhookNotifier, collectors ...*services.Collector) (*gin.Engine, error) {
+	return SetupFeatures(db, cfg, sshCache, notifier, Features{}, collectors...)
+}
+
+func SetupFeatures(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, notifier *services.WebhookNotifier, features Features, collectors ...*services.Collector) (*gin.Engine, error) {
 	r := gin.New()
 	// Only honor X-Forwarded-For from the configured reverse proxies; gin's
 	// default trusts every client, which would let direct requests spoof their
@@ -31,7 +41,7 @@ func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, noti
 		// keep them out of the access log entirely.
 		Skip: func(c *gin.Context) bool {
 			path := c.Request.URL.Path
-			return strings.HasPrefix(path, "/api/ssh/") || strings.HasPrefix(path, "/api/ws/")
+			return strings.HasPrefix(path, "/api/ssh/") || strings.HasPrefix(path, "/api/ws/") || strings.HasPrefix(path, "/api/agent/")
 		},
 	}), gin.Recovery())
 
@@ -73,7 +83,8 @@ func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, noti
 	if len(collectors) > 0 {
 		collector = collectors[0]
 	}
-	serverH := handlers.NewServerHandler(sshCache, collector)
+	publicStatusH := handlers.NewPublicStatusHandler()
+	serverH := handlers.NewServerHandler(sshCache, collector, publicStatusH.Invalidate)
 	tagH := handlers.NewTagHandler()
 	metricsH := handlers.NewMetricsHandler()
 	sshH := handlers.NewSSHHandler()
@@ -81,10 +92,9 @@ func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, noti
 	filesH := handlers.NewFileHandler(sshCache)
 	processH := handlers.NewProcessHandler(sshCache)
 	hostOpsH := handlers.NewHostOpsHandler(sshCache)
-	batchH := handlers.NewBatchHandler(sshCache)
+	batchH := handlers.NewBatchHandler(sshCache, publicStatusH.Invalidate)
 	uptimeH := handlers.NewUptimeHandler()
 	credH := handlers.NewCredentialHandler()
-	publicStatusH := handlers.NewPublicStatusHandler()
 	alertH := handlers.NewAlertHandler(notifier)
 
 	rateLimit := middleware.RateLimit(5, 1*time.Minute)
@@ -109,6 +119,39 @@ func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, noti
 	r.GET("/api/public/status", middleware.RateLimit(60, 1*time.Minute), publicStatusH.Get)
 
 	api := r.Group("/api")
+	if features.AgentHub != nil {
+		agentH := handlers.NewAgentHandler(features.AgentHub, sshCache, cfg.PublicURL, cfg.AgentAssetsDir)
+		agent := api.Group("/agent")
+		agent.POST("/register", middleware.RateLimit(20, time.Minute), agentH.Register)
+		agent.GET("/control", agentH.Control)
+		agent.GET("/data", agentH.Data)
+		agent.GET("/install.sh", agentH.Installer)
+		agent.GET("/install.ps1", agentH.Installer)
+		agent.GET("/download/:os/:arch", agentH.Download)
+		secured := api.Group("/servers", middleware.AuthRequired(cfg))
+		secured.GET("/:id/agent", agentH.Status)
+		secured.POST("/:id/agent/enroll", middleware.RateLimit(10, time.Minute), agentH.Enroll)
+		secured.DELETE("/:id/agent", agentH.Revoke)
+	}
+	secured := api.Group("", middleware.AuthRequired(cfg))
+	backupH := handlers.NewBackupHandler()
+	backups := secured.Group("/backups", middleware.RateLimit(6, time.Minute))
+	backups.POST("/export", backupH.Export)
+	backups.POST("/preview", backupH.Preview)
+	backups.POST("/import", backupH.Import)
+	handlers.RegisterNotificationRoutes(secured)
+	if features.Network != nil {
+		networkH := handlers.NewNetworkHandler(features.Network)
+		secured.GET("/network/checks", networkH.List)
+		secured.POST("/network/checks", networkH.Create)
+		secured.PUT("/network/checks/:check_id", networkH.Update)
+		secured.DELETE("/network/checks/:check_id", networkH.Delete)
+		secured.POST("/network/checks/:check_id/run", middleware.RateLimit(12, time.Minute), networkH.Run)
+		secured.GET("/network/checks/:check_id/history", networkH.History)
+	}
+	logsH := handlers.NewLogsHandler(sshCache)
+	secured.GET("/servers/:id/logs", logsH.Journal)
+	secured.GET("/servers/:id/docker/containers/:containerId/logs/page", logsH.Docker)
 	{
 		auth := api.Group("/auth")
 		{

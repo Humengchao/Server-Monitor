@@ -65,7 +65,7 @@ func (r *collectorRows) Columns() []string {
 		return r.fixture.columns
 	}
 	return []string{"id", "user_id", "name", "host", "port", "ssh_username", "ssh_password", "ssh_key",
-		"ssh_host_key", "credential_id", "server_type", "credential_username", "credential_password", "credential_key"}
+		"ssh_host_key", "credential_id", "server_type", "credential_username", "credential_password", "credential_key", "connection_mode", "is_public", "monitoring_enabled", "auto_renew_enabled"}
 }
 func (r *collectorRows) Close() error { r.fixture.closed = true; return nil }
 func (r *collectorRows) Next(dest []driver.Value) error {
@@ -84,7 +84,7 @@ const collectorTestKey = "0123456789abcdef0123456789abcdef"
 
 func collectorRow(name string) []driver.Value {
 	return []driver.Value{uuid.NewString(), uuid.NewString(), name, "host.invalid", int64(22), "root", "", "",
-		"pinned-host-key", nil, "linux", nil, "", ""}
+		"pinned-host-key", nil, "linux", nil, "", "", "ssh", true, true, true}
 }
 
 func collectorDatabase(t *testing.T, fixture *collectorConnector) *DB {

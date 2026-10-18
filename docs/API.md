@@ -1190,3 +1190,57 @@ Token 本身是无状态的 JWT（HS256，有效期 72 小时），但 `users.to
 ## 独立保存备注
 
 `PATCH /api/servers/:id/notes` 接受 `{"notes":"..."}`，空字符串用于清空，缺失或非字符串返回 400，请求体上限 1 MiB。仅更新当前用户拥有的主机备注，成功返回 200 `{"message":"updated"}`，不存在或不属于当前用户返回 404。该接口不读取或重写 SSH 凭据、地址、主机密钥、名称或计费字段，旧页面保存备注不会覆盖其他页面的连接配置变更。
+
+## 接入方式、公开状态和暂停监控（Web）
+
+创建服务器新增以下可选字段：
+
+| 字段 | 默认值 | 含义 |
+| --- | --- | --- |
+| `connection_mode` | `ssh` | `ssh` 或 `agent`；创建后不能切换 |
+| `is_public` | `false` | 是否包含在匿名 `/api/public/status` 中 |
+| `monitoring_enabled` | `true` | 是否参与自动指标采集、告警及网络检查 |
+| `auto_renew_enabled` | `true` | 是否允许自动顺延该服务器的到期日期 |
+
+`agent` 模式无需 SSH 认证字段，`host` 可省略，OS 在登记时由 Agent 上报；登记后的系统类型不能手动改写。
+更新时省略三个布尔字段会保留已保存值。升级数据库保留既有服务器的公开状态，新建服务器则默认私有。
+公开丢包字段 `packet_loss_percent` 来自近期真实的面板来源 ICMP 检查，没有有效测量时为 `null`。
+
+## Agent 登记与连接（Web）
+
+| 方法与路径 | 认证与用途 |
+| --- | --- |
+| `GET /api/servers/:id/agent` | 用户 JWT；读取本人主机登记/连接状态 |
+| `POST /api/servers/:id/agent/enroll` | 用户 JWT；生成 15 分钟一次性票据和 Linux/Windows 安装命令 |
+| `DELETE /api/servers/:id/agent` | 用户 JWT；撤销票据、长期令牌并断开通道 |
+| `POST /api/agent/register` | 一次性票据及主机身份；交换长期 Agent 令牌 |
+| `GET /api/agent/control` | Agent Bearer 令牌；控制 WebSocket |
+| `GET /api/agent/data?session=...` | Agent Bearer 令牌与单次会话；数据 WebSocket |
+| `GET /api/agent/install.sh` / `install.ps1` | 下载安装脚本，无需用户 JWT |
+| `GET /api/agent/download/:os/:arch` | `linux/windows`、`amd64/arm64`；`?checksum=1` 返回 SHA-256 |
+
+Agent 令牌不是用户 JWT，不能调用管理接口。控制/数据认证不把长期令牌放入 URL。
+终端、文件、Docker、服务和采集仍使用现有服务器接口，后端按 `connection_mode` 路由通道。
+系统要求、权限和维护方式见 [Agent 指南](agent.md)。
+
+## 加密配置备份（Web）
+
+三个接口均需要用户 JWT 和请求体中的 `current_password`（当前账号密码）、`password`（独立备份密码）。
+
+| 路径（均为 POST） | 额外请求字段 | 响应 |
+| --- | --- | --- |
+| `/api/backups/export` | `include_credentials` 布尔值 | 加密 `.smbak` 二进制文件 |
+| `/api/backups/preview` | `data`：文件的标准 Base64 | `preview`、`digest`、恢复默认策略 |
+| `/api/backups/import` | 同一份 `data` 与预览得到的 `digest` | 201 及恢复计数；重复导入或摘要不符为 409 |
+
+恢复为当前用户创建新 ID，不覆盖既有主机；默认私有，自动任务暂停，Agent 需重新登记。
+完整范围、大小限制和跨实例凭据处理见 [备份恢复](backups.md)。
+
+## 网络、日志与多渠道通知（Web）
+
+网络检查的 CRUD、手动探测、历史汇总，以及 journald/Docker 日志查询的时间、关键词、分页和未知数据语义，见
+[网络与日志接口说明](network-logs.md)。所有来源与目标服务器均校验当前用户归属。
+
+告警规则可携带 `channel_ids` 数组选择多个已保存渠道，仍支持原有 `webhook_url`。
+通知渠道管理、秘密保留/清除、测试投递、记录分页及重发接口见 [通知中心](notifications.md)。
+新的多渠道投递使用持久化队列，事件/网络状态转换与入队同事务提交；第三方响应丢失时可能重复投递。

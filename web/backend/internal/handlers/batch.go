@@ -17,11 +17,16 @@ import (
 // BatchHandler serves the dashboard's multi-select actions. Every operation is
 // scoped to the caller's own servers at the SQL level.
 type BatchHandler struct {
-	sshCache *services.SSHConnCache
+	sshCache         *services.SSHConnCache
+	invalidatePublic func()
 }
 
-func NewBatchHandler(sshCache *services.SSHConnCache) *BatchHandler {
-	return &BatchHandler{sshCache: sshCache}
+func NewBatchHandler(sshCache *services.SSHConnCache, invalidate ...func()) *BatchHandler {
+	h := &BatchHandler{sshCache: sshCache}
+	if len(invalidate) > 0 {
+		h.invalidatePublic = invalidate[0]
+	}
+	return h
 }
 
 type BulkTagRequest struct {
@@ -120,17 +125,23 @@ func (h *BatchHandler) BulkDelete(c *gin.Context) {
 		return
 	}
 	db := c.MustGet("db").(*models.DB)
-	deleted, err := models.DeleteServers(db.Raw, serverIDs, userID)
+	deletedIDs, err := models.DeleteServersReturningIDs(c.Request.Context(), db.Raw, serverIDs, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete servers"})
 		return
 	}
+	if len(deletedIDs) > 0 && h.invalidatePublic != nil {
+		h.invalidatePublic()
+	}
 	// Drop any cached SSH connection so nothing stays connected to a host that
 	// is no longer in the panel.
-	for _, id := range serverIDs {
-		h.sshCache.Drop(id)
+	for _, id := range deletedIDs {
+		if h.sshCache != nil {
+			h.sshCache.Drop(id)
+		}
+		services.DisconnectAgent(id)
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "deleted", "deleted": deleted})
+	c.JSON(http.StatusOK, gin.H{"message": "deleted", "deleted": len(deletedIDs)})
 }
 
 // normalizeBatchCommand rejects input that cannot be a single shell command

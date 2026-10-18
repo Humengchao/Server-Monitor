@@ -12,7 +12,7 @@ Built with Claude Code & DeepSeek-v4-pro
 
 - 🌐 [Public Probe / Service Status](http://svr.hmchxd.com/status)
 
-The public probe refreshes every 10 seconds and displays real server names, manually configured public locations, tags, availability, and rounded CPU, memory, and uptime health metrics. Servers can be searched by name. Connection fields (IP addresses / hostnames, ports, and SSH users), credentials, notes, and database IDs remain omitted.
+The public probe refreshes every 10 seconds and displays real names, manually configured public locations, tags, availability, and rounded health metrics for servers marked “Show on public status page.” New servers are private until explicitly published in the edit form. Servers can be searched by name. Connection fields (IP addresses / hostnames, ports, and SSH users), credentials, notes, and database IDs remain omitted.
 
 > **Security note:** Management features handle login tokens and SSH credentials. Use them only after the domain has a valid HTTPS certificate and HTTP is forcibly redirected to HTTPS. The link above points only to the public status page.
 
@@ -39,14 +39,28 @@ The public probe refreshes every 10 seconds and displays real server names, manu
 | Server dashboard | Remembered card / list views, search, tag and online / offline / awaiting-data filters; shortcuts for alerts, high resource usage and expiry within 30 days; CPU / memory / disk / uptime / expiry sorting |
 | Overview stats | Collection states, average CPU and memory, online memory / disk capacity and combined network rates, valid sample coverage, monthly-normalized and currency-converted spend |
 | Server detail | Resource stat tiles; six charts (CPU / memory / network / disk I/O / load / latency) with adaptive units and theme-aware styling; range presets plus custom windows; CSV export of the charted window |
-| Alert center | Threshold rules and an alert timeline, with webhook delivery and a built-in connectivity test |
+| Alert center | Threshold rules and an alert timeline, Telegram / WeCom / DingTalk / SMTP email / Webhook channels, test sends, delivery history and retries |
 | Batch operations | Multi-select servers to add/remove tags, delete, export an inventory CSV, or run one command across up to 50 hosts with per-host results |
 | Process management | Live process table on the detail page, sortable by PID / user / CPU / memory / RSS / uptime, with search, pausable auto-refresh, and terminate (SIGTERM / SIGKILL) |
 | Availability | Observed availability over 24h / 7d / 30d, a 30-day daily strip and outage log, a fleet-wide mean on the overview, and a 30-day SLA figure on the public status page |
 | Services & ports | systemd unit list (failures first) with start/stop/restart/reload, plus a listening-port table that classifies each bind by who can reach it |
 | Operations | Web SSH terminal, Docker container management (start / stop / logs / interactive shell, CPU / memory / disk usage), shared SSH credential store, per-server notes |
+| Agent access | Outbound Linux / Windows connections with terminal, file and host-management operations; enrollment, upgrades, revocation and uninstall |
+| Network quality | Panel or assigned-host probe sources, independent ICMP packet counts, loss/RTT history and comparison across sources |
+| Log inspection | Journal time/unit/priority/literal-text queries, Docker stdout/stderr, cancellable cursor polling, and contextual incident/service links |
+| Configuration backups | Password-encrypted export and previewed restore, optional secrets, remapped cross-instance relationships, private and paused imports |
 | Account security | Change your password and sign every other device out at once |
-| Public status page | Real server names and health metrics, with connection details, credentials, notes, and database IDs excluded from the API |
+| Public status page | Per-server visibility, real names and health metrics; packet loss comes from actual local probes and remains unknown without samples |
+
+### Agent access, network checks, logs and backups
+
+Choose SSH or “Install Agent” when adding a server. The outbound Agent supports Linux and Windows on amd64/arm64, with terminal, file and host-management operations running under its service identity: root on Linux and LocalSystem on Windows by default. It needs no uploaded SSH password or private key. Host tools and OS permissions still apply; the system-journal viewer currently supports Linux journald rather than Windows event logs. Enrollment requires an HTTPS panel with a valid certificate. See the [Agent installation and maintenance guide (Chinese)](docs/agent.md).
+
+Network checks run independently every minute between explicitly selected servers owned by the account, or from the panel host. Loss is computed from actual sent/received packet counts; failed execution and unknown measurements are not reported as 100% loss. The log viewer provides bounded journal queries and both Docker output streams, cancellable cursor polling, and incident links with a ±10-minute window. See [network checks and log inspection](docs/network-logs.md).
+
+Backups encrypt account configuration with a separate password and can optionally include SSH credentials and notification secrets. Restore previews the file, remaps relationships into new records, and keeps imported servers private with monitoring, expiry automation, alerts, channels and network checks paused. Agents must enroll again. See [configuration backup and restore (Chinese)](docs/backups.md).
+
+The Notifications page manages Telegram, WeCom, DingTalk, SMTP email and generic Webhook channels, with test sends and delivery history. Rules can select multiple channels. See [notification setup and delivery semantics (Chinese)](docs/notifications.md).
 
 ### File Management and Automatic Docker Loading
 
@@ -63,7 +77,7 @@ The web client now loads container information automatically when opening Docker
 
 Every ten minutes the backend checks hosts whose expiry is **more than ten days** overdue. A host that is currently online and has **at least 99% observed availability over a complete 24-hour window** gets one calendar month added to its previous expiry date. Month arithmetic uses `Asia/Shanghai` by default and clamps month-end dates (January 31 becomes February 28/29). This updates the expiry tracked by the panel.
 
-Incomplete history, current collection failures, and offline hosts are excluded. Changes and evidence commit atomically, with persisted protection against duplicate renewals after restarts or across instances. If a very old date remains more than ten days overdue after one month, it is not repeatedly advanced; correct the base date manually. Set `AUTO_RENEW_EXPIRY=false` to disable or `EXPIRY_TIMEZONE` to select another calendar zone. Stale edit forms report an expiry conflict instead of overwriting an automatic update.
+Incomplete history, current collection failures, and offline hosts are excluded. Changes and evidence commit atomically, with persisted protection against duplicate renewals after restarts or across instances. If a very old date remains more than ten days overdue after one month, it is not repeatedly advanced; correct the base date manually. Disable automation per server in its edit form, set `AUTO_RENEW_EXPIRY=false` to disable it globally, or use `EXPIRY_TIMEZONE` to select another calendar zone. Stale edit forms report an expiry conflict instead of overwriting an automatic update.
 
 ### Alerting
 
@@ -72,7 +86,7 @@ Rules are evaluated by a dedicated backend loop (every 30s by default, `ALERT_IN
 - **Metrics**: CPU, memory and disk usage (%), 1-minute load, network latency (ms), and host offline.
 - **Sustained duration**: a threshold must hold for the configured window before an alert opens, so transient spikes don't page you. Offline rules never fire sooner than 2 minutes, matching the dashboard's online window.
 - **Scope**: target one server, or leave it empty to cover every server you own, including ones added later.
-- **Notifications**: a JSON payload is POSTed to the configured webhook on both firing and recovery (see [docs/API.md](docs/API.md)); "Send test" verifies the endpoint before you save.
+- **Notifications**: firing and recovery can be delivered to the rule's selected Telegram, WeCom, DingTalk, SMTP or Webhook channels. Existing direct Webhook URLs remain supported. Test channels and inspect delivery results in the Notifications page; see [channel setup](docs/notifications.md) and [API payloads](docs/API.md).
 - **Durable state**: event transitions and pending webhook deliveries commit together. Failed deliveries retry with backoff after restarts, in order per rule/host. A lost response can cause redelivery; the stable `X-Server-Monitor-Delivery` header lets receivers deduplicate. If a host disappears for good, threshold alerts resolve instead of hanging open forever.
 
 ### Availability

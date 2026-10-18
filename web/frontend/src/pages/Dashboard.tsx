@@ -10,6 +10,7 @@ import {
   CheckSquareOutlined, RiseOutlined, ClockCircleOutlined, AlertOutlined, CalendarOutlined, WarningOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import ServerCard from '../components/ServerCard';
 import ServerTable from '../components/ServerTable';
 import FleetResources from '../components/FleetResources';
@@ -70,6 +71,7 @@ async function lookupIP(ip: string): Promise<string> {
 }
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const { t, i18n } = useTranslation();
   // modal (not the static Modal.*) so confirm dialogs inherit the dark theme.
   const { message, modal, notification } = App.useApp();
@@ -239,6 +241,11 @@ export default function Dashboard() {
           await serversApi.setTags(res.data.id, tagValues);
         }
         message.success(t('server.added'));
+        if (payload.connection_mode === 'agent') {
+          setModalOpen(false);
+          navigate(`/servers/${res.data.id}`);
+          return;
+        }
       }
       setModalOpen(false);
       form.resetFields();

@@ -4,6 +4,8 @@ import {
   CaretRightOutlined, PauseOutlined, ReloadOutlined, SearchOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
+import '../i18n/networkLogs';
 import { PHONE_QUERY, useMediaQuery } from '../hooks/useMediaQuery';
 import {
   hostOpsApi, ServiceAction, ServiceUnit, serviceStateColor,
@@ -27,6 +29,7 @@ type StateFilter = 'all' | 'failed' | 'active' | 'inactive';
 
 export default function ServiceTable({ serverId, serverType }: Props) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const phone = useMediaQuery(PHONE_QUERY);
   const { message, modal } = App.useApp();
   const { data, loading, error: loadError, load, scheduleReload, isActive } = useHostPanel(serverId, hostOpsApi.services);
@@ -160,6 +163,7 @@ export default function ServiceTable({ serverId, serverType }: Props) {
       // mistake: a restart drops every connection the service is holding.
       render: (_: unknown, unit: ServiceUnit) => (
         <Space size={2} className="service-actions">
+          {manager === 'systemd' && <Button type="text" size="small" onClick={() => navigate('/logs?' + new URLSearchParams({ server: serverId, unit: unit.name }))}>{t('openLogs', { ns: 'networkLogs' })}</Button>}
           <Button type="text" size="small"
             loading={busy === `${unit.name}:start`}
             disabled={unit.active === 'active'}

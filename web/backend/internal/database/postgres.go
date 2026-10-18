@@ -11,6 +11,15 @@ import (
 //go:embed migrations.sql
 var migrationsSQL string
 
+//go:embed access.sql
+var accessSQL string
+
+//go:embed notifications.sql
+var notificationsSQL string
+
+//go:embed network.sql
+var networkSQL string
+
 func Connect(databaseURL string) (*sql.DB, error) {
 	db, err := sql.Open("postgres", databaseURL)
 	if err != nil {
@@ -23,7 +32,7 @@ func Connect(databaseURL string) (*sql.DB, error) {
 }
 
 func RunMigrations(db *sql.DB) error {
-	_, err := db.Exec(migrationsSQL)
+	_, err := db.Exec(migrationsSQL + "\n" + accessSQL + "\n" + notificationsSQL + "\n" + networkSQL)
 	if err != nil {
 		return fmt.Errorf("exec migrations: %w", err)
 	}

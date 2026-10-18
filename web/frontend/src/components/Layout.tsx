@@ -21,6 +21,7 @@ import { useAuthStore } from '../store/authStore';
 import { alertsApi } from '../api/alerts';
 import { usePolling } from '../hooks/usePolling';
 import { DarkModeContext, ToggleThemeContext } from '../contexts/DarkModeContext';
+import '../i18n/operations';
 
 const { Header, Sider, Content } = AntLayout;
 const { Text } = Typography;
@@ -32,6 +33,7 @@ export default function AppLayout() {
   const location = useLocation();
   const { user } = useAuthStore();
   const { t, i18n } = useTranslation();
+  const { t: op } = useTranslation('operations');
   const [activeAlerts, setActiveAlerts] = useState(0);
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
 
@@ -76,6 +78,10 @@ export default function AppLayout() {
     },
     { key: '/docker', icon: <DockerOutlined />, label: t('nav.docker') },
     { key: '/files', icon: <FolderOpenOutlined />, label: t('nav.files') },
+    { key: '/network', icon: <CloudServerOutlined />, label: op('network') },
+    { key: '/logs', icon: <HistoryOutlined />, label: op('logs') },
+    { key: '/notifications', icon: <BellOutlined />, label: op('notifications') },
+    { key: '/backups', icon: <FolderOpenOutlined />, label: op('backups') },
     { key: '/credentials', icon: <KeyOutlined />, label: t('nav.credentials') },
     { key: '/login-history', icon: <HistoryOutlined />, label: t('nav.loginHistory') },
     { key: '/settings', icon: <SettingOutlined />, label: t('nav.settings') },

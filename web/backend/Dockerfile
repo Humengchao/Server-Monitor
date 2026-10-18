@@ -3,7 +3,12 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+ARG BUILD_VERSION=dev
 RUN CGO_ENABLED=0 GOOS=linux go build -o server ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-s -w -X main.version=${BUILD_VERSION}" -o agent-assets/server-monitor-agent-linux-amd64 ./cmd/agent \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "-s -w -X main.version=${BUILD_VERSION}" -o agent-assets/server-monitor-agent-linux-arm64 ./cmd/agent \
+    && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags "-s -w -X main.version=${BUILD_VERSION}" -o agent-assets/server-monitor-agent-windows-amd64.exe ./cmd/agent \
+    && CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -ldflags "-s -w -X main.version=${BUILD_VERSION}" -o agent-assets/server-monitor-agent-windows-arm64.exe ./cmd/agent
 
 FROM alpine:3.19
 # ping (from iputils-ping) needs raw sockets. Hand just CAP_NET_RAW to the
@@ -15,6 +20,7 @@ RUN apk --no-cache add ca-certificates wget iputils-ping libcap \
     && adduser -S -D -H monitor
 WORKDIR /app
 COPY --from=builder /app/server .
+COPY --from=builder /app/agent-assets ./agent-assets
 USER monitor
 EXPOSE 8080
 CMD ["./server"]

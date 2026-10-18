@@ -149,7 +149,7 @@ func (c *SSHConnCache) ensureLive(ctx context.Context, e *sshCacheEntry, s *mode
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	client, conn, err := dialSSHClientConnContext(ctx, s.Host, s.Port, s.SSHUsername, s.SSHPassword, s.SSHKey, s.SSHHostKey, sshDialTimeout)
+	client, conn, err := DialServer(ctx, s)
 	if err != nil {
 		return nil, err
 	}

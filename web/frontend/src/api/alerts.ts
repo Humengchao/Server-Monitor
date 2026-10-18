@@ -14,6 +14,7 @@ export interface AlertRule {
   duration_seconds: number;
   enabled: boolean;
   webhook_url: string;
+  channel_ids?: string[];
   created_at: string;
   firing_count: number;
 }
@@ -58,6 +59,7 @@ export interface AlertRulePayload {
   duration_seconds: number;
   enabled: boolean;
   webhook_url: string;
+  channel_ids?: string[];
 }
 
 // Metrics measured as a percentage of a known total; the UI renders them with a

@@ -38,7 +38,7 @@ func (h *SSHHandler) Handle(c *gin.Context) {
 		return
 	}
 
-	client, err := services.DialSSH(server.Host, server.Port, server.SSHUsername, server.SSHPassword, server.SSHKey, server.SSHHostKey)
+	client, _, err := services.DialServer(c.Request.Context(), server)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "SSH connection failed: " + err.Error()})
 		return

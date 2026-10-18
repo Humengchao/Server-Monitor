@@ -18,14 +18,14 @@ import (
 func batchServerRow(id, userID uuid.UUID) []driver.Value {
 	return []driver.Value{id.String(), userID.String(), "selected", "host.invalid", int64(22), "root", "", "",
 		"pinned-host-key", nil, time.Unix(1000, 0), "linux", time.Unix(2000, 0), "notes",
-		float64(12), "USD", "month", int64(1234), "location", nil, "", ""}
+		float64(12), "USD", "month", int64(1234), "location", nil, "", "", "ssh", true, true, true}
 }
 
 func batchServerFixture(rows ...[]driver.Value) *collectorConnector {
 	return &collectorConnector{rows: rows, columns: []string{
 		"id", "user_id", "name", "host", "port", "ssh_username", "ssh_password", "ssh_key", "ssh_host_key",
 		"credential_id", "created_at", "server_type", "expires_at", "notes", "billing_price", "billing_currency",
-		"billing_cycle", "traffic_limit_bytes", "public_location", "credential_username", "credential_password", "credential_key",
+		"billing_cycle", "traffic_limit_bytes", "public_location", "credential_username", "credential_password", "credential_key", "connection_mode", "is_public", "monitoring_enabled", "auto_renew_enabled",
 	}}
 }
 

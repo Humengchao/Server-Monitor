@@ -15,31 +15,35 @@ import (
 )
 
 type Server struct {
-	ID              uuid.UUID  `json:"id"`
-	UserID          uuid.UUID  `json:"user_id"`
-	Name            string     `json:"name"`
-	Host            string     `json:"host"`
-	Port            int        `json:"port"`
-	SSHUsername     string     `json:"ssh_username"`
-	SSHPassword     string     `json:"-"`
-	SSHKey          string     `json:"-"`
-	SSHHostKey      string     `json:"ssh_host_key,omitempty"`
-	CredentialID    *uuid.UUID `json:"credential_id,omitempty"`
-	CredentialName  string     `json:"credential_name,omitempty"`
-	CPUCores        int        `json:"cpu_cores"`
-	MemoryTotal     int64      `json:"memory_total"`
-	DiskTotal       int64      `json:"disk_total"`
-	HasDocker       bool       `json:"has_docker"`
-	DockerVersion   string     `json:"docker_version"`
-	ExpiresAt       *time.Time `json:"expires_at"`
-	BillingPrice    float64    `json:"billing_price"`
-	BillingCurrency string     `json:"billing_currency"`
-	BillingCycle    string     `json:"billing_cycle"`
-	TrafficLimit    int64      `json:"traffic_limit_bytes"`
-	PublicLocation  string     `json:"public_location"`
-	ServerType      string     `json:"server_type"`
-	Notes           string     `json:"notes"`
-	CreatedAt       time.Time  `json:"created_at"`
+	ConnectionMode    string     `json:"connection_mode"`
+	IsPublic          bool       `json:"is_public"`
+	MonitoringEnabled bool       `json:"monitoring_enabled"`
+	AutoRenewEnabled  bool       `json:"auto_renew_enabled"`
+	ID                uuid.UUID  `json:"id"`
+	UserID            uuid.UUID  `json:"user_id"`
+	Name              string     `json:"name"`
+	Host              string     `json:"host"`
+	Port              int        `json:"port"`
+	SSHUsername       string     `json:"ssh_username"`
+	SSHPassword       string     `json:"-"`
+	SSHKey            string     `json:"-"`
+	SSHHostKey        string     `json:"ssh_host_key,omitempty"`
+	CredentialID      *uuid.UUID `json:"credential_id,omitempty"`
+	CredentialName    string     `json:"credential_name,omitempty"`
+	CPUCores          int        `json:"cpu_cores"`
+	MemoryTotal       int64      `json:"memory_total"`
+	DiskTotal         int64      `json:"disk_total"`
+	HasDocker         bool       `json:"has_docker"`
+	DockerVersion     string     `json:"docker_version"`
+	ExpiresAt         *time.Time `json:"expires_at"`
+	BillingPrice      float64    `json:"billing_price"`
+	BillingCurrency   string     `json:"billing_currency"`
+	BillingCycle      string     `json:"billing_cycle"`
+	TrafficLimit      int64      `json:"traffic_limit_bytes"`
+	PublicLocation    string     `json:"public_location"`
+	ServerType        string     `json:"server_type"`
+	Notes             string     `json:"notes"`
+	CreatedAt         time.Time  `json:"created_at"`
 	// The last sustained collector failure is diagnostic state. It is cleared
 	// after a successful sample and never contains credentials.
 	LastErrorKind string         `json:"last_error_kind,omitempty"`
@@ -70,6 +74,12 @@ type LatestMetrics struct {
 
 func CreateServer(db *DB, s *Server) error {
 	s.ID = uuid.New()
+	if s.ConnectionMode == "" {
+		s.ConnectionMode = "ssh"
+		s.IsPublic = true
+		s.MonitoringEnabled = true
+		s.AutoRenewEnabled = true
+	}
 	encPassword, err := crypto.Encrypt(s.SSHPassword, db.EncryptionKey)
 	if err != nil {
 		return err
@@ -80,16 +90,19 @@ func CreateServer(db *DB, s *Server) error {
 	}
 	return db.Raw.QueryRow(
 		`INSERT INTO servers (id, user_id, name, host, port, ssh_username, ssh_password, ssh_key, ssh_host_key, credential_id,
-		 expires_at, notes, server_type, billing_price, billing_currency, billing_cycle, traffic_limit_bytes, public_location)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING created_at`,
+		 expires_at, notes, server_type, billing_price, billing_currency, billing_cycle, traffic_limit_bytes, public_location,
+		 connection_mode,is_public,monitoring_enabled,auto_renew_enabled)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) RETURNING created_at`,
 		s.ID, s.UserID, s.Name, s.Host, s.Port, s.SSHUsername, encPassword, encKey, s.SSHHostKey, s.CredentialID,
 		s.ExpiresAt, s.Notes, s.ServerType, s.BillingPrice, s.BillingCurrency, s.BillingCycle, s.TrafficLimit, s.PublicLocation,
+		s.ConnectionMode, s.IsPublic, s.MonitoringEnabled, s.AutoRenewEnabled,
 	).Scan(&s.CreatedAt)
 }
 
 // serverSummarySelect returns servers without decrypted secrets, joined with
 // their linked credential name and latest metrics sample.
-const serverSummarySelect = `SELECT s.id, s.user_id, s.name, s.host, s.port, s.ssh_username, s.created_at,
+const serverSummarySelect = `SELECT s.connection_mode,s.is_public,s.monitoring_enabled,s.auto_renew_enabled,
+	 s.id, s.user_id, s.name, s.host, s.port, s.ssh_username, s.created_at,
 	 COALESCE(s.ssh_host_key, ''),
 	 COALESCE(s.credential_id::text, ''),
 	 COALESCE(c.name, ''),
@@ -117,7 +130,7 @@ func scanServerSummaries(rows *sql.Rows) ([]Server, error) {
 		var credIDStr string
 		var expiresAt sql.NullTime
 		var lastErrorAt sql.NullTime
-		if err := rows.Scan(&s.ID, &s.UserID, &s.Name, &s.Host, &s.Port,
+		if err := rows.Scan(&s.ConnectionMode, &s.IsPublic, &s.MonitoringEnabled, &s.AutoRenewEnabled, &s.ID, &s.UserID, &s.Name, &s.Host, &s.Port,
 			&s.SSHUsername, &s.CreatedAt, &s.SSHHostKey,
 			&credIDStr, &s.CredentialName,
 			&s.CPUCores, &s.MemoryTotal, &s.DiskTotal,
@@ -222,11 +235,13 @@ func GetServerByIDAndUser(db *DB, id, userID uuid.UUID) (*Server, error) {
 	err := db.Raw.QueryRow(
 		`SELECT id, user_id, name, host, port, ssh_username, ssh_password, ssh_key, COALESCE(ssh_host_key, ''),
 		 credential_id, created_at, COALESCE(server_type, 'linux'), expires_at, COALESCE(notes, ''),
-		 COALESCE(billing_price, 0), COALESCE(billing_currency, 'CNY'), COALESCE(billing_cycle, 'year'), COALESCE(traffic_limit_bytes, 0), COALESCE(public_location, '')
+		 COALESCE(billing_price, 0), COALESCE(billing_currency, 'CNY'), COALESCE(billing_cycle, 'year'), COALESCE(traffic_limit_bytes, 0), COALESCE(public_location, ''),
+		 connection_mode,is_public,monitoring_enabled,auto_renew_enabled
 		 FROM servers WHERE id=$1 AND user_id=$2`, id, userID,
 	).Scan(&s.ID, &s.UserID, &s.Name, &s.Host, &s.Port,
 		&s.SSHUsername, &encPassword, &encKey, &s.SSHHostKey, &credID, &s.CreatedAt, &s.ServerType, &expiresAt, &s.Notes,
-		&s.BillingPrice, &s.BillingCurrency, &s.BillingCycle, &s.TrafficLimit, &s.PublicLocation)
+		&s.BillingPrice, &s.BillingCurrency, &s.BillingCycle, &s.TrafficLimit, &s.PublicLocation,
+		&s.ConnectionMode, &s.IsPublic, &s.MonitoringEnabled, &s.AutoRenewEnabled)
 	if err != nil {
 		return nil, err
 	}
@@ -238,6 +253,9 @@ func GetServerByIDAndUser(db *DB, id, userID uuid.UUID) (*Server, error) {
 	}
 	if expiresAt.Valid {
 		s.ExpiresAt = &expiresAt.Time
+	}
+	if s.ConnectionMode == "agent" {
+		return s, nil
 	}
 	s.SSHPassword, err = crypto.Decrypt(encPassword, db.EncryptionKey)
 	if err != nil {
@@ -264,7 +282,13 @@ var ErrServerExpiryChanged = errors.New("server expiry changed")
 // replace a server. A non-nil expectation also represents an expected NULL.
 type ExpiryExpectation struct{ ExpiresAt *time.Time }
 
-func UpdateServerWithExpiryExpectation(ctx context.Context, db *DB, s *Server, expected *ExpiryExpectation) error {
+type ServerOptions struct {
+	IsPublic          *bool
+	MonitoringEnabled *bool
+	AutoRenewEnabled  *bool
+}
+
+func UpdateServerWithExpiryExpectation(ctx context.Context, db *DB, s *Server, expected *ExpiryExpectation, options ...ServerOptions) error {
 	tx, err := db.Raw.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -295,6 +319,12 @@ func UpdateServerWithExpiryExpectation(ctx context.Context, db *DB, s *Server, e
 	}
 	if rows == 0 {
 		return sql.ErrNoRows
+	}
+	if len(options) > 0 {
+		o := options[0]
+		if err := tx.QueryRowContext(ctx, `UPDATE servers SET is_public=COALESCE($1,is_public),monitoring_enabled=COALESCE($2,monitoring_enabled),auto_renew_enabled=COALESCE($3,auto_renew_enabled) WHERE id=$4 AND user_id=$5 RETURNING is_public,monitoring_enabled,auto_renew_enabled`, o.IsPublic, o.MonitoringEnabled, o.AutoRenewEnabled, s.ID, s.UserID).Scan(&s.IsPublic, &s.MonitoringEnabled, &s.AutoRenewEnabled); err != nil {
+			return err
+		}
 	}
 	if s.SSHPassword != "" {
 		enc, err := crypto.Encrypt(s.SSHPassword, db.EncryptionKey)
@@ -341,7 +371,7 @@ func UpdateDockerInfo(db *sql.DB, id uuid.UUID, hasDocker bool, version string) 
 // ResolveCredentials overwrites SSHUsername/SSHPassword/SSHKey from the linked credential
 // when CredentialID is set. Call after fetching a server that needs decrypted SSH creds.
 func (s *Server) ResolveCredentials(db *DB) error {
-	if s.CredentialID == nil {
+	if s.ConnectionMode == "agent" || s.CredentialID == nil {
 		return nil
 	}
 	cred, err := GetCredentialByID(db, *s.CredentialID, s.UserID)
@@ -409,8 +439,18 @@ func ServerHasDirectSSHAuth(db *sql.DB, id, userID uuid.UUID) (bool, error) {
 }
 
 func DeleteServer(db *sql.DB, id, userID uuid.UUID) error {
-	_, err := db.Exec("DELETE FROM servers WHERE id=$1 AND user_id=$2", id, userID)
-	return err
+	result, err := db.Exec("DELETE FROM servers WHERE id=$1 AND user_id=$2", id, userID)
+	if err != nil {
+		return err
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if deleted == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 // SetServerTags replaces a server's tag set. Both statements are owner-scoped
@@ -484,16 +524,46 @@ func RemoveTagsFromServers(db *sql.DB, serverIDs, tagIDs []uuid.UUID, userID uui
 // DeleteServers removes several servers at once and reports how many rows the
 // owner actually had, so the caller can tell the user if some IDs were ignored.
 func DeleteServers(db *sql.DB, serverIDs []uuid.UUID, userID uuid.UUID) (int64, error) {
+	deleted, err := DeleteServersReturningIDs(context.Background(), db, serverIDs, userID)
+	return int64(len(deleted)), err
+}
+
+// Return only rows this owner actually deleted. Side effects such as closing
+// SSH/Agent transports must use these IDs, never the untrusted request list.
+// The transaction commits only after every returned ID has been read.
+func DeleteServersReturningIDs(ctx context.Context, db *sql.DB, serverIDs []uuid.UUID, userID uuid.UUID) ([]uuid.UUID, error) {
 	if len(serverIDs) == 0 {
-		return 0, nil
+		return []uuid.UUID{}, nil
 	}
-	result, err := db.Exec(
-		`DELETE FROM servers WHERE id = ANY($1) AND user_id = $2`,
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx,
+		`DELETE FROM servers WHERE id = ANY($1) AND user_id = $2 RETURNING id`,
 		pq.Array(serverIDs), userID)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return result.RowsAffected()
+	deleted := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err = rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		deleted = append(deleted, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return deleted, nil
 }
 
 // CountOwnedServers reports how many of the given IDs the user actually owns.
@@ -530,7 +600,8 @@ func GetServersByIDsAndUserContext(ctx context.Context, db *DB, ids []uuid.UUID,
 		s.credential_id, s.created_at, COALESCE(s.server_type, 'linux'), s.expires_at, COALESCE(s.notes, ''),
 		COALESCE(s.billing_price, 0), COALESCE(s.billing_currency, 'CNY'), COALESCE(s.billing_cycle, 'year'),
 		COALESCE(s.traffic_limit_bytes, 0), COALESCE(s.public_location, ''),
-		c.ssh_username, COALESCE(c.ssh_password, ''), COALESCE(c.ssh_key, '')
+		c.ssh_username, COALESCE(c.ssh_password, ''), COALESCE(c.ssh_key, ''),
+		s.connection_mode,s.is_public,s.monitoring_enabled,s.auto_renew_enabled
 		FROM servers s
 		LEFT JOIN credentials c ON c.id = s.credential_id AND c.user_id = s.user_id
 		WHERE s.id = ANY($1) AND s.user_id = $2`, pq.Array(ids), userID)
@@ -548,11 +619,15 @@ func GetServersByIDsAndUserContext(ctx context.Context, db *DB, ids []uuid.UUID,
 		if err := rows.Scan(&s.ID, &s.UserID, &s.Name, &s.Host, &s.Port,
 			&s.SSHUsername, &encPassword, &encKey, &s.SSHHostKey, &credID, &s.CreatedAt, &s.ServerType, &expiresAt, &s.Notes,
 			&s.BillingPrice, &s.BillingCurrency, &s.BillingCycle, &s.TrafficLimit, &s.PublicLocation,
-			&credentialUsername, &credentialPassword, &credentialKey); err != nil {
+			&credentialUsername, &credentialPassword, &credentialKey, &s.ConnectionMode, &s.IsPublic, &s.MonitoringEnabled, &s.AutoRenewEnabled); err != nil {
 			return nil, err
 		}
 		if expiresAt.Valid {
 			s.ExpiresAt = &expiresAt.Time
+		}
+		if s.ConnectionMode == "agent" {
+			byID[s.ID] = s
+			continue
 		}
 		if credID.Valid {
 			id, err := uuid.Parse(credID.String)
@@ -634,9 +709,10 @@ func GetAllServers(db *DB) ([]Server, error) {
 	rows, err := db.Raw.Query(`SELECT s.id, s.user_id, s.name, s.host, s.port,
 		s.ssh_username, COALESCE(s.ssh_password, ''), COALESCE(s.ssh_key, ''),
 		COALESCE(s.ssh_host_key, ''), s.credential_id, COALESCE(s.server_type, 'linux'),
-		c.ssh_username, COALESCE(c.ssh_password, ''), COALESCE(c.ssh_key, '')
+		c.ssh_username, COALESCE(c.ssh_password, ''), COALESCE(c.ssh_key, ''),
+		s.connection_mode,s.is_public,s.monitoring_enabled,s.auto_renew_enabled
 		FROM servers s
-		LEFT JOIN credentials c ON c.id = s.credential_id AND c.user_id = s.user_id`)
+		LEFT JOIN credentials c ON c.id = s.credential_id AND c.user_id = s.user_id WHERE s.monitoring_enabled`)
 	if err != nil {
 		return nil, err
 	}
@@ -650,8 +726,12 @@ func GetAllServers(db *DB) ([]Server, error) {
 		var credentialPassword, credentialKey string
 		if err := rows.Scan(&s.ID, &s.UserID, &s.Name, &s.Host, &s.Port,
 			&s.SSHUsername, &encPassword, &encKey, &s.SSHHostKey, &credID, &s.ServerType,
-			&credentialUsername, &credentialPassword, &credentialKey); err != nil {
+			&credentialUsername, &credentialPassword, &credentialKey, &s.ConnectionMode, &s.IsPublic, &s.MonitoringEnabled, &s.AutoRenewEnabled); err != nil {
 			return nil, err
+		}
+		if s.ConnectionMode == "agent" {
+			servers = append(servers, s)
+			continue
 		}
 		if credID.Valid {
 			id, err := uuid.Parse(credID.String)

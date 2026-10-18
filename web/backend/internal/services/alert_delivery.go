@@ -12,9 +12,6 @@ import (
 )
 
 func alertNotification(rule models.AlertRule, snap models.AlertSnapshot, status string, value float64, at time.Time) *models.AlertNotification {
-	if rule.WebhookURL == "" {
-		return nil
-	}
 	message := FormatAlertMessage(rule, snap, value)
 	if status == "resolved" {
 		message = FormatRecoveryMessage(rule, snap, value)

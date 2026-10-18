@@ -22,6 +22,10 @@ const Files = lazy(() => import('./pages/Files'));
 const Credentials = lazy(() => import('./pages/Credentials'));
 const Alerts = lazy(() => import('./pages/Alerts'));
 const PublicStatus = lazy(() => import('./pages/PublicStatus'));
+const Network = lazy(() => import('./pages/Network'));
+const Logs = lazy(() => import('./pages/Logs'));
+const Notifications = lazy(() => import('./pages/Notifications'));
+const Backups = lazy(() => import('./pages/Backups'));
 
 const antdLocales: Record<string, typeof enUS> = { en: enUS, zh: zhCN };
 
@@ -53,6 +57,10 @@ const router = createBrowserRouter(createRoutesFromElements(
               <Route path="files" element={<Files />} />
               <Route path="credentials" element={<Credentials />} />
               <Route path="alerts" element={<Alerts />} />
+              <Route path="network" element={<Network />} />
+              <Route path="logs" element={<Logs />} />
+              <Route path="notifications" element={<Notifications />} />
+              <Route path="backups" element={<Backups />} />
             </Route>
             <Route path="*" element={<Navigate to="/dashboard" />} />
           </Route>

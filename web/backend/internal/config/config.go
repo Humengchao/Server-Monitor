@@ -13,6 +13,8 @@ import (
 )
 
 type Config struct {
+	PublicURL      string
+	AgentAssetsDir string
 	DatabaseURL    string
 	JWTSecret      string
 	EncryptionKey  string
@@ -91,6 +93,8 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("EXPIRY_TIMEZONE: %w", err)
 	}
 	return &Config{
+		PublicURL:            strings.TrimRight(os.Getenv("PUBLIC_URL"), "/"),
+		AgentAssetsDir:       getEnv("AGENT_ASSETS_DIR", "/app/agent-assets"),
 		DatabaseURL:          dbURL,
 		JWTSecret:            jwtSecret,
 		EncryptionKey:        encKey,

@@ -23,7 +23,9 @@ import ServiceTable from '../components/ServiceTable';
 import PortTable from '../components/PortTable';
 import PollErrorNotice from '../components/PollErrorNotice';
 import ServerForm from '../components/ServerForm';
+import AgentPanel from '../components/AgentPanel';
 import { buildServerPayload, isExpiryConflict, serverFormValues } from '../utils/serverForm';
+import '../i18n/networkLogs';
 import type { ServerFormValues } from '../utils/serverForm';
 import { copyToClipboard } from '../utils/clipboard';
 import { formatBytes, formatDate, formatDateTime, formatTime, formatUptime, getExpirationInfo, percentOf, severityColor } from '../utils/format';
@@ -334,6 +336,7 @@ export default function ServerDetail() {
 
   return (
       <div className={`server-detail-page${activeTab === 'terminal' ? ' server-detail-page--terminal' : ''}`}>
+      {server.connection_mode === 'agent' && <AgentPanel key={server.id} serverId={server.id} serverType={server.server_type} />}
       <div className="detail-hero">
         <div className="detail-hero-main">
           <Button className="detail-back" icon={<ArrowLeftOutlined />} onClick={() => navigate('/dashboard')}>
@@ -372,6 +375,8 @@ export default function ServerDetail() {
           </div>
         </div>
         <Space wrap className="detail-actions">
+          <Button onClick={() => navigate('/network?server=' + id)}>{t('networkLink', { ns: 'networkLogs' })}</Button>
+          <Button onClick={() => navigate('/logs?server=' + id)}>{t('openLogs', { ns: 'networkLogs' })}</Button>
           <Button icon={<FolderOpenOutlined />} onClick={() => navigate('/files?server=' + id)}>{t('nav.files')}</Button>
           <Tooltip title={dockerInstalled === true ? '' : t('docker.noServers')}>
             <Button

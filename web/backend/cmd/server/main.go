@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"server-monitor/internal/agenttransport"
 	"server-monitor/internal/config"
 	"server-monitor/internal/database"
 	"server-monitor/internal/models"
@@ -60,6 +61,9 @@ func main() {
 
 	// Start metrics collector
 	dbWrapper := &models.DB{Raw: db, EncryptionKey: cfg.EncryptionKey}
+	agentHub := agenttransport.NewHub()
+	services.SetAgentConnector(agentHub.Dial, agentHub.Disconnect)
+	defer agentHub.Close()
 	collector := services.NewCollector(dbWrapper, time.Duration(cfg.PollInterval)*time.Second)
 	collector.Start()
 
@@ -69,6 +73,7 @@ func main() {
 	alertEngine := services.NewAlertEngine(db, time.Duration(cfg.AlertInterval)*time.Second, notifier)
 	alertEngine.Start()
 	webhookDispatcher := services.StartWebhookDispatcher(db, notifier)
+	notificationDispatcher := services.StartNotificationDispatcher(dbWrapper, services.NewNotificationSender(cfg.AllowPrivateWebhooks))
 	var expiryRenewer *services.ExpiryRenewer
 	if cfg.AutoRenewExpiry {
 		expiryRenewer = services.StartExpiryRenewer(db, cfg.ExpiryTimezone)
@@ -76,9 +81,11 @@ func main() {
 
 	// Shared SSH connection cache for interactive API calls (Docker management).
 	sshCache := services.NewSSHConnCache()
+	networkMonitor := services.NewNetworkMonitor(dbWrapper, sshCache)
+	networkMonitor.Start()
 
 	log.Printf("Server starting on :%s", cfg.ServerPort)
-	r, err := router.Setup(db, cfg, sshCache, notifier, collector)
+	r, err := router.SetupFeatures(db, cfg, sshCache, notifier, router.Features{AgentHub: agentHub, Network: networkMonitor}, collector)
 	if err != nil {
 		exitWithError(exitConfigError, "Router setup failed", err)
 	}
@@ -121,6 +128,9 @@ func main() {
 	collector.Stop()
 	alertEngine.Stop()
 	webhookDispatcher.Stop()
+	notificationDispatcher.Stop()
+	networkMonitor.Stop()
+	agentHub.Close()
 	if expiryRenewer != nil {
 		expiryRenewer.Stop()
 	}

@@ -5,6 +5,10 @@ import type { Server } from '../api/servers';
 const GB = 1024 * 1024 * 1024;
 
 export interface ServerFormValues {
+  connection_mode?: 'ssh' | 'agent';
+  is_public?: boolean;
+  monitoring_enabled?: boolean;
+  auto_renew_enabled?: boolean;
   name: string;
   host: string;
   port?: number;
@@ -22,6 +26,10 @@ export interface ServerFormValues {
 }
 
 export interface ServerPayload {
+  connection_mode?: 'ssh' | 'agent';
+  is_public?: boolean;
+  monitoring_enabled?: boolean;
+  auto_renew_enabled?: boolean;
   name: string;
   host: string;
   port?: number;
@@ -50,6 +58,10 @@ export function isExpiryConflict(error: unknown): boolean {
 /** Seeds the form from a saved server. Secrets are never echoed back; empty means "keep". */
 export function serverFormValues(server: Server): ServerFormValues {
   return {
+    connection_mode: server.connection_mode || 'ssh',
+    is_public: server.is_public ?? true,
+    monitoring_enabled: server.monitoring_enabled ?? true,
+    auto_renew_enabled: server.auto_renew_enabled ?? true,
     name: server.name,
     host: server.host,
     port: server.port,
@@ -75,16 +87,17 @@ export function buildServerPayload(values: ServerFormValues, options: { credenti
   const serverType = values.server_type || 'linux';
   const windows = serverType === 'windows';
   const shared = !!options.credentialId;
+  const agent = values.connection_mode === 'agent';
   return {
     ...values,
     name: trim(values.name) as string,
-    host: trim(values.host) as string,
-    ssh_username: trim(values.ssh_username) as string | undefined,
-    ssh_password: shared ? undefined : values.ssh_password,
-    ssh_key: windows || shared ? undefined : values.ssh_key,
-    ssh_host_key: windows ? undefined : values.ssh_host_key,
-    port: windows ? undefined : values.port,
-    credential_id: options.credentialId || null,
+    host: agent && !values.host?.trim() ? 'agent' : trim(values.host) as string,
+    ssh_username: agent ? undefined : trim(values.ssh_username) as string | undefined,
+    ssh_password: agent || shared ? undefined : values.ssh_password,
+    ssh_key: agent || windows || shared ? undefined : values.ssh_key,
+    ssh_host_key: agent || windows ? undefined : values.ssh_host_key,
+    port: agent || windows ? undefined : values.port,
+    credential_id: agent ? null : options.credentialId || null,
     server_type: serverType,
     expires_at: values.expires_at ? values.expires_at.toISOString() : null,
     traffic_limit_bytes: Math.round((values.traffic_limit_gb || 0) * GB),

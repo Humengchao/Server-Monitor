@@ -31,6 +31,11 @@ func NewPublicStatusHandler() *PublicStatusHandler {
 	return &PublicStatusHandler{cache: services.NewRequestCache[gin.H](1)}
 }
 
+// Visibility mutations invalidate both a cached response and its in-flight
+// refresh. RequestCache's entry identity prevents the old refresh from
+// repopulating the cache after a server was made private or removed.
+func (h *PublicStatusHandler) Invalidate() { h.cache.Forget("public") }
+
 type publicNode struct {
 	Name string `json:"name"`
 	// Alias remains a compatibility identifier; clients display Name.
@@ -64,7 +69,7 @@ type publicNode struct {
 	BillingCycle      string             `json:"billing_cycle"`
 	RemainingValue    float64            `json:"remaining_value"`
 	LatencyMS         int                `json:"latency_ms"`
-	PacketLossPercent int                `json:"packet_loss_percent"`
+	PacketLossPercent *float64           `json:"packet_loss_percent"`
 	// Observed availability over the last 30 days, clamped to how long the node
 	// has existed. Null when the node is too new to have a meaningful figure.
 	Availability30d *float64 `json:"availability_30d"`
@@ -138,10 +143,6 @@ func buildPublicStatus(ctx context.Context, db *sql.DB) (gin.H, error) {
 		}
 
 		remainingDays, remainingValue := calculateRemaining(now, metric.ExpiresAt, metric.BillingPrice, metric.BillingCycle)
-		packetLoss := 0
-		if status == "offline" {
-			packetLoss = 100
-		}
 
 		// Below a few hours of history the number says more about how recently
 		// the node was added than about its reliability, so publish nothing.
@@ -165,7 +166,7 @@ func buildPublicStatus(ctx context.Context, db *sql.DB) (gin.H, error) {
 			UptimeSeconds: metric.UptimeSeconds, ExpiresAt: metric.ExpiresAt, RemainingDays: remainingDays,
 			BillingPrice: metric.BillingPrice, BillingCurrency: metric.BillingCurrency,
 			BillingCycle: metric.BillingCycle, RemainingValue: remainingValue,
-			LatencyMS: metric.LatencyMS, PacketLossPercent: packetLoss,
+			LatencyMS: metric.LatencyMS, PacketLossPercent: metric.PacketLossPercent,
 			Availability30d: availability,
 		})
 

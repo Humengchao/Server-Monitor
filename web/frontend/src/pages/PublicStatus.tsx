@@ -69,7 +69,7 @@ interface PublicNode {
   billing_cycle: string;
   remaining_value: number;
   latency_ms: number;
-  packet_loss_percent: number;
+  packet_loss_percent: number | null;
   /** Observed 30-day availability; null when the node is too new to score. */
   availability_30d: number | null;
 }
@@ -402,7 +402,7 @@ function ProbeNodeCard({
         <div><CalendarOutlined /><span>{t('probe.expiry')}<strong className={expired ? 'is-expired' : undefined}>{expiryText}{expired ? ` · ${t('probe.expired')}` : node.remaining_days > 0 ? ` · ${node.remaining_days} ${t('probe.days')}` : ''}</strong></span></div>
         {node.billing_price > 0 && <div><DollarOutlined /><span>{t('probe.remainingValue')}<strong>{node.remaining_value > 0 ? `≈ ${displaySymbol}${convertedRemainingValue.toFixed(2)}` : '—'}</strong></span></div>}
         <div><WifiOutlined /><span>{t('probe.latency')}<strong>{node.status === 'offline' || node.latency_ms <= 0 ? '—' : `${node.latency_ms} ms`}</strong></span></div>
-        <div><SwapOutlined /><span>{t('probe.packetLoss')}<strong>{node.packet_loss_percent}%</strong></span></div>
+        <div><SwapOutlined /><span>{t('probe.packetLoss')}<strong>{typeof node.packet_loss_percent === 'number' ? `${node.packet_loss_percent.toFixed(1)}%` : '—'}</strong></span></div>
         <div><RiseOutlined /><span>{t('probe.availability')}<strong style={node.availability_30d === null ? undefined : { color: availabilityColor(node.availability_30d) }}>{node.availability_30d === null ? '—' : `${node.availability_30d.toFixed(2)}%`}</strong></span></div>
       </div>
 

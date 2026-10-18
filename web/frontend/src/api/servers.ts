@@ -1,6 +1,10 @@
 import client from './client';
 
 export interface Server {
+  connection_mode?: 'ssh' | 'agent';
+  is_public?: boolean;
+  monitoring_enabled?: boolean;
+  auto_renew_enabled?: boolean;
   id: string;
   user_id: string;
   name: string;
@@ -153,6 +157,10 @@ export const serversApi = {
     client.get<Server>(`/servers/${id}`, { signal }),
 
   create: (data: {
+    connection_mode?: 'ssh' | 'agent';
+    is_public?: boolean;
+    monitoring_enabled?: boolean;
+    auto_renew_enabled?: boolean;
     name: string;
     host: string;
     port?: number;
@@ -172,6 +180,10 @@ export const serversApi = {
   }) => client.post<Server>('/servers', data),
 
   update: (id: string, data: {
+    connection_mode?: 'ssh' | 'agent';
+    is_public?: boolean;
+    monitoring_enabled?: boolean;
+    auto_renew_enabled?: boolean;
     name: string;
     host: string;
     port?: number;

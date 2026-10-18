@@ -38,18 +38,19 @@ func ValidAlertMetric(metric string) bool {
 }
 
 type AlertRule struct {
-	ID         uuid.UUID  `json:"id"`
-	UserID     uuid.UUID  `json:"user_id"`
-	Name       string     `json:"name"`
-	ServerID   *uuid.UUID `json:"server_id"`
-	ServerName string     `json:"server_name,omitempty"`
-	Metric     string     `json:"metric"`
-	Comparator string     `json:"comparator"`
-	Threshold  float64    `json:"threshold"`
-	Duration   int        `json:"duration_seconds"`
-	Enabled    bool       `json:"enabled"`
-	WebhookURL string     `json:"webhook_url"`
-	CreatedAt  time.Time  `json:"created_at"`
+	ID         uuid.UUID   `json:"id"`
+	UserID     uuid.UUID   `json:"user_id"`
+	Name       string      `json:"name"`
+	ServerID   *uuid.UUID  `json:"server_id"`
+	ServerName string      `json:"server_name,omitempty"`
+	Metric     string      `json:"metric"`
+	Comparator string      `json:"comparator"`
+	Threshold  float64     `json:"threshold"`
+	Duration   int         `json:"duration_seconds"`
+	Enabled    bool        `json:"enabled"`
+	WebhookURL string      `json:"webhook_url"`
+	ChannelIDs []uuid.UUID `json:"channel_ids"`
+	CreatedAt  time.Time   `json:"created_at"`
 	// FiringCount is the number of servers currently breaching this rule. It is
 	// filled in by list queries so the UI can badge a rule without a second call.
 	FiringCount int `json:"firing_count"`
@@ -94,13 +95,25 @@ type AlertSnapshot struct {
 
 func CreateAlertRule(db *sql.DB, r *AlertRule) error {
 	r.ID = uuid.New()
-	return db.QueryRow(
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	err = tx.QueryRow(
 		`INSERT INTO alert_rules (id, user_id, name, server_id, metric, comparator, threshold, duration_seconds, enabled, webhook_url)
 		 SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
 		 WHERE $4::uuid IS NULL OR EXISTS (SELECT 1 FROM servers WHERE id = $4 AND user_id = $2)
 		 RETURNING created_at`,
 		r.ID, r.UserID, r.Name, r.ServerID, r.Metric, r.Comparator, r.Threshold, r.Duration, r.Enabled, r.WebhookURL,
 	).Scan(&r.CreatedAt)
+	if err != nil {
+		return err
+	}
+	if err = setAlertRuleChannels(context.Background(), tx, r.ID, r.UserID, r.ChannelIDs); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func UpdateAlertRule(db *sql.DB, r *AlertRule) error {
@@ -125,10 +138,23 @@ func UpdateAlertRule(db *sql.DB, r *AlertRule) error {
 	if rows == 0 {
 		return sql.ErrNoRows
 	}
+	if err = setAlertRuleChannels(context.Background(), tx, r.ID, r.UserID, r.ChannelIDs); err != nil {
+		return err
+	}
+	if !r.Enabled {
+		if _, err = tx.Exec(`UPDATE notification_deliveries SET status='canceled',lease_version=lease_version+1,last_error='Rule disabled'
+		 WHERE rule_id=$1 AND user_id=$2 AND status IN ('pending','retry','sending')`, r.ID, r.UserID); err != nil {
+			return err
+		}
+	}
+	var hasChannels bool
+	if err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM alert_rule_channels WHERE rule_id=$1)`, r.ID).Scan(&hasChannels); err != nil {
+		return err
+	}
 	// Fixing a webhook address must also unblock already queued deliveries.
 	// Disabled notifications are canceled; an in-flight HTTP request cannot be
 	// retracted, but its late acknowledgement cannot complete a retargeted row.
-	if !r.Enabled || r.WebhookURL == "" {
+	if !r.Enabled || r.WebhookURL == "" || hasChannels {
 		_, err = tx.Exec(`DELETE FROM alert_webhooks WHERE rule_id=$1 AND user_id=$2 AND delivered_at IS NULL`, r.ID, r.UserID)
 	} else {
 		_, err = tx.Exec(`UPDATE alert_webhooks SET target=$1,attempts=0,next_attempt_at=NOW()
@@ -149,7 +175,8 @@ func GetAlertRulesByUserID(db *sql.DB, userID uuid.UUID) ([]AlertRule, error) {
 	rows, err := db.Query(
 		`SELECT r.id, r.user_id, r.name, r.server_id, COALESCE(s.name, ''), r.metric, r.comparator,
 		 r.threshold, r.duration_seconds, r.enabled, r.webhook_url, r.created_at,
-		 (SELECT COUNT(*) FROM alert_events e WHERE e.rule_id = r.id AND e.resolved_at IS NULL)
+		 (SELECT COUNT(*) FROM alert_events e WHERE e.rule_id = r.id AND e.resolved_at IS NULL),
+		 COALESCE((SELECT ARRAY_AGG(rc.channel_id ORDER BY rc.channel_id) FROM alert_rule_channels rc WHERE rc.rule_id=r.id),'{}'::uuid[])
 		 FROM alert_rules r
 		 LEFT JOIN servers s ON s.id = r.server_id
 		 WHERE r.user_id = $1
@@ -166,7 +193,8 @@ func GetAlertRulesByUserID(db *sql.DB, userID uuid.UUID) ([]AlertRule, error) {
 func GetEnabledAlertRules(db *sql.DB) ([]AlertRule, error) {
 	rows, err := db.Query(
 		`SELECT r.id, r.user_id, r.name, r.server_id, '', r.metric, r.comparator,
-		 r.threshold, r.duration_seconds, r.enabled, r.webhook_url, r.created_at, 0
+		 r.threshold, r.duration_seconds, r.enabled, r.webhook_url, r.created_at, 0,
+		 COALESCE((SELECT ARRAY_AGG(rc.channel_id ORDER BY rc.channel_id) FROM alert_rule_channels rc WHERE rc.rule_id=r.id),'{}'::uuid[])
 		 FROM alert_rules r WHERE r.enabled ORDER BY r.created_at`)
 	if err != nil {
 		return nil, err
@@ -180,9 +208,18 @@ func scanAlertRules(rows *sql.Rows) ([]AlertRule, error) {
 	for rows.Next() {
 		var r AlertRule
 		var serverID sql.NullString
+		var channelIDs pq.StringArray
 		if err := rows.Scan(&r.ID, &r.UserID, &r.Name, &serverID, &r.ServerName, &r.Metric, &r.Comparator,
-			&r.Threshold, &r.Duration, &r.Enabled, &r.WebhookURL, &r.CreatedAt, &r.FiringCount); err != nil {
+			&r.Threshold, &r.Duration, &r.Enabled, &r.WebhookURL, &r.CreatedAt, &r.FiringCount, &channelIDs); err != nil {
 			return nil, err
+		}
+		r.ChannelIDs = []uuid.UUID{}
+		for _, raw := range channelIDs {
+			id, err := uuid.Parse(raw)
+			if err != nil {
+				return nil, err
+			}
+			r.ChannelIDs = append(r.ChannelIDs, id)
 		}
 		if serverID.Valid {
 			if id, err := uuid.Parse(serverID.String); err == nil {
@@ -204,7 +241,7 @@ func GetAlertSnapshots(db *sql.DB) ([]AlertSnapshot, error) {
 		 COALESCE(lm.disk_used_bytes, 0), COALESCE(lm.load_1, 0), COALESCE(lm.latency_ms, 0),
 		 COALESCE(lm.recorded_at, TIMESTAMPTZ 'epoch')
 		 FROM servers s
-		 LEFT JOIN server_latest_metrics lm ON lm.server_id = s.id`)
+		 LEFT JOIN server_latest_metrics lm ON lm.server_id = s.id WHERE s.monitoring_enabled`)
 	if err != nil {
 		return nil, err
 	}

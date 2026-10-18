@@ -24,14 +24,15 @@ func NewAlertHandler(notifier *services.WebhookNotifier) *AlertHandler {
 }
 
 type AlertRuleRequest struct {
-	Name       string     `json:"name" binding:"required"`
-	ServerID   *uuid.UUID `json:"server_id"`
-	Metric     string     `json:"metric" binding:"required"`
-	Comparator string     `json:"comparator"`
-	Threshold  float64    `json:"threshold"`
-	Duration   int        `json:"duration_seconds"`
-	Enabled    *bool      `json:"enabled"`
-	WebhookURL string     `json:"webhook_url"`
+	Name       string      `json:"name" binding:"required"`
+	ServerID   *uuid.UUID  `json:"server_id"`
+	Metric     string      `json:"metric" binding:"required"`
+	Comparator string      `json:"comparator"`
+	Threshold  float64     `json:"threshold"`
+	Duration   int         `json:"duration_seconds"`
+	Enabled    *bool       `json:"enabled"`
+	WebhookURL string      `json:"webhook_url"`
+	ChannelIDs []uuid.UUID `json:"channel_ids"`
 }
 
 const (
@@ -82,6 +83,9 @@ func normalizeAlertRule(req *AlertRuleRequest) error {
 		return fmt.Errorf("duration must be between %d and %d seconds", alertMinDuration, alertMaxDuration)
 	}
 	req.WebhookURL = strings.TrimSpace(req.WebhookURL)
+	if len(req.ChannelIDs) > 32 {
+		return fmt.Errorf("at most 32 notification channels per rule")
+	}
 	return nil
 }
 
@@ -128,12 +132,13 @@ func (h *AlertHandler) CreateRule(c *gin.Context) {
 		Duration:   req.Duration,
 		Enabled:    enabled,
 		WebhookURL: req.WebhookURL,
+		ChannelIDs: req.ChannelIDs,
 	}
 	db := c.MustGet("db").(*models.DB)
 	if err := models.CreateAlertRule(db.Raw, rule); err != nil {
 		// The insert is guarded by an ownership check, so no rows means the
 		// referenced server belongs to somebody else (or does not exist).
-		if err == sql.ErrNoRows {
+		if err == sql.ErrNoRows || err == models.ErrNotificationChannels {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "server not found"})
 			return
 		}
@@ -178,9 +183,14 @@ func (h *AlertHandler) UpdateRule(c *gin.Context) {
 		Duration:   req.Duration,
 		Enabled:    enabled,
 		WebhookURL: req.WebhookURL,
+		ChannelIDs: req.ChannelIDs,
 	}
 	db := c.MustGet("db").(*models.DB)
 	if err := models.UpdateAlertRule(db.Raw, rule); err != nil {
+		if err == models.ErrNotificationChannels {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "notification channel not found"})
+			return
+		}
 		if err == sql.ErrNoRows {
 			c.JSON(http.StatusNotFound, gin.H{"error": "alert rule not found"})
 			return
