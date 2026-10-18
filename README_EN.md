@@ -226,19 +226,19 @@ Add the following secrets in **Settings -> Secrets and variables -> actions**:
 
 ## Screenshots
 
-Updated 2026-10-18 from the running web application. Connection addresses and credential names are masked.
+Updated 2026-10-18 from the running web application with the interface set to English. Connection addresses and credential names are masked.
 
 | Dashboard |
 |:---:|
-| ![Server overview with live metrics, resource totals, quick filters, and server cards](docs/screenshots/dashboard.png) |
+| ![Server overview with live metrics, resource totals, quick filters, and server cards](docs/screenshots/dashboard-en.png) |
 
 | Server Detail | SSH Terminal |
 |:---:|:---:|
-| ![Server detail with resource metrics, historical charts, and management tabs](docs/screenshots/server-detail.png) | ![Connected SSH terminal showing uptime, memory, disk, and operating system information](docs/screenshots/ssh-terminal.png) |
+| ![Server detail with resource metrics, historical charts, and management tabs](docs/screenshots/server-detail-en.png) | ![Connected SSH terminal showing uptime, memory, disk, and operating system information](docs/screenshots/ssh-terminal-en.png) |
 
 | Public Status Page |
 |:---:|
-| ![Public status page with fleet totals and live server health metrics](docs/screenshots/public-status.png) |
+| ![Public status page with fleet totals and live server health metrics](docs/screenshots/public-status-en.png) |
 
 ---
 
