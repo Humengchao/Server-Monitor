@@ -14,6 +14,7 @@ import {
   TranslationOutlined,
   DisconnectOutlined,
   FolderOpenOutlined,
+  RobotOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -22,6 +23,7 @@ import { alertsApi } from '../api/alerts';
 import { usePolling } from '../hooks/usePolling';
 import { DarkModeContext, ToggleThemeContext } from '../contexts/DarkModeContext';
 import '../i18n/operations';
+import '../i18n/ai';
 
 const { Header, Sider, Content } = AntLayout;
 const { Text } = Typography;
@@ -65,6 +67,7 @@ export default function AppLayout() {
   }, [location.pathname, refreshAlertBadge]);
 
   const menuItems = [
+    { key: '/ai', icon: <RobotOutlined />, label: t('title', { ns: 'ai' }) },
     { key: '/dashboard', icon: <DashboardOutlined />, label: t('nav.servers') },
     {
       key: '/alerts',

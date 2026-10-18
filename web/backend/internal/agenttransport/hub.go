@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -237,6 +238,14 @@ func (h *Hub) Dial(ctx context.Context, agentID uuid.UUID) (*ssh.Client, net.Con
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
+	var expected ssh.PublicKey
+	if encoded, pinned := ctx.Value(expectedHostKeyContextKey{}).(string); pinned {
+		key, _, _, rest, parseErr := ssh.ParseAuthorizedKey([]byte(encoded))
+		if parseErr != nil || len(strings.TrimSpace(string(rest))) != 0 {
+			return nil, nil, ErrAgentIdentityChanged
+		}
+		expected = key
+	}
 	id, err := randomSecret()
 	if err != nil {
 		return nil, nil, err
@@ -250,6 +259,10 @@ func (h *Hub) Dial(ctx context.Context, agentID uuid.UUID) (*ssh.Client, net.Con
 	if h.closed || c == nil || !c.ready {
 		h.mu.Unlock()
 		return nil, nil, ErrOffline
+	}
+	if expected != nil && !bytes.Equal(expected.Marshal(), c.key.Marshal()) {
+		h.mu.Unlock()
+		return nil, nil, ErrAgentIdentityChanged
 	}
 	count := len(c.connections)
 	for _, p := range h.pending {
@@ -303,6 +316,9 @@ func (h *Hub) Dial(ctx context.Context, agentID uuid.UUID) (*ssh.Client, net.Con
 	_ = conn.SetDeadline(deadline)
 	config := &ssh.ClientConfig{User: c.hello.Username, Auth: []ssh.AuthMethod{ssh.Password(secret)},
 		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
+			if expected != nil && !bytes.Equal(key.Marshal(), expected.Marshal()) {
+				return ErrAgentIdentityChanged
+			}
 			if !bytes.Equal(key.Marshal(), c.key.Marshal()) {
 				return errors.New("agent SSH host key changed")
 			}

@@ -26,6 +26,7 @@ const Network = lazy(() => import('./pages/Network'));
 const Logs = lazy(() => import('./pages/Logs'));
 const Notifications = lazy(() => import('./pages/Notifications'));
 const Backups = lazy(() => import('./pages/Backups'));
+const AI = lazy(() => import('./pages/AI'));
 
 const antdLocales: Record<string, typeof enUS> = { en: enUS, zh: zhCN };
 
@@ -61,6 +62,7 @@ const router = createBrowserRouter(createRoutesFromElements(
               <Route path="logs" element={<Logs />} />
               <Route path="notifications" element={<Notifications />} />
               <Route path="backups" element={<Backups />} />
+              <Route path="ai" element={<AI />} />
             </Route>
             <Route path="*" element={<Navigate to="/dashboard" />} />
           </Route>

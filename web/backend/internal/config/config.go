@@ -28,7 +28,8 @@ type Config struct {
 	// AllowPrivateWebhooks permits alert webhooks that resolve to loopback or
 	// RFC1918 addresses. Off by default so an authenticated user cannot use the
 	// alerting pipeline to reach the server's private network.
-	AllowPrivateWebhooks bool
+	AllowPrivateWebhooks    bool
+	AIAllowPrivateEndpoints bool
 	// AllowRegistration gates POST /api/auth/register. On by default so existing
 	// deployments keep their behavior; set ALLOW_REGISTRATION=false to close
 	// signup once the initial accounts exist.
@@ -88,27 +89,32 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	aiPrivateEndpoints, err := loadBoolDefault("AI_ALLOW_PRIVATE_ENDPOINTS", false)
+	if err != nil {
+		return nil, err
+	}
 	expiryTimezone, err := time.LoadLocation(getEnv("EXPIRY_TIMEZONE", "Asia/Shanghai"))
 	if err != nil {
 		return nil, fmt.Errorf("EXPIRY_TIMEZONE: %w", err)
 	}
 	return &Config{
-		PublicURL:            strings.TrimRight(os.Getenv("PUBLIC_URL"), "/"),
-		AgentAssetsDir:       getEnv("AGENT_ASSETS_DIR", "/app/agent-assets"),
-		DatabaseURL:          dbURL,
-		JWTSecret:            jwtSecret,
-		EncryptionKey:        encKey,
-		ServerPort:           getEnv("SERVER_PORT", "8080"),
-		TLSCertFile:          os.Getenv("TLS_CERT_FILE"),
-		TLSKeyFile:           os.Getenv("TLS_KEY_FILE"),
-		CORSOrigin:           getEnv("CORS_ORIGIN", "http://localhost:5173"),
-		PollInterval:         pollInterval,
-		AlertInterval:        alertInterval,
-		TrustedProxies:       trustedProxies,
-		AllowPrivateWebhooks: strings.EqualFold(strings.TrimSpace(os.Getenv("ALLOW_PRIVATE_WEBHOOKS")), "true"),
-		AllowRegistration:    allowRegistration,
-		AutoRenewExpiry:      autoRenewExpiry,
-		ExpiryTimezone:       expiryTimezone,
+		PublicURL:               strings.TrimRight(os.Getenv("PUBLIC_URL"), "/"),
+		AgentAssetsDir:          getEnv("AGENT_ASSETS_DIR", "/app/agent-assets"),
+		DatabaseURL:             dbURL,
+		JWTSecret:               jwtSecret,
+		EncryptionKey:           encKey,
+		ServerPort:              getEnv("SERVER_PORT", "8080"),
+		TLSCertFile:             os.Getenv("TLS_CERT_FILE"),
+		TLSKeyFile:              os.Getenv("TLS_KEY_FILE"),
+		CORSOrigin:              getEnv("CORS_ORIGIN", "http://localhost:5173"),
+		PollInterval:            pollInterval,
+		AlertInterval:           alertInterval,
+		TrustedProxies:          trustedProxies,
+		AllowPrivateWebhooks:    strings.EqualFold(strings.TrimSpace(os.Getenv("ALLOW_PRIVATE_WEBHOOKS")), "true"),
+		AIAllowPrivateEndpoints: aiPrivateEndpoints,
+		AllowRegistration:       allowRegistration,
+		AutoRenewExpiry:         autoRenewExpiry,
+		ExpiryTimezone:          expiryTimezone,
 	}, nil
 }
 

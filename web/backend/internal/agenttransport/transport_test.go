@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,12 +24,13 @@ import (
 )
 
 type tunnelFixture struct {
-	hub    *Hub
-	agent  *Agent
-	id     uuid.UUID
-	cancel context.CancelFunc
-	done   <-chan error
-	dir    string
+	hub           *Hub
+	agent         *Agent
+	id            uuid.UUID
+	cancel        context.CancelFunc
+	done          <-chan error
+	dir           string
+	registeredKey *atomic.Value
 }
 
 func newTunnel(t *testing.T) *tunnelFixture {
@@ -44,6 +46,8 @@ func newTunnel(t *testing.T) *tunnelFixture {
 	id := uuid.New()
 	token := strings.Repeat("a", 64)
 	hub := NewHub()
+	registeredKey := &atomic.Value{}
+	registeredKey.Store(strings.TrimSpace(string(ssh.MarshalAuthorizedKey(signer.PublicKey()))))
 	upgrader := websocket.Upgrader{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer "+token {
@@ -57,7 +61,7 @@ func newTunnel(t *testing.T) *tunnelFixture {
 		switch r.URL.Path {
 		case ControlPath:
 			_ = hub.ServeControl(r.Context(), id, ws, func(hello Hello) error {
-				if hello.HostKey != strings.TrimSpace(string(ssh.MarshalAuthorizedKey(signer.PublicKey()))) {
+				if hello.HostKey != registeredKey.Load().(string) {
 					return errors.New("wrong key")
 				}
 				return nil
@@ -73,7 +77,7 @@ func newTunnel(t *testing.T) *tunnelFixture {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- agent.RunOnce(ctx) }()
-	fixture := &tunnelFixture{hub: hub, agent: agent, id: id, cancel: cancel, done: done, dir: dir}
+	fixture := &tunnelFixture{hub: hub, agent: agent, id: id, cancel: cancel, done: done, dir: dir, registeredKey: registeredKey}
 	t.Cleanup(func() {
 		cancel()
 		hub.Close()
@@ -440,5 +444,123 @@ func TestAgentReconnectsAfterControlDisconnectAndStopsOnCancellation(t *testing.
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("agent shutdown did not finish")
+	}
+}
+
+func TestPinnedDialRefusesReenrolledMachineWhileUnpinnedDialFollowsIt(t *testing.T) {
+	f := newTunnel(t)
+	oldKey := f.registeredKey.Load().(string)
+	client, _, err := f.hub.Dial(WithExpectedHostKey(context.Background(), oldKey), f.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	hello, private, err := NewIdentity("replacement")
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := ssh.ParsePrivateKey([]byte(private))
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement := *f.agent
+	replacement.Config.HostKeyPEM = private
+	replacement.Server = &SSHServer{Signer: signer, WorkingDirectory: f.dir}
+	f.registeredKey.Store(hello.HostKey)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- replacement.RunOnce(ctx) }()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("replacement did not stop")
+		}
+	}()
+	until := time.Now().Add(5 * time.Second)
+	for {
+		f.hub.mu.Lock()
+		current := f.hub.controls[f.id]
+		ready := current != nil && current.ready && current.hello.HostKey == hello.HostKey
+		f.hub.mu.Unlock()
+		if ready {
+			break
+		}
+		if time.Now().After(until) {
+			t.Fatal("replacement did not connect")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if client, _, err := f.hub.Dial(WithExpectedHostKey(context.Background(), oldKey), f.id); !errors.Is(err, ErrAgentIdentityChanged) {
+		if client != nil {
+			client.Close()
+		}
+		t.Fatalf("old approved identity reached replacement: %v", err)
+	}
+	for _, pin := range []string{"", "invalid", "ssh-ed25519 broken"} {
+		if _, _, err := f.hub.Dial(WithExpectedHostKey(context.Background(), pin), f.id); !errors.Is(err, ErrAgentIdentityChanged) {
+			t.Fatal("invalid pin did not fail closed", err)
+		}
+	}
+	fresh := f.dial(t)
+	if _, _, err := fresh.SendRequest("keepalive@openssh.com", true, nil); err != nil {
+		t.Fatal("ordinary dial no longer follows enrollment", err)
+	}
+	pinned, _, err := f.hub.Dial(WithExpectedHostKey(context.Background(), hello.HostKey), f.id)
+	if err != nil {
+		t.Fatal("new approved identity did not connect", err)
+	}
+	pinned.Close()
+}
+
+func TestPinnedSSHHandshakeChecksActualDataChannelKey(t *testing.T) {
+	f := newTunnel(t)
+	key := f.registeredKey.Load().(string)
+	_, private, err := NewIdentity("different-data-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := ssh.ParsePrivateKey([]byte(private))
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement := *f.agent
+	replacement.Server = &SSHServer{Signer: signer, WorkingDirectory: f.dir}
+	f.hub.mu.Lock()
+	original := f.hub.controls[f.id]
+	f.hub.mu.Unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- replacement.RunOnce(ctx) }()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("test agent did not stop")
+		}
+	}()
+	until := time.Now().Add(5 * time.Second)
+	for {
+		f.hub.mu.Lock()
+		current := f.hub.controls[f.id]
+		ready := current != nil && current != original && current.ready
+		f.hub.mu.Unlock()
+		if ready {
+			break
+		}
+		if time.Now().After(until) {
+			t.Fatal("test agent not ready")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	client, _, err := f.hub.Dial(WithExpectedHostKey(context.Background(), key), f.id)
+	if err == nil {
+		client.Close()
+		t.Fatal("data channel with different key passed pinned handshake")
+	}
+	if !strings.Contains(err.Error(), ErrAgentIdentityChanged.Error()) {
+		t.Fatalf("unexpected handshake failure: %v", err)
 	}
 }

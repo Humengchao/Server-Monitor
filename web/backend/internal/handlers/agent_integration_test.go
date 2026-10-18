@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -31,6 +32,25 @@ func TestAgentHTTPEnrollmentRemoteOperationsRevocationAndReenrollment(t *testing
 	db := testdb.Open(t)
 	owner, _, _ := testdb.Seed(t, db)
 	foreign, _, _ := testdb.Seed(t, db)
+	// This test covers the Agent transport and collector persistence, not the
+	// developer machine's optional Docker daemon. Keep the real OS probe while
+	// making Docker deterministically unavailable only in the fixture's children.
+	bin := t.TempDir()
+	dockerName, dockerScript := "docker", "#!/bin/sh\nexit 1\n"
+	if runtime.GOOS == "windows" {
+		dockerName, dockerScript = "docker.cmd", "@exit /b 1\r\n"
+	}
+	if err := os.WriteFile(filepath.Join(bin, dockerName), []byte(dockerScript), 0700); err != nil {
+		t.Fatal(err)
+	}
+	fixtureEnvironment := make([]string, 0, len(os.Environ())+1)
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if !strings.EqualFold(key, "PATH") {
+			fixtureEnvironment = append(fixtureEnvironment, entry)
+		}
+	}
+	fixtureEnvironment = append(fixtureEnvironment, "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	if _, err := db.Exec(`UPDATE servers SET is_public=false`); err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +171,7 @@ func TestAgentHTTPEnrollmentRemoteOperationsRevocationAndReenrollment(t *testing
 		if err != nil {
 			t.Fatal(err)
 		}
-		agent := &agenttransport.Agent{Config: config, Version: "integration", Server: &agenttransport.SSHServer{Signer: signer, WorkingDirectory: t.TempDir()}}
+		agent := &agenttransport.Agent{Config: config, Version: "integration", Server: &agenttransport.SSHServer{Signer: signer, WorkingDirectory: t.TempDir(), Environment: fixtureEnvironment}}
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan error, 1)
 		go func() { done <- agent.RunOnce(ctx) }()

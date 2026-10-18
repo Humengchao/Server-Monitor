@@ -130,6 +130,18 @@ func AuthenticateAgent(ctx context.Context, db *sql.DB, token string) (uuid.UUID
 	return id, hostKey, err
 }
 
+// GetAgentHostKey binds a long-lived operation to the enrolled machine rather
+// than only its reusable server row. Ownership and access mode are rechecked.
+func GetAgentHostKey(ctx context.Context, db *sql.DB, id, userID uuid.UUID) (string, error) {
+	var key string
+	err := db.QueryRowContext(ctx, `SELECT a.host_key FROM server_agents a JOIN servers s ON s.id=a.server_id
+ WHERE s.id=$1 AND s.user_id=$2 AND s.connection_mode='agent'`, id, userID).Scan(&key)
+	if err == nil && strings.TrimSpace(key) == "" {
+		return "", sql.ErrNoRows
+	}
+	return key, err
+}
+
 func TouchAgent(ctx context.Context, db *sql.DB, id uuid.UUID, hello agenttransport.Hello) error {
 	result, err := db.ExecContext(ctx, `UPDATE server_agents SET last_seen_at=NOW(),version=$2,hostname=$3,os=$4,arch=$5,run_user=$6 WHERE server_id=$1 AND host_key=$7`,
 		id, hello.Version, hello.Hostname, hello.OS, hello.Arch, hello.Username, hello.HostKey)

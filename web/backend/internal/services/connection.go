@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/ssh"
+	"server-monitor/internal/agenttransport"
 	"server-monitor/internal/models"
 )
 
@@ -43,6 +44,9 @@ func DialServer(ctx context.Context, s *models.Server) (*ssh.Client, net.Conn, e
 		agentConnector.RUnlock()
 		if dial == nil {
 			return nil, nil, errors.New("agent connection unavailable")
+		}
+		if s.AgentHostKey != "" {
+			ctx = agenttransport.WithExpectedHostKey(ctx, s.AgentHostKey)
 		}
 		return dial(ctx, s.ID)
 	}

@@ -26,6 +26,7 @@ import ServerForm from '../components/ServerForm';
 import AgentPanel from '../components/AgentPanel';
 import { buildServerPayload, isExpiryConflict, serverFormValues } from '../utils/serverForm';
 import '../i18n/networkLogs';
+import '../i18n/ai';
 import type { ServerFormValues } from '../utils/serverForm';
 import { copyToClipboard } from '../utils/clipboard';
 import { formatBytes, formatDate, formatDateTime, formatTime, formatUptime, getExpirationInfo, percentOf, severityColor } from '../utils/format';
@@ -375,6 +376,7 @@ export default function ServerDetail() {
           </div>
         </div>
         <Space wrap className="detail-actions">
+          <Button onClick={() => navigate('/ai?server=' + id)}>{t('title', { ns: 'ai' })}</Button>
           <Button onClick={() => navigate('/network?server=' + id)}>{t('networkLink', { ns: 'networkLogs' })}</Button>
           <Button onClick={() => navigate('/logs?server=' + id)}>{t('openLogs', { ns: 'networkLogs' })}</Button>
           <Button icon={<FolderOpenOutlined />} onClick={() => navigate('/files?server=' + id)}>{t('nav.files')}</Button>

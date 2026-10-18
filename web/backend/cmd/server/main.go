@@ -83,9 +83,12 @@ func main() {
 	sshCache := services.NewSSHConnCache()
 	networkMonitor := services.NewNetworkMonitor(dbWrapper, sshCache)
 	networkMonitor.Start()
+	aiClient := services.NewAIClient(cfg.AIAllowPrivateEndpoints)
+	aiWorker := services.NewAITaskWorker(dbWrapper, aiClient)
+	aiWorker.Start()
 
 	log.Printf("Server starting on :%s", cfg.ServerPort)
-	r, err := router.SetupFeatures(db, cfg, sshCache, notifier, router.Features{AgentHub: agentHub, Network: networkMonitor}, collector)
+	r, err := router.SetupFeatures(db, cfg, sshCache, notifier, router.Features{AgentHub: agentHub, Network: networkMonitor, AI: aiWorker, AIClient: aiClient}, collector)
 	if err != nil {
 		exitWithError(exitConfigError, "Router setup failed", err)
 	}
@@ -125,6 +128,7 @@ func main() {
 	<-quit
 
 	log.Println("Shutting down server...")
+	aiWorker.Stop()
 	collector.Stop()
 	alertEngine.Stop()
 	webhookDispatcher.Stop()

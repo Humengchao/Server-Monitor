@@ -21,6 +21,8 @@ import (
 type Features struct {
 	AgentHub *agenttransport.Hub
 	Network  *services.NetworkMonitor
+	AI       *services.AITaskWorker
+	AIClient *services.AIClient
 }
 
 func Setup(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCache, notifier *services.WebhookNotifier, collectors ...*services.Collector) (*gin.Engine, error) {
@@ -134,6 +136,10 @@ func SetupFeatures(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCac
 		secured.DELETE("/:id/agent", agentH.Revoke)
 	}
 	secured := api.Group("", middleware.AuthRequired(cfg))
+	if features.AI != nil && features.AIClient != nil {
+		handlers.RegisterAIProviderRoutes(secured, features.AIClient)
+		handlers.RegisterAITaskRoutes(secured, features.AI)
+	}
 	backupH := handlers.NewBackupHandler()
 	backups := secured.Group("/backups", middleware.RateLimit(6, time.Minute))
 	backups.POST("/export", backupH.Export)

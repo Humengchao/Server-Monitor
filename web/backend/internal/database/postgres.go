@@ -20,6 +20,12 @@ var notificationsSQL string
 //go:embed network.sql
 var networkSQL string
 
+//go:embed ai_providers.sql
+var aiProvidersSQL string
+
+//go:embed ai_tasks.sql
+var aiTasksSQL string
+
 func Connect(databaseURL string) (*sql.DB, error) {
 	db, err := sql.Open("postgres", databaseURL)
 	if err != nil {
@@ -32,7 +38,7 @@ func Connect(databaseURL string) (*sql.DB, error) {
 }
 
 func RunMigrations(db *sql.DB) error {
-	_, err := db.Exec(migrationsSQL + "\n" + accessSQL + "\n" + notificationsSQL + "\n" + networkSQL)
+	_, err := db.Exec(migrationsSQL + "\n" + accessSQL + "\n" + notificationsSQL + "\n" + networkSQL + "\n" + aiProvidersSQL + "\n" + aiTasksSQL)
 	if err != nil {
 		return fmt.Errorf("exec migrations: %w", err)
 	}

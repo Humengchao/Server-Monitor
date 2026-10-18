@@ -16,7 +16,9 @@ import (
 
 type Server struct {
 	// Creation-only metadata; enrollment and edits manage the persisted flag.
-	AgentAutoName     bool       `json:"-"`
+	AgentAutoName bool `json:"-"`
+	// Optional per-operation identity pin, never persisted or returned to API clients.
+	AgentHostKey      string     `json:"-"`
 	ConnectionMode    string     `json:"connection_mode"`
 	IsPublic          bool       `json:"is_public"`
 	MonitoringEnabled bool       `json:"monitoring_enabled"`

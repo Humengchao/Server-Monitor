@@ -1,5 +1,7 @@
 # Server Monitor API 文档
 
+AI 提供商配置与任务执行见 [AI 助手](ai.md)、[提供商接口](ai-provider.md)。
+
 ## 概述
 
 - **Base URL**: `http://localhost:8080/api`

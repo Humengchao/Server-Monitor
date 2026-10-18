@@ -49,10 +49,13 @@ The public probe refreshes every 10 seconds and displays real names, manually co
 | Network quality | Panel or assigned-host probe sources, independent ICMP packet counts, loss/RTT history and comparison across sources |
 | Log inspection | Journal time/unit/priority/literal-text queries, Docker stdout/stderr, cancellable cursor polling, and contextual incident/service links |
 | Configuration backups | Password-encrypted export and previewed restore, optional secrets, remapped cross-instance relationships, private and paused imports |
+| AI assistant | Bring a DeepSeek or compatible API key, select a server, and request installation or management tasks; normal operations run directly, risky actions require approval, with commands, output and token usage recorded |
 | Account security | Change your password and sign every other device out at once |
 | Public status page | Per-server visibility, real names and health metrics; packet loss comes from actual local probes and remains unknown without samples |
 
 ### Agent access, network checks, logs and backups
+
+The AI assistant uses your configured model and existing SSH/Agent account to manage one selected server. Tasks run in the background with history, cancellation, revision-checked file backups and exact approvals for risky commands. See the [AI assistant guide (Chinese)](docs/ai.md).
 
 Choose SSH or “Install Agent” when adding a server. The outbound Agent supports Linux and Windows on amd64/arm64, with terminal, file and host-management operations running under its service identity: root on Linux and LocalSystem on Windows by default. It needs no uploaded SSH password or private key. Host tools and OS permissions still apply; the system-journal viewer currently supports Linux journald rather than Windows event logs. Enrollment requires an HTTPS panel with a valid certificate. See the [Agent installation and maintenance guide (Chinese)](docs/agent.md).
 

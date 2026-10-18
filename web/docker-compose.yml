@@ -36,6 +36,7 @@ services:
       # the register endpoint starts answering 403. See README security notes.
       ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-true}
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+      AI_ALLOW_PRIVATE_ENDPOINTS: ${AI_ALLOW_PRIVATE_ENDPOINTS:-false}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     logging:
