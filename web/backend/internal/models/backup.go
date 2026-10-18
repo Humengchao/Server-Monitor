@@ -15,9 +15,10 @@ import (
 
 type BackupServer struct {
 	Server
-	Password   string      `json:"ssh_password,omitempty"`
-	PrivateKey string      `json:"ssh_key,omitempty"`
-	TagIDs     []uuid.UUID `json:"tag_ids"`
+	AgentAutoName bool        `json:"agent_auto_name,omitempty"`
+	Password      string      `json:"ssh_password,omitempty"`
+	PrivateKey    string      `json:"ssh_key,omitempty"`
+	TagIDs        []uuid.UUID `json:"tag_ids"`
 }
 type BackupCredential struct {
 	ID         uuid.UUID `json:"id"`
@@ -325,7 +326,7 @@ func ValidateConfigurationBackup(b *ConfigurationBackup) error {
 	}
 	validName := func(name string) bool { return strings.TrimSpace(name) != "" && len([]rune(name)) <= 128 }
 	for _, s := range b.Servers {
-		if !validName(s.Name) || len(s.Host) > 256 || s.Host == "" || (s.ServerType != "linux" && s.ServerType != "windows") || (s.ConnectionMode != "ssh" && s.ConnectionMode != "agent") || s.Port < 1 || s.Port > 65535 {
+		if !validName(s.Name) || len(s.Host) > 256 || s.Host == "" || (s.ServerType != "linux" && s.ServerType != "windows") || (s.ConnectionMode != "ssh" && s.ConnectionMode != "agent") || s.Port < 1 || s.Port > 65535 || (s.AgentAutoName && s.ConnectionMode != "agent") {
 			return errors.New("invalid server configuration")
 		}
 		if s.CredentialID != nil && !maps["credentials"][*s.CredentialID] {
@@ -477,8 +478,8 @@ func ImportConfiguration(ctx context.Context, db *DB, user uuid.UUID, b *Configu
 			credential = nil
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO servers(id,user_id,name,host,port,ssh_username,ssh_password,ssh_key,ssh_host_key,credential_id,server_type,
-   expires_at,notes,billing_price,billing_currency,billing_cycle,traffic_limit_bytes,public_location,connection_mode,is_public,monitoring_enabled,auto_renew_enabled)
-   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,FALSE,FALSE,FALSE)`, remap[s.ID], user, s.Name, s.Host, s.Port, s.SSHUsername, password, key, s.SSHHostKey, credential, s.ServerType, s.ExpiresAt, s.Notes, s.BillingPrice, s.BillingCurrency, s.BillingCycle, s.TrafficLimit, s.PublicLocation, s.ConnectionMode); err != nil {
+   expires_at,notes,billing_price,billing_currency,billing_cycle,traffic_limit_bytes,public_location,connection_mode,is_public,monitoring_enabled,auto_renew_enabled,agent_auto_name)
+   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,FALSE,FALSE,FALSE,$20)`, remap[s.ID], user, s.Name, s.Host, s.Port, s.SSHUsername, password, key, s.SSHHostKey, credential, s.ServerType, s.ExpiresAt, s.Notes, s.BillingPrice, s.BillingCurrency, s.BillingCycle, s.TrafficLimit, s.PublicLocation, s.ConnectionMode, s.AgentAutoName); err != nil {
 			return p, err
 		}
 		for _, tag := range s.TagIDs {

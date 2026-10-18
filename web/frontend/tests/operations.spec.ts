@@ -15,13 +15,13 @@ async function agentFixture(page: Page) {
   const errors = await setup(page);
   const state = { server: host('new-agent', { connection_mode: 'agent', is_public: false, monitoring_enabled: true }),
     created: [] as Record<string, unknown>[], updated: [] as Record<string, unknown>[], enrolled: false, online: false, generated: 0, revoked: 0,
-    statusReads: 0, holdStatus: false, held: undefined as Route | undefined, enrollmentError: '' };
+    statusReads: 0, holdStatus: false, held: undefined as Route | undefined, enrollmentError: '', enrollmentAttempts: 0 };
   await page.route('**/api/**', route => {
     const path = new URL(route.request().url()).pathname;
     const method = route.request().method();
     const headers = { Date: new Date(observedAt).toUTCString() };
     if (path === '/api/servers') {
-      if (method === 'POST') { const body = route.request().postDataJSON(); state.created.push(body); state.server = { ...state.server, ...body }; return route.fulfill({ json: state.server }); }
+      if (method === 'POST') { const body = route.request().postDataJSON(); state.created.push(body); state.server = { ...state.server, ...body, name: body.name?.trim() || 'Agent pending', host: body.host || 'agent' }; return route.fulfill({ json: state.server }); }
       return route.fulfill({ headers, json: [state.server] });
     }
     if (path === '/api/servers/new-agent') {
@@ -32,9 +32,10 @@ async function agentFixture(page: Page) {
       if (method === 'DELETE') { state.revoked++; state.enrolled = false; state.online = false; return route.fulfill({ status: 204 }); }
       state.statusReads++;
       if (state.holdStatus) { state.held = route; return; }
-      return route.fulfill({ json: { enrolled: state.enrolled, online: state.online, version: state.enrolled ? '1.0' : '', username: state.enrolled ? 'agent-user' : '' } });
+      return route.fulfill({ json: { enrolled: state.enrolled, online: state.online, version: state.enrolled ? '1.0' : '', username: state.enrolled ? 'agent-user' : '', hostname: state.enrolled ? state.server.name : '' } });
     }
     if (path === '/api/servers/new-agent/agent/enroll') {
+      state.enrollmentAttempts++;
       if (state.enrollmentError) return route.fulfill({ status: 400, json: { error: state.enrollmentError } });
       state.generated++;
       return route.fulfill({ headers, json: { command: `sudo install-agent --ticket linux-${state.generated}`, windows_command: `Install-Agent -Ticket windows-${state.generated}`, expires_at: new Date(observedAt + 900000).toISOString() } });
@@ -61,30 +62,85 @@ async function choose(page: Page, label: string, option: string) {
 }
 
 for (const platform of ['linux', 'windows'] as const) {
-  test(`${platform} Agent creation needs no SSH fields and opens the installation panel`, async ({ page }) => {
+  test(`${platform} Agent creation needs no address or name and automatically shows its own binding command`, async ({ page }) => {
     const { state, errors } = await agentFixture(page);
     await page.goto('/dashboard');
     await page.getByRole('button', { name: en['server.add'] }).first().click();
     const dialog = page.getByRole('dialog');
+    await dialog.getByLabel(en['server.host'], { exact: true }).fill('198.51.100.77');
     await dialog.getByLabel(en['server.sshPassword'], { exact: true }).fill('do-not-send');
     await dialog.getByLabel(en['server.sshKey'], { exact: true }).fill('do-not-send-key');
     await choose(page, 'Connection method', 'Install Agent');
     if (platform === 'windows') await choose(page, en['server.type'], 'Windows');
-    await dialog.getByLabel(en['server.serverName'], { exact: true }).fill(`${platform}-agent`);
+    await expect(dialog.getByLabel(en['server.host'], { exact: true })).toHaveCount(0);
+    await expect(dialog.getByLabel(en['server.serverName'], { exact: true })).toHaveValue('');
     await expect(dialog.getByRole('switch', { name: 'Show on public status page' })).toBeChecked();
     await expect(dialog.getByLabel(en['server.sshPort'], { exact: true })).toHaveCount(0);
     await expect(dialog.getByLabel(en['server.password'], { exact: true })).toHaveCount(0);
     await expect(dialog.getByLabel(en['server.sshPassword'], { exact: true })).toHaveCount(0);
     await dialog.getByRole('button', { name: 'OK', exact: true }).click();
     await expect.poll(() => state.created.length).toBe(1);
-    expect(state.created[0]).toMatchObject({ connection_mode: 'agent', server_type: platform, is_public: true, monitoring_enabled: true });
+    expect(state.created[0]).toMatchObject({ connection_mode: 'agent', name: '', host: '', server_type: platform, is_public: true, monitoring_enabled: true });
     for (const key of ['ssh_password', 'ssh_key', 'ssh_host_key', 'ssh_username', 'port']) expect(state.created[0]).not.toHaveProperty(key);
+    await expect(page).toHaveURL(/dashboard$/);
+    const installation = page.getByRole('dialog', { name: 'Install and bind server', exact: true });
+    await expect(installation).toBeVisible();
+    await expect(installation.locator('pre')).toContainText(platform === 'windows' ? 'Install-Agent -Ticket windows-1' : 'sudo install-agent --ticket linux-1');
+    await expect(installation.getByRole('button', { name: 'Copy command', exact: true })).toBeEnabled();
+    expect(state.enrollmentAttempts).toBe(1);
+    state.enrolled = true; state.online = true; state.server = { ...state.server, name: `${platform}-bound-host` };
+    await expect(installation.getByText('Bound to this server', { exact: true })).toBeVisible();
+    await expect(installation).toContainText(`${platform}-bound-host`);
+    await expect(installation.locator('pre')).toHaveCount(0);
+    await expect(installation.getByRole('button', { name: 'Copy command', exact: true })).toHaveCount(0);
+    await installation.getByRole('button', { name: 'View server details', exact: true }).click();
     await expect(page).toHaveURL(/servers\/new-agent$/);
-    await page.getByRole('button', { name: 'Generate installation command', exact: true }).click();
-    await expect(page.locator('.agent-panel pre')).toContainText(platform === 'windows' ? 'Install-Agent -Ticket windows-1' : 'sudo install-agent --ticket linux-1');
+    await expect(page.getByRole('heading', { name: `${platform}-bound-host`, exact: true })).toBeVisible();
+    expect(state.created).toHaveLength(1);
+    expect(state.enrollmentAttempts).toBe(1);
     expect(errors).toEqual([]);
   });
 }
+
+test('a failed automatic installation command retries for the existing record without creating another server', async ({ page }) => {
+  const { state } = await agentFixture(page);
+  state.enrollmentError = 'Configure the panel HTTPS address';
+  await page.goto('/dashboard');
+  await page.getByRole('button', { name: en['server.add'] }).first().click();
+  await choose(page, 'Connection method', 'Install Agent');
+  await page.getByRole('dialog').getByRole('button', { name: 'OK', exact: true }).click();
+  const installation = page.getByRole('dialog', { name: 'Install and bind server', exact: true });
+  await expect(installation).toContainText('The server was created, but its installation command could not be generated.');
+  await expect(installation.locator('.ant-alert').filter({ hasText: state.enrollmentError })).toBeVisible();
+  await expect.poll(() => state.statusReads).toBeGreaterThan(1);
+  await expect(installation.locator('.ant-alert').filter({ hasText: state.enrollmentError })).toBeVisible();
+  expect(state.created).toHaveLength(1);
+  expect(state.enrollmentAttempts).toBe(1);
+  state.enrollmentError = '';
+  await installation.getByRole('button', { name: 'Generate installation command', exact: true }).click();
+  await expect(installation.locator('pre')).toContainText('linux-1');
+  expect(state.created).toHaveLength(1);
+  expect(state.enrollmentAttempts).toBe(2);
+});
+
+test('closing setup cancels pending enrollment while keeping the created server', async ({ page }) => {
+  const { state } = await agentFixture(page);
+  let held: Route | undefined;
+  await page.route('**/api/servers/new-agent/agent/enroll', route => { held = route; });
+  await page.goto('/dashboard');
+  await page.getByRole('button', { name: en['server.add'] }).first().click();
+  await choose(page, 'Connection method', 'Install Agent');
+  await page.getByRole('dialog').getByRole('button', { name: 'OK', exact: true }).click();
+  const installation = page.getByRole('dialog', { name: 'Install and bind server', exact: true });
+  await expect.poll(() => !!held).toBe(true);
+  const canceled = page.waitForEvent('requestfailed', request => request.url().endsWith('/new-agent/agent/enroll'));
+  await installation.getByRole('button', { name: 'Install later', exact: true }).click();
+  await canceled;
+  await expect(installation).toHaveCount(0);
+  expect(state.created).toHaveLength(1);
+  expect(state.revoked).toBe(0);
+  await expect(page.locator('.server-card').filter({ hasText: 'Agent pending' })).toBeVisible();
+});
 
 test('changing server platform clears hidden SSH secrets and paused private servers can be enabled explicitly', async ({ page }) => {
   const { state, errors } = await agentFixture(page);

@@ -16,6 +16,7 @@ import ServerTable from '../components/ServerTable';
 import FleetResources from '../components/FleetResources';
 import BatchActionBar from '../components/BatchActionBar';
 import ServerForm from '../components/ServerForm';
+import AgentPanel from '../components/AgentPanel';
 import { buildServerPayload, isExpiryConflict, serverFormValues } from '../utils/serverForm';
 import type { ServerFormValues } from '../utils/serverForm';
 import { serversApi, Server, Tag } from '../api/servers';
@@ -73,6 +74,7 @@ async function lookupIP(ip: string): Promise<string> {
 export default function Dashboard() {
   const navigate = useNavigate();
   const { t, i18n } = useTranslation();
+  const { t: op } = useTranslation('operations');
   // modal (not the static Modal.*) so confirm dialogs inherit the dark theme.
   const { message, modal, notification } = App.useApp();
   const [servers, setServers] = useState<Server[]>([]);
@@ -83,6 +85,7 @@ export default function Dashboard() {
   const [modalOpen, setModalOpen] = useState(false);
   const [savingServer, setSavingServer] = useState(false);
   const [editingServer, setEditingServer] = useState<Server | null>(null);
+  const [pendingAgent, setPendingAgent] = useState<Server | null>(null);
   const editingExpiryRef = useRef<string | null>(null);
   const [form] = Form.useForm<ServerFormValues>();
   const [tagValues, setTagValues] = useState<string[]>([]);
@@ -230,22 +233,35 @@ export default function Dashboard() {
   const handleSubmit = async (values: ServerFormValues) => {
     setSavingServer(true);
     try {
-      const payload = buildServerPayload(values, { credentialId: selectedCredential, notes: editingServer?.notes || '' });
+      const payload = buildServerPayload(values, { editing: !!editingServer, credentialId: selectedCredential, notes: editingServer?.notes || '' });
       if (editingServer) {
         await serversApi.update(editingServer.id, { ...payload, expected_expires_at: editingExpiryRef.current });
         await serversApi.setTags(editingServer.id, tagValues);
         message.success(t('server.updated'));
       } else {
         const res = await serversApi.create(payload);
+        if (payload.connection_mode === 'agent') {
+          if (!activeRef.current) return;
+          setModalOpen(false);
+          setPendingAgent(res.data);
+          form.resetFields();
+          setTagValues([]);
+          setSelectedCredential(undefined);
+          setEditingServer(null);
+          message.success(t('server.added'));
+          // Once creation succeeds, failures in optional tags or enrollment
+          // must not send the user back through server creation a second time.
+          if (tagValues.length > 0) {
+            try { await serversApi.setTags(res.data.id, tagValues); }
+            catch (failure) { if (activeRef.current) message.error(apiError(failure, t('server.operationFailed'))); }
+          }
+          if (activeRef.current) void loadServers();
+          return;
+        }
         if (tagValues.length > 0) {
           await serversApi.setTags(res.data.id, tagValues);
         }
         message.success(t('server.added'));
-        if (payload.connection_mode === 'agent') {
-          setModalOpen(false);
-          navigate(`/servers/${res.data.id}`);
-          return;
-        }
       }
       setModalOpen(false);
       form.resetFields();
@@ -684,6 +700,20 @@ export default function Dashboard() {
           disabled={savingServer}
           onFinish={handleSubmit}
         />
+      </Modal>
+      <Modal
+        title={op('agentSetupTitle')}
+        open={pendingAgent !== null}
+        onCancel={() => setPendingAgent(null)}
+        destroyOnHidden
+        width={760}
+        footer={<Space wrap>
+          <Button onClick={() => setPendingAgent(null)}>{op('agentSetupClose')}</Button>
+          <Button type="primary" onClick={() => { if (pendingAgent) navigate(`/servers/${pendingAgent.id}`); }}>{op('agentDetails')}</Button>
+        </Space>}
+      >
+        <Typography.Paragraph>{op('agentSetupHint')}</Typography.Paragraph>
+        {pendingAgent && <AgentPanel key={pendingAgent.id} serverId={pendingAgent.id} serverType={pendingAgent.server_type || 'linux'} autoEnroll onBound={() => { void loadServers(false); }} />}
       </Modal>
     </div>
   );

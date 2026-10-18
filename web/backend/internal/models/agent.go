@@ -7,7 +7,9 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 	"server-monitor/internal/agenttransport"
@@ -58,6 +60,10 @@ func RegisterAgent(ctx context.Context, db *sql.DB, ticket string, hello agenttr
 	if _, err := hello.Validate(); err != nil {
 		return uuid.Nil, "", err
 	}
+	displayName, err := agentHostnameDisplayName(hello.Hostname)
+	if err != nil {
+		return uuid.Nil, "", err
+	}
 	token, err := randomAgentSecret()
 	if err != nil {
 		return uuid.Nil, "", err
@@ -92,11 +98,25 @@ func RegisterAgent(ctx context.Context, db *sql.DB, ticket string, hello agenttr
 	// The HTTP peer can be a reverse proxy or NAT gateway. It is not evidence
 	// of this machine's ICMP target address; preserve the operator's host value.
 	_, err = tx.ExecContext(ctx, `UPDATE servers SET server_type=$1,ssh_username=$2,
- ssh_password='',ssh_key='',ssh_host_key='',credential_id=NULL,last_error_kind='',last_error='',last_error_at=NULL WHERE id=$3`, hello.OS, hello.Username, serverID)
+ name=CASE WHEN agent_auto_name THEN $4 ELSE name END,agent_auto_name=FALSE,
+ ssh_password='',ssh_key='',ssh_host_key='',credential_id=NULL,last_error_kind='',last_error='',last_error_at=NULL WHERE id=$3`, hello.OS, hello.Username, serverID, displayName)
 	if err != nil {
 		return uuid.Nil, "", err
 	}
 	return serverID, token, tx.Commit()
+}
+
+func agentHostnameDisplayName(hostname string) (string, error) {
+	name := strings.TrimSpace(hostname)
+	if name == "" || strings.ContainsFunc(name, func(r rune) bool { return unicode.Is(unicode.C, r) }) {
+		return "", errors.New("invalid agent hostname")
+	}
+	// Keep the full hostname in server_agents; the display column is shorter.
+	characters := []rune(name)
+	if len(characters) > 128 {
+		name = string(characters[:128])
+	}
+	return name, nil
 }
 
 func AuthenticateAgent(ctx context.Context, db *sql.DB, token string) (uuid.UUID, string, error) {

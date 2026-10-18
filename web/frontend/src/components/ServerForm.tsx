@@ -45,14 +45,14 @@ export default function ServerForm({ form, editing, credentialId, onCredentialCh
       <Form.Item name="connection_mode" label={op('connectionMode')} initialValue="ssh">
         <Select disabled={editing} options={[{ value: 'ssh', label: op('sshMode') }, { value: 'agent', label: op('agentMode') }]} onChange={(mode) => {
           onCredentialChange(undefined);
-          form.setFieldsValue({ ssh_username: undefined, ssh_password: undefined, ssh_key: undefined, ssh_host_key: undefined, port: mode === 'ssh' && !windows ? 22 : undefined });
+          form.setFieldsValue({ ...(mode === 'agent' ? { host: undefined } : {}), ssh_username: undefined, ssh_password: undefined, ssh_key: undefined, ssh_host_key: undefined, port: mode === 'ssh' && !windows ? 22 : undefined });
         }} />
       </Form.Item>
       {agent && <Alert type="info" showIcon title={op('agentHint')} style={{ marginBottom: 16 }} />}
       <Row gutter={12}>
         <Col xs={24} sm={14}>
-          <Form.Item name="name" label={t('server.serverName')} rules={[{ required: true }]}>
-            <Input placeholder={t('server.serverNamePlaceholder')} maxLength={128} />
+          <Form.Item name="name" label={t('server.serverName')} rules={[{ required: !agent || editing }]} extra={agent && !editing ? op('agentNameHint') : undefined}>
+            <Input placeholder={agent && !editing ? op('agentNamePlaceholder') : t('server.serverNamePlaceholder')} maxLength={128} />
           </Form.Item>
         </Col>
         <Col xs={24} sm={10}>
@@ -73,8 +73,8 @@ export default function ServerForm({ form, editing, credentialId, onCredentialCh
           </Form.Item>
         </Col>
       </Row>
-      <Row gutter={12}>
-        <Col xs={24} sm={windows ? 24 : 16}>
+      {(!agent || editing) && <Row gutter={12}>
+        <Col xs={24} sm={windows || agent ? 24 : 16}>
           <Form.Item name="host" label={t('server.host')} rules={[{ required: !agent }]} extra={agent ? op('agentHostHint') : undefined}>
             <Input placeholder={t('server.hostPlaceholder')} />
           </Form.Item>
@@ -86,7 +86,7 @@ export default function ServerForm({ form, editing, credentialId, onCredentialCh
             </Form.Item>
           </Col>
         )}
-      </Row>
+      </Row>}
 
       {!agent && <><div className="form-section-title">{t('server.sectionAuth')}</div>
       <Form.Item label={t('server.credential')}>

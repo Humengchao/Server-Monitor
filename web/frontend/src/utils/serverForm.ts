@@ -63,7 +63,7 @@ export function serverFormValues(server: Server): ServerFormValues {
     monitoring_enabled: server.monitoring_enabled ?? true,
     auto_renew_enabled: server.auto_renew_enabled ?? true,
     name: server.name,
-    host: server.host,
+    host: server.connection_mode === 'agent' && server.host === 'agent' ? '' : server.host,
     port: server.port,
     ssh_username: server.ssh_username,
     ssh_host_key: server.ssh_host_key || '',
@@ -83,15 +83,17 @@ export function serverFormValues(server: Server): ServerFormValues {
  * values of unmounted fields, so a password typed for another server would
  * otherwise ride along and silently overwrite this one's credentials.
  */
-export function buildServerPayload(values: ServerFormValues, options: { credentialId?: string; notes?: string } = {}): ServerPayload {
+export function buildServerPayload(values: ServerFormValues, options: { credentialId?: string; notes?: string; editing?: boolean } = {}): ServerPayload {
   const serverType = values.server_type || 'linux';
   const windows = serverType === 'windows';
   const shared = !!options.credentialId;
   const agent = values.connection_mode === 'agent';
   return {
     ...values,
-    name: trim(values.name) as string,
-    host: agent && !values.host?.trim() ? 'agent' : trim(values.host) as string,
+    name: agent ? values.name?.trim() || '' : trim(values.name) as string,
+    // An Agent record is bound by its enrollment ticket, not a typed address.
+    // Only later edits may configure an explicit network-probe target.
+    host: agent ? options.editing ? values.host?.trim() || '' : '' : trim(values.host) as string,
     ssh_username: agent ? undefined : trim(values.ssh_username) as string | undefined,
     ssh_password: agent || shared ? undefined : values.ssh_password,
     ssh_key: agent || windows || shared ? undefined : values.ssh_key,

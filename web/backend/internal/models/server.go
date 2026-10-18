@@ -15,6 +15,8 @@ import (
 )
 
 type Server struct {
+	// Creation-only metadata; enrollment and edits manage the persisted flag.
+	AgentAutoName     bool       `json:"-"`
 	ConnectionMode    string     `json:"connection_mode"`
 	IsPublic          bool       `json:"is_public"`
 	MonitoringEnabled bool       `json:"monitoring_enabled"`
@@ -74,6 +76,9 @@ type LatestMetrics struct {
 
 func CreateServer(db *DB, s *Server) error {
 	s.ID = uuid.New()
+	if s.ConnectionMode == "agent" && s.AgentAutoName {
+		s.Name = "Agent " + s.ID.String()[:8]
+	}
 	if s.ConnectionMode == "" {
 		s.ConnectionMode = "ssh"
 		s.IsPublic = true
@@ -91,11 +96,11 @@ func CreateServer(db *DB, s *Server) error {
 	return db.Raw.QueryRow(
 		`INSERT INTO servers (id, user_id, name, host, port, ssh_username, ssh_password, ssh_key, ssh_host_key, credential_id,
 		 expires_at, notes, server_type, billing_price, billing_currency, billing_cycle, traffic_limit_bytes, public_location,
-		 connection_mode,is_public,monitoring_enabled,auto_renew_enabled)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) RETURNING created_at`,
+		 connection_mode,is_public,monitoring_enabled,auto_renew_enabled,agent_auto_name)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23) RETURNING created_at`,
 		s.ID, s.UserID, s.Name, s.Host, s.Port, s.SSHUsername, encPassword, encKey, s.SSHHostKey, s.CredentialID,
 		s.ExpiresAt, s.Notes, s.ServerType, s.BillingPrice, s.BillingCurrency, s.BillingCycle, s.TrafficLimit, s.PublicLocation,
-		s.ConnectionMode, s.IsPublic, s.MonitoringEnabled, s.AutoRenewEnabled,
+		s.ConnectionMode, s.IsPublic, s.MonitoringEnabled, s.AutoRenewEnabled, s.AgentAutoName && s.ConnectionMode == "agent",
 	).Scan(&s.CreatedAt)
 }
 
@@ -305,7 +310,8 @@ func UpdateServerWithExpiryExpectation(ctx context.Context, db *DB, s *Server, e
 	}
 
 	result, err := tx.ExecContext(ctx,
-		`UPDATE servers SET name=$1, host=$2, port=$3, ssh_username=$4, ssh_host_key=$5, credential_id=$6,
+		`UPDATE servers SET agent_auto_name=CASE WHEN name IS DISTINCT FROM $1 THEN FALSE ELSE agent_auto_name END,
+		 name=$1, host=$2, port=$3, ssh_username=$4, ssh_host_key=$5, credential_id=$6,
 		 expires_at=$7, notes=$8, server_type=$9, billing_price=$10, billing_currency=$11, billing_cycle=$12, traffic_limit_bytes=$13, public_location=$14
 		 WHERE id=$15 AND user_id=$16`,
 		s.Name, s.Host, s.Port, s.SSHUsername, s.SSHHostKey, s.CredentialID, s.ExpiresAt, s.Notes, s.ServerType,

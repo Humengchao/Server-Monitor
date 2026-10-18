@@ -226,7 +226,7 @@ export default function ServerDetail() {
     if (!server) return;
     setSavingServer(true);
     try {
-      const payload = buildServerPayload(values, { credentialId: selectedCredential, notes: server.notes || '' });
+      const payload = buildServerPayload(values, { editing: true, credentialId: selectedCredential, notes: server.notes || '' });
       await serversApi.update(server.id, { ...payload, expected_expires_at: editingExpiryRef.current });
       await serversApi.setTags(server.id, tagValues);
       message.success(t('server.updated'));

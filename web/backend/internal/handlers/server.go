@@ -85,7 +85,7 @@ type CreateServerRequest struct {
 	IsPublic          *bool      `json:"is_public"`
 	MonitoringEnabled *bool      `json:"monitoring_enabled"`
 	AutoRenewEnabled  *bool      `json:"auto_renew_enabled"`
-	Name              string     `json:"name" binding:"required"`
+	Name              string     `json:"name"`
 	Host              string     `json:"host"`
 	Port              int        `json:"port"`
 	SSHUsername       string     `json:"ssh_username"`
@@ -134,6 +134,9 @@ func normalizeServerConnection(name, host, username string, port int) (string, s
 
 	if name == "" {
 		return "", "", "", 0, fmt.Errorf("server name is required")
+	}
+	if len([]rune(name)) > 128 {
+		return "", "", "", 0, fmt.Errorf("server name must be at most 128 characters")
 	}
 	if host == "" {
 		return "", "", "", 0, fmt.Errorf("host is required")
@@ -257,15 +260,21 @@ func (h *ServerHandler) Create(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid connection mode"})
 		return
 	}
+	autoName := req.ConnectionMode == "agent" && strings.TrimSpace(req.Name) == ""
+	if autoName {
+		// CreateServer assigns the placeholder's short ID after allocating its
+		// UUID. The ticket, never this display label, binds the installed host.
+		req.Name = "Agent"
+	}
 	if req.ConnectionMode == "agent" {
 		req.SSHPassword = ""
 		req.SSHKey = ""
 		req.SSHHostKey = ""
 		req.CredentialID = nil
-		if req.Host == "" {
+		if strings.TrimSpace(req.Host) == "" {
 			req.Host = "agent"
 		}
-		if req.SSHUsername == "" {
+		if strings.TrimSpace(req.SSHUsername) == "" {
 			req.SSHUsername = "agent"
 		}
 	}
@@ -307,6 +316,7 @@ func (h *ServerHandler) Create(c *gin.Context) {
 		return
 	}
 	s := &models.Server{
+		AgentAutoName:  autoName,
 		ConnectionMode: req.ConnectionMode, IsPublic: boolDefault(req.IsPublic, true), MonitoringEnabled: boolDefault(req.MonitoringEnabled, true), AutoRenewEnabled: boolDefault(req.AutoRenewEnabled, true),
 		UserID:          userID,
 		Name:            req.Name,

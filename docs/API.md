@@ -175,7 +175,7 @@ GET /api/servers
 POST /api/servers
 ```
 
-**请求体**:
+**SSH 模式请求体**（默认 `connection_mode: "ssh"`）:
 
 ```json
 {
@@ -187,6 +187,9 @@ POST /api/servers
   "ssh_key": "string (私钥内容, 与ssh_password二选一)"
 }
 ```
+
+Agent 模式可直接发送 `{"connection_mode":"agent"}` 创建待接入记录，无需填写以上名称、地址或 SSH 字段。
+创建后使用返回的服务器 `id` 生成安装命令，首次登记自动补齐留空的名称；详见本文“Agent 登记与连接”及 [Agent 指南](agent.md)。
 
 **响应**: `201` 返回创建的 Server 对象
 
@@ -1202,7 +1205,18 @@ Token 本身是无状态的 JWT（HS256，有效期 72 小时），但 `users.to
 | `monitoring_enabled` | `true` | 是否参与自动指标采集、告警及网络检查 |
 | `auto_renew_enabled` | `true` | 是否允许自动顺延该服务器的到期日期 |
 
-`agent` 模式无需 SSH 认证字段，`host` 可省略，OS 在登记时由 Agent 上报；登记后的系统类型不能手动改写。
+`agent` 模式创建记录无需 IP、域名或 SSH 认证字段；`name`、`host` 均可省略或传空字符串。最小请求为：
+
+```json
+{ "connection_mode": "agent" }
+```
+
+后端返回新建服务器记录及其 `id`。名称为空时分配待接入名称，并在首次 Agent 登记后替换为机器上报的主机名；自定义名称保留。
+前端创建成功后立即弹出安装界面，再对该 `id` 调用 `POST /api/servers/:id/agent/enroll` 获取 Linux Bash / Windows PowerShell 命令。
+登记票据决定绑定哪条记录，不依赖地址匹配；命令生成失败时应重试生成命令，不重复创建服务器。
+
+OS 在登记时由 Agent 上报；登记后的系统类型不能手动改写。没有显式地址的记录使用内部 `agent` 占位，不从 HTTP 对端 IP 推断目标地址。
+仅当需要把主机作为 ICMP 网络检查目标时，才在后续更新中填写探测点可达的 `host`；没有该地址不影响 Agent 的采集、终端和文件操作。
 更新时省略三个布尔字段会保留已保存值。升级数据库保留既有服务器的公开状态，新建服务器默认公开，可显式传入 `is_public: false` 关闭公开显示。
 公开丢包字段 `packet_loss_percent` 来自近期真实的面板来源 ICMP 检查，没有有效测量时为 `null`。
 

@@ -2,6 +2,9 @@ ALTER TABLE servers ADD COLUMN IF NOT EXISTS connection_mode TEXT NOT NULL DEFAU
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT TRUE;
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS monitoring_enabled BOOLEAN NOT NULL DEFAULT TRUE;
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS auto_renew_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+-- Only nameless Agent placeholders opt in. Existing names are user data and
+-- must never be inferred from a label or overwritten during enrollment.
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS agent_auto_name BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE TABLE IF NOT EXISTS server_agents (
     server_id UUID PRIMARY KEY REFERENCES servers(id) ON DELETE CASCADE,
