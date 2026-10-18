@@ -47,8 +47,17 @@ async function agentFixture(page: Page) {
   return { state, errors };
 }
 async function choose(page: Page, label: string, option: string) {
-  await page.getByLabel(label, { exact: true }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: option }).click();
+  const select = page.getByLabel(label, { exact: true });
+  await select.click();
+  const controls = await select.getAttribute('aria-controls');
+  const popup = page.locator('.ant-select-dropdown').filter({ has: page.locator(`[id="${controls}"]`) });
+  // Both choices exercised here are the second option (Agent and Windows).
+  // Use the real combobox keyboard path instead of a portaled popup's coordinates.
+  await expect(popup.locator('.ant-select-item-option-active')).toBeVisible();
+  await select.press('ArrowDown');
+  await expect(popup.locator('.ant-select-item-option-active')).toContainText(option);
+  await select.press('Enter');
+  await expect(select).toHaveAttribute('aria-expanded', 'false');
 }
 
 for (const platform of ['linux', 'windows'] as const) {
@@ -107,6 +116,7 @@ test('Agent reenrollment, expiry, server errors and revocation are visible and p
   await expect(page.locator('.agent-panel')).toContainText('Connected');
   await page.getByRole('button', { name: 'Generate new installation command', exact: true }).click();
   await expect(page.locator('.agent-panel pre')).toContainText('linux-1');
+  await expect(page.getByRole('button', { name: 'Generate new installation command', exact: true })).toBeEnabled();
   await page.clock.fastForward(901000);
   await expect(page.getByText('This installation command has expired. Generate a new command.', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Copy command', exact: true })).toBeDisabled();
@@ -161,9 +171,60 @@ test('backup export downloads opaque encrypted bytes and reads JSON errors from 
   expect(file.suggestedFilename()).toMatch(/\.smbak$/);
   expect(await readFile((await file.path())!)).toEqual(opaqueBackup);
   expect(state.exports[0]).toMatchObject({ password: 'backup-password-123', current_password: 'account-password', include_credentials: true });
+  await expect(page.getByRole('button', { name: 'Export encrypted backup', exact: true })).toBeEnabled();
   state.failExport = true;
   await page.getByRole('button', { name: 'Export encrypted backup', exact: true }).click();
   await expect(page.getByText('Account password rejected', { exact: true })).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test('backup and Agent actions keep their names through slow loading-icon transitions and become usable again', async ({ page }) => {
+  const { errors } = await backupFixture(page);
+  const session = await page.context().newCDPSession(page);
+  await session.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+  await page.addStyleTag({ content: '.ant-btn-loading-icon-motion-appear-active, .ant-btn-loading-icon-motion-enter-active, .ant-btn-loading-icon-motion-leave-active { transition-duration: 60s !important; }' });
+  let first: Route | undefined;
+  let calls = 0;
+  await page.route('**/api/backups/export', route => {
+    calls++;
+    if (calls === 1) { first = route; return; }
+    return route.fulfill({ status: 403, json: { error: 'Second export handled' } });
+  });
+  const exportButton = page.getByRole('button', { name: 'Export encrypted backup', exact: true });
+  await exportButton.click();
+  await expect.poll(() => !!first).toBe(true);
+  await expect(exportButton).toHaveAttribute('aria-busy', 'true');
+  await expect(exportButton).toBeDisabled();
+  await expect(exportButton).toHaveAccessibleName('Export encrypted backup');
+  const downloaded = page.waitForEvent('download');
+  await first!.fulfill({ contentType: 'application/octet-stream', body: opaqueBackup });
+  await downloaded;
+  await expect(exportButton).toHaveAttribute('aria-busy', 'false');
+  await expect(exportButton).toBeEnabled();
+  await exportButton.click();
+  await expect(page.getByText('Second export handled', { exact: true })).toBeVisible();
+  expect(calls).toBe(2);
+
+  const { state } = await agentFixture(page);
+  state.enrolled = true;
+  await page.goto('/servers/new-agent');
+  await page.addStyleTag({ content: '.ant-btn-loading-icon-motion-appear-active, .ant-btn-loading-icon-motion-enter-active, .ant-btn-loading-icon-motion-leave-active { transition-duration: 60s !important; }' });
+  let enrollment: Route | undefined;
+  await page.route('**/api/servers/new-agent/agent/enroll', route => { enrollment = route; });
+  const generateButton = page.getByRole('button', { name: 'Generate new installation command', exact: true });
+  await generateButton.click();
+  await expect.poll(() => !!enrollment).toBe(true);
+  await expect(generateButton).toHaveAccessibleName('Generate new installation command');
+  await expect(generateButton).toHaveAttribute('aria-busy', 'true');
+  await expect(generateButton).toBeDisabled();
+  await enrollment!.fulfill({ headers: { Date: new Date(observedAt).toUTCString() }, json: { command: 'install fixture', expires_at: new Date(observedAt + 900000).toISOString() } });
+  await expect(generateButton).toHaveAttribute('aria-busy', 'false');
+  await expect(generateButton).toBeEnabled();
+  enrollment = undefined;
+  await generateButton.click();
+  await expect.poll(() => !!enrollment).toBe(true);
+  await enrollment!.fulfill({ status: 400, json: { error: 'Second enrollment handled' } });
+  await expect(page.locator('.agent-panel .ant-alert').filter({ hasText: 'Second enrollment handled' })).toBeVisible();
   expect(errors).toEqual([]);
 });
 

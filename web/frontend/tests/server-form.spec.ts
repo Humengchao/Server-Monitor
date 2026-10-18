@@ -70,8 +70,17 @@ test('adding a Windows host keeps the dialog buttons on screen and sends only Wi
   await dialog.getByLabel(en['server.serverName']).fill('  win-01  ');
   await dialog.getByLabel(en['server.host']).fill('198.51.100.7');
   await expect(dialog.getByLabel(en['server.sshPort'])).toHaveValue('22');
-  await dialog.getByLabel(en['server.type']).click();
-  await page.locator('.ant-select-item-option').filter({ hasText: 'Windows' }).click();
+  const serverType = dialog.getByLabel(en['server.type']);
+  await serverType.click();
+  const controls = await serverType.getAttribute('aria-controls');
+  const popup = page.locator('.ant-select-dropdown').filter({ has: page.locator(`[id="${controls}"]`) });
+  // The popup is portaled outside the scrollable modal. Keyboard selection
+  // avoids clicking coordinates that change when scrollIntoView realigns it.
+  await expect(popup.locator('.ant-select-item-option-active')).toBeVisible();
+  await serverType.press('ArrowDown');
+  await expect(popup.locator('.ant-select-item-option-active')).toContainText('Windows');
+  await serverType.press('Enter');
+  await expect(serverType).toHaveAttribute('aria-expanded', 'false');
   await expect(dialog.getByLabel(en['server.sshPort'])).toHaveCount(0);
   await expect(dialog.getByLabel(en['server.sshKey'])).toHaveCount(0);
   await expect(dialog.getByLabel(en['server.sshHostKey'])).toHaveCount(0);

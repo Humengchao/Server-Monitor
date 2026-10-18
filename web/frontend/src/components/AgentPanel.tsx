@@ -79,11 +79,12 @@ export default function AgentPanel({ serverId, serverType }: { serverId: string;
       afterClose: () => { confirmation.current = null; }, onOk: () => mutate('revoke') });
   };
   const command = serverType === 'windows' ? currentEnrollment?.windows_command : currentEnrollment?.command;
+  const generateLabel = currentEnrollment || currentStatus?.enrolled ? t('regenerate') : t('generate');
   return <Card title={t('agentTitle')} className="agent-panel">
     <Space wrap><Tag color={currentStatus?.online ? 'green' : 'default'}>{!currentStatus ? t('checking') : currentStatus.online ? t('online') : currentStatus.enrolled ? t('offline') : t('notEnrolled')}</Tag>
       {currentStatus?.version && <Typography.Text>{t('agentVersion')}: {currentStatus.version}</Typography.Text>}
       {currentStatus?.username && <Typography.Text>{t('runUser')}: {currentStatus.username}</Typography.Text>}
-      <Button onClick={() => { void mutate('enroll'); }} loading={busy}>{currentEnrollment || currentStatus?.enrolled ? t('regenerate') : t('generate')}</Button>
+      <Button aria-label={generateLabel} aria-busy={busy} disabled={busy} onClick={() => { void mutate('enroll'); }} loading={busy}>{generateLabel}</Button>
       {(currentStatus?.enrolled || currentEnrollment) && <Button danger disabled={busy} onClick={revoke}>{t('revoke')}</Button>}
     </Space>
     {error && <Alert type="warning" title={error} />}

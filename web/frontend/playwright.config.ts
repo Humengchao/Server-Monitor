@@ -7,6 +7,6 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   timeout: 45000,
   use: { baseURL: remote || 'http://127.0.0.1:4173', browserName: 'chromium', trace: 'retain-on-failure', screenshot: 'only-on-failure' },
-  reporter: [['list']],
+  reporter: process.env.CI ? [['list'], ['github']] : [['list']],
   webServer: remote ? undefined : { command: 'npm run preview -- --host 127.0.0.1 --port 4173', url: 'http://127.0.0.1:4173', reuseExistingServer: false },
 });

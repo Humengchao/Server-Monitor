@@ -121,14 +121,14 @@ export default function Backups() {
     <Space orientation="vertical" style={{ width: '100%' }} size="large">
       <Card title={t('export')}><Typography.Paragraph>{t('exportHint')}</Typography.Paragraph>
         <Space wrap><Checkbox checked={include} disabled={busy} onChange={event => setInclude(event.target.checked)}>{t('includeCredentials')}</Checkbox>
-          <Button type="primary" onClick={() => { void exportBackup(); }} disabled={!valid || busy || reading} loading={busy}>{t('export')}</Button></Space>
+          <Button type="primary" aria-label={t('export')} aria-busy={busy} onClick={() => { void exportBackup(); }} disabled={!valid || busy || reading} loading={busy}>{t('export')}</Button></Space>
       </Card>
       <Card title={t('import')}><Alert type="info" title={t('restoreHint')} />
         <Form.Item label={t('file')} style={{ marginTop: 16 }}><input type="file" accept=".smbak" aria-label={t('chooseFile')} disabled={busy} onChange={event => {
           const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; void readFile(file);
         }} /></Form.Item>
         <Space wrap><Typography.Text>{filename}</Typography.Text>{reading && <Typography.Text>{t('readingFile')}</Typography.Text>}
-          <Button disabled={!valid || !data || busy || reading} onClick={() => { void previewBackup(); }}>{t('preview')}</Button></Space>
+          <Button aria-label={t('preview')} aria-busy={busy} disabled={!valid || !data || busy || reading} onClick={() => { void previewBackup(); }}>{t('preview')}</Button></Space>
         {preview && <div style={{ marginTop: 16 }}>
           <Descriptions column={{ xs: 1, sm: 2, md: 3 }} bordered items={[
             ['servers', 'serverCount'], ['credentials', 'credentialCount'], ['tags', 'tagCount'], ['rules', 'ruleCount'],
@@ -137,7 +137,7 @@ export default function Backups() {
           <Typography.Paragraph style={{ marginTop: 8 }}>{preview.preview.server_names.join(' · ')}</Typography.Paragraph>
           {!preview.preview.includes_credentials && <Alert type="warning" title={t('noSecrets')} />}
           {preview.preview.already_imported && <Alert type="warning" title={t('alreadyImported')} />}
-          <Button type="primary" disabled={busy || reading || !valid || preview.preview.already_imported} onClick={restore} style={{ marginTop: 12 }}>{t('restore')}</Button>
+          <Button type="primary" aria-label={t('restore')} aria-busy={busy} disabled={busy || reading || !valid || preview.preview.already_imported} onClick={restore} style={{ marginTop: 12 }}>{t('restore')}</Button>
         </div>}
       </Card>
     </Space>
