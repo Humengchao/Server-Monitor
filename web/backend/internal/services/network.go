@@ -68,7 +68,7 @@ func ParseNetworkPing(output string) models.NetworkSample {
 		result.MinMS = &values[0]
 		result.AvgMS = &values[1]
 		result.MaxMS = &values[2]
-		if rtt[4] != "" && received>=2 {
+		if rtt[4] != "" && received >= 2 {
 			result.MdevMS = &values[3]
 		}
 	}
@@ -121,7 +121,9 @@ func parseNetworkWindows(output string) models.NetworkSample {
 	s.MinMS = &low
 	s.MaxMS = &high
 	s.AvgMS = &avg
-	if received>=2{s.MdevMS = &mdev}
+	if received >= 2 {
+		s.MdevMS = &mdev
+	}
 	return s
 }
 
@@ -238,7 +240,10 @@ func (m *NetworkMonitor) Run(ctx context.Context, user, id uuid.UUID) (models.Ne
 		return sample, nil
 	}
 	hostname := strings.Trim(target.Host, "[]")
-	if !validNetworkTarget(hostname) {
+	if target.ConnectionMode == "agent" && (hostname == "" || hostname == "agent") {
+		sample.Status = "error"
+		sample.ErrorCode = "target_address_required"
+	} else if !validNetworkTarget(hostname) {
 		sample.Status = "error"
 		sample.ErrorCode = "invalid_target"
 	} else {

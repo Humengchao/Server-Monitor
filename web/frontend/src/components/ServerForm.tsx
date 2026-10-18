@@ -70,7 +70,7 @@ export default function ServerForm({ form, editing, credentialId, onCredentialCh
       </Row>
       <Row gutter={12}>
         <Col xs={24} sm={windows ? 24 : 16}>
-          <Form.Item name="host" label={t('server.host')} rules={[{ required: !agent }]}>
+          <Form.Item name="host" label={t('server.host')} rules={[{ required: !agent }]} extra={agent ? op('agentHostHint') : undefined}>
             <Input placeholder={t('server.hostPlaceholder')} />
           </Form.Item>
         </Col>

@@ -51,7 +51,7 @@ func CreateAgentTicket(ctx context.Context, db *sql.DB, serverID, userID uuid.UU
 	return ticket, expires, tx.Commit()
 }
 
-func RegisterAgent(ctx context.Context, db *sql.DB, ticket string, hello agenttransport.Hello, address string) (uuid.UUID, string, error) {
+func RegisterAgent(ctx context.Context, db *sql.DB, ticket string, hello agenttransport.Hello) (uuid.UUID, string, error) {
 	if len(ticket) != 64 {
 		return uuid.Nil, "", ErrAgentTicket
 	}
@@ -89,8 +89,10 @@ func RegisterAgent(ctx context.Context, db *sql.DB, ticket string, hello agenttr
 	if err != nil {
 		return uuid.Nil, "", err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE servers SET server_type=$1,ssh_username=$2,host=CASE WHEN host='' OR host='agent' THEN $3 ELSE host END,
- ssh_password='',ssh_key='',ssh_host_key='',credential_id=NULL,last_error_kind='',last_error='',last_error_at=NULL WHERE id=$4`, hello.OS, hello.Username, address, serverID)
+	// The HTTP peer can be a reverse proxy or NAT gateway. It is not evidence
+	// of this machine's ICMP target address; preserve the operator's host value.
+	_, err = tx.ExecContext(ctx, `UPDATE servers SET server_type=$1,ssh_username=$2,
+ ssh_password='',ssh_key='',ssh_host_key='',credential_id=NULL,last_error_kind='',last_error='',last_error_at=NULL WHERE id=$3`, hello.OS, hello.Username, serverID)
 	if err != nil {
 		return uuid.Nil, "", err
 	}

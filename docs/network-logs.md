@@ -5,6 +5,11 @@ of samples. The source is either the panel host or one of the current user's
 assigned servers. The target must also be an assigned server owned by that user;
 the API never accepts an arbitrary destination address. SSH and Agent sources use
 the same connection cache. Pausing monitoring on either endpoint pauses probes.
+Agent enrollment does not infer a target IP from the HTTP connection: that peer
+may be a reverse proxy or NAT gateway. Before using an Agent host as an ICMP
+target, set its reachable IP or hostname in the server form. Otherwise the check
+reports `target_address_required` with unknown packet counts. This address is
+not required for the Agent to act as a probe source or for its management tunnel.
 
 `GET/POST /api/network/checks`, `PUT/DELETE /api/network/checks/:check_id`,
 `POST /api/network/checks/:check_id/run`, and

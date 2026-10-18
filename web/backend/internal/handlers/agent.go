@@ -84,7 +84,7 @@ func (h *AgentHandler) Register(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid enrollment"})
 		return
 	}
-	id, token, err := models.RegisterAgent(c.Request.Context(), c.MustGet("db").(*models.DB).Raw, request.Ticket, request.Hello, c.ClientIP())
+	id, token, err := models.RegisterAgent(c.Request.Context(), c.MustGet("db").(*models.DB).Raw, request.Ticket, request.Hello)
 	if err != nil {
 		c.JSON(403, gin.H{"error": "enrollment rejected; generate a new installation command"})
 		return

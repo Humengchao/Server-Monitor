@@ -100,6 +100,24 @@ func TestNetworkPingRealCountsAndUnknown(t *testing.T) {
 		})
 	}
 }
+
+func TestNetworkAgentWithoutTargetAddressDoesNotProbeProxyOrDNSPlaceholder(t *testing.T) {
+	db := testdb.Open(t)
+	user, target, _ := testdb.Seed(t, db)
+	if _, err := db.Exec(`UPDATE servers SET connection_mode='agent',host='agent' WHERE id=$1`, target); err != nil {
+		t.Fatal(err)
+	}
+	check := models.NetworkCheck{ID: uuid.New(), UserID: user, Name: "address required", SourceServerID: &target, TargetServerID: target, Packets: 5, Enabled: true, LossThreshold: 10}
+	if err := models.SaveNetworkCheck(context.Background(), db, &check, true); err != nil {
+		t.Fatal(err)
+	}
+	// A nil connection cache also proves no remote command is attempted.
+	monitor := NewNetworkMonitor(&models.DB{Raw: db}, nil)
+	sample, err := monitor.Run(context.Background(), user, check.ID)
+	if err != nil || sample.Status != "error" || sample.ErrorCode != "target_address_required" || sample.Sent != nil || sample.LossPercent != nil {
+		t.Fatalf("unconfigured address was measured: %+v %v", sample, err)
+	}
+}
 func floatPtr(value float64) *float64 { return &value }
 func TestNetworkWindowsDeviationAndSafeCommand(t *testing.T) {
 	sample := parseNetworkWindows(`{"sent":5,"values":[1,3,5]}`)

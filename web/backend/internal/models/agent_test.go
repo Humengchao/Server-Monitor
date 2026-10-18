@@ -46,7 +46,7 @@ func TestAgentEnrollmentOneUseRevocationAndOwnership(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			registered, token, err := RegisterAgent(ctx, db, ticket, hello, "192.0.2.2")
+			registered, token, err := RegisterAgent(ctx, db, ticket, hello)
 			if err == nil {
 				if registered != id {
 					t.Error("wrong server")
@@ -72,8 +72,8 @@ func TestAgentEnrollmentOneUseRevocationAndOwnership(t *testing.T) {
 	if err := db.QueryRow(`SELECT a.token_hash,s.host FROM server_agents a JOIN servers s ON s.id=a.server_id WHERE a.server_id=$1`, id).Scan(&stored, &host); err != nil {
 		t.Fatal(err)
 	}
-	if stored == token || host != "192.0.2.2" {
-		t.Fatal("raw token persisted or observed host missing")
+	if stored == token || host != "agent" {
+		t.Fatal("raw token persisted or an ICMP target address was invented")
 	}
 	if err := RevokeAgent(ctx, db, id, uuid.New()); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatal("foreign revocation allowed")
