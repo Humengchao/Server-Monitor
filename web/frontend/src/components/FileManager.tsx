@@ -3,7 +3,7 @@ import type { Text as EditorText } from '@codemirror/state';
 import type { DragEvent } from 'react';
 import { Alert, App, Breadcrumb, Button, Card, Empty, Input, Modal, Progress, Space, Spin, Table, Tag, Tooltip, Typography } from 'antd';
 import {
-  ArrowUpOutlined, CloudUploadOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, FileAddOutlined, FileOutlined,
+  ArrowUpOutlined, CloudUploadOutlined, CodeOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, FileAddOutlined, FileImageOutlined, FileOutlined, FilePdfOutlined, FileTextOutlined, FileZipOutlined,
   FolderAddOutlined, FolderOpenOutlined, FormOutlined, HistoryOutlined, HomeOutlined, InfoCircleOutlined, LinkOutlined,
   ReloadOutlined, SaveOutlined, UploadOutlined,
 } from '@ant-design/icons';
@@ -29,6 +29,19 @@ function auditActionCode(action: string): string {
 }
 
 const OUTCOME_COLOR: Record<string, string> = { success: 'success', failed: 'error', pending: 'processing' };
+
+function fileAppearance(entry: RemoteFileEntry) {
+  if (entry.is_symlink) return { kind: 'symlink', icon: <LinkOutlined /> };
+  if (entry.is_dir) return { kind: 'directory', icon: <FolderOpenOutlined /> };
+  const name = entry.name.toLowerCase();
+  if (/\.(zip|gz|bz2|xz|tar|tgz|7z|rar|zst)$/.test(name)) return { kind: 'archive', icon: <FileZipOutlined /> };
+  if (/\.(png|jpe?g|gif|svg|webp|ico|avif|bmp)$/.test(name)) return { kind: 'image', icon: <FileImageOutlined /> };
+  if (name.endsWith('.pdf')) return { kind: 'pdf', icon: <FilePdfOutlined /> };
+  if (/\.(conf|config|json|ya?ml|toml|ini|env|xml)$/.test(name) || name.startsWith('.env')) return { kind: 'config', icon: <CodeOutlined /> };
+  if (/\.(txt|md|log|csv)$/.test(name)) return { kind: 'text', icon: <FileTextOutlined /> };
+  if (/\.(sh|bash|ps1|py|js|jsx|ts|tsx|go|rs|java|c|cpp|h|css|html|sql)$/.test(name)) return { kind: 'code', icon: <CodeOutlined /> };
+  return { kind: 'file', icon: <FileOutlined /> };
+}
 
 export default function FileManager({ serverId, containerId, onLockedChange }: Props) {
   const { t, i18n } = useTranslation();
@@ -276,22 +289,27 @@ export default function FileManager({ serverId, containerId, onLockedChange }: P
     {
       title: t('common.name'),
       key: 'name',
-      width: 300,
+      width: 320,
       // Directories stay together when sorting by name, as in any file browser.
       sorter: (first, second) => Number(second.is_dir) - Number(first.is_dir) || first.name.localeCompare(second.name),
-      render: (_, entry) => (
-        <Button type="link" aria-label={entry.name} className="file-name" disabled={locked || (!entry.is_dir && !entry.is_file)} onClick={() => { void openFile(entry); }} icon={entry.is_dir ? <FolderOpenOutlined /> : <FileOutlined />}>
-          <span>{entry.name}</span>{entry.is_symlink && <LinkOutlined />}
-        </Button>
-      ),
+      render: (_, entry) => {
+        const appearance = fileAppearance(entry);
+        return <Button type="link" aria-label={entry.name} className="file-name file-entry" disabled={locked || (!entry.is_dir && !entry.is_file)} onClick={() => { void openFile(entry); }}>
+          <span className={`file-entry-icon is-${appearance.kind}`} aria-hidden="true">{appearance.icon}</span>
+          <span className="file-entry-copy">
+            <span>{entry.name}</span>
+            <span className="file-entry-kind">{t('files.kind.' + appearance.kind)}</span>
+          </span>
+        </Button>;
+      },
     },
     { title: t('files.size'), key: 'size', width: 110, align: 'right', className: 'file-size', render: (_, entry) => entry.is_dir ? '—' : formatBytes(entry.size), sorter: (first, second) => first.size - second.size },
-    { title: t('files.modified'), dataIndex: 'modified_at', width: 190, sorter: (first, second) => Date.parse(first.modified_at) - Date.parse(second.modified_at), render: (value: string) => formatDate(value, i18n.language, { hour: '2-digit', minute: '2-digit', second: '2-digit' }) },
-    { title: t('files.permissions'), dataIndex: 'mode', width: 120, render: (value: string) => <Text code>{value}</Text> },
+    { title: t('files.modified'), dataIndex: 'modified_at', width: 190, className: 'file-modified', sorter: (first, second) => Date.parse(first.modified_at) - Date.parse(second.modified_at), render: (value: string) => formatDate(value, i18n.language, { hour: '2-digit', minute: '2-digit', second: '2-digit' }) },
+    { title: t('files.permissions'), dataIndex: 'mode', width: 130, render: (value: string) => <Text code className="file-permissions">{value}</Text> },
     {
       title: t('common.actions'),
       key: 'actions',
-      width: 150,
+      width: 160,
       className: 'file-actions',
       // Icon buttons with names: four labelled buttons on every row read as a
       // wall of controls, and the red Delete on each line shouted the loudest.
@@ -321,20 +339,28 @@ export default function FileManager({ serverId, containerId, onLockedChange }: P
 
   return <Card className="panel-card file-manager">
     {containerId && <Alert type="warning" showIcon title={t('files.containerHint')} />}
-    <div className="file-toolbar">
-      <Space.Compact>
-        <Tooltip title={t('files.home')}><Button icon={<HomeOutlined />} aria-label={t('files.home')} disabled={locked} onClick={() => { void loadDirectory(''); }} /></Tooltip>
-        <Tooltip title={t('files.parent')}><Button icon={<ArrowUpOutlined />} aria-label={t('files.parent')} disabled={locked || !listing || listing.parent === listing.path} onClick={() => { if (listing) void loadDirectory(listing.parent); }} /></Tooltip>
-      </Space.Compact>
-      <Input.Search value={directory} onChange={(event) => setDirectory(event.target.value)} onSearch={(value) => { void loadDirectory(value); }} disabled={locked} placeholder={t('files.pathPlaceholder')} enterButton={t('files.go')} aria-label={t('files.pathPlaceholder')} />
+    <div className="file-browser-heading">
+      <div className="file-browser-title">
+        <span className="file-browser-icon" aria-hidden="true"><FolderOpenOutlined /></span>
+        <div><Text className="file-section-label">{t('files.browser')}</Text><Typography.Title level={4}>{listing ? parts[parts.length - 1] || '/' : t('files.home')}</Typography.Title></div>
+      </div>
       <div className="file-toolbar-actions">
-        <Button icon={<FileAddOutlined />} disabled={locked || !listing} onClick={() => setChange({ action: 'create', kind: 'file', name: '' })}>{t('files.newFile')}</Button>
-        <Button icon={<FolderAddOutlined />} disabled={locked || !listing} onClick={() => setChange({ action: 'create', kind: 'directory', name: '' })}>{t('files.newDirectory')}</Button>
-        <Button type="primary" icon={<UploadOutlined />} disabled={locked || loading || !listing} onClick={() => uploadInput.current?.click()}>{t('files.upload')}</Button>
-        <Tooltip title={t('files.history')}><Button icon={<HistoryOutlined />} aria-label={t('files.history')} disabled={locked} onClick={() => { void loadHistory(); }} /></Tooltip>
-        <Tooltip title={t('common.refresh')}><Button icon={<ReloadOutlined />} aria-label={t('common.refresh')} loading={loading} disabled={locked} onClick={() => { void loadDirectory(listing?.path || directory); }} /></Tooltip>
+        <div className="file-create-actions">
+          <Button icon={<FileAddOutlined />} aria-label={t('files.newFile')} disabled={locked || !listing} onClick={() => setChange({ action: 'create', kind: 'file', name: '' })}>{t('files.newFile')}</Button>
+          <Button icon={<FolderAddOutlined />} aria-label={t('files.newDirectory')} disabled={locked || !listing} onClick={() => setChange({ action: 'create', kind: 'directory', name: '' })}>{t('files.newDirectory')}</Button>
+        </div>
+        <Tooltip title={t('files.history')}><Button className="file-history-button" icon={<HistoryOutlined />} aria-label={t('files.history')} disabled={locked} onClick={() => { void loadHistory(); }} /></Tooltip>
+        <Button type="primary" className="file-upload-button" icon={<UploadOutlined />} aria-label={t('files.upload')} disabled={locked || loading || !listing} onClick={() => uploadInput.current?.click()}>{t('files.upload')}</Button>
         <input ref={uploadInput} type="file" multiple hidden onChange={(event) => { const files = Array.from(event.target.files || []); event.target.value = ''; void upload(files); }} />
       </div>
+    </div>
+    <div className="file-toolbar">
+      <Space.Compact className="file-navigation">
+        <Tooltip title={t('files.home')}><Button icon={<HomeOutlined />} aria-label={t('files.home')} disabled={locked} onClick={() => { void loadDirectory(''); }} /></Tooltip>
+        <Tooltip title={t('files.parent')}><Button icon={<ArrowUpOutlined />} aria-label={t('files.parent')} disabled={locked || !listing || listing.parent === listing.path} onClick={() => { if (listing) void loadDirectory(listing.parent); }} /></Tooltip>
+        <Tooltip title={t('common.refresh')}><Button icon={<ReloadOutlined />} aria-label={t('common.refresh')} loading={loading} disabled={locked} onClick={() => { void loadDirectory(listing?.path || directory); }} /></Tooltip>
+      </Space.Compact>
+      <Input.Search className="file-address" prefix={<FolderOpenOutlined aria-hidden="true" />} value={directory} onChange={(event) => setDirectory(event.target.value)} onSearch={(value) => { void loadDirectory(value); }} disabled={locked} placeholder={t('files.pathPlaceholder')} enterButton={t('files.go')} aria-label={t('files.pathPlaceholder')} />
     </div>
     {busy && <div className="file-transfer"><Progress percent={progress} status="active" showInfo={phase === 'uploading'} /><Text type="secondary">{t('files.phase.' + phase)}</Text></div>}
     {error && <Alert type="error" showIcon title={t('files.error.' + error, { defaultValue: t('files.error.remote_failed') })} />}
@@ -347,7 +373,7 @@ export default function FileManager({ serverId, containerId, onLockedChange }: P
     </div>}
     {listing?.truncated && <Alert type="warning" showIcon title={t('files.truncated')} />}
     <div className={`file-dropzone${dragging ? ' is-dragging' : ''}`} onDragEnter={onDragEnter} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
-      <Table rowKey="path" columns={columns} dataSource={visibleEntries} loading={loading} size="small" scroll={{ x: 880 }} pagination={false} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={error ? t('files.loadFailed') : t('files.empty')} /> }} />
+      <Table className="file-table" rowKey="path" columns={columns} dataSource={visibleEntries} loading={loading} size="small" scroll={{ x: 910 }} pagination={false} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={error ? t('files.loadFailed') : t('files.empty')} /> }} />
       {dragging && <div className="file-drop-overlay" aria-hidden="true"><CloudUploadOutlined /><span>{t('files.dropHint')}</span></div>}
     </div>
     <div className="file-footer">
@@ -364,11 +390,11 @@ export default function FileManager({ serverId, containerId, onLockedChange }: P
         <Button disabled={locked || loading || !listing?.next_cursor} onClick={() => { if (listing) void loadDirectory(listing.path, listing.next_cursor, [...previousCursors, cursor]); }}>{t('files.nextPage')}</Button>
       </Space>
     </div>
-    <Modal open={!!change} title={change?.action === 'rename' ? t('files.rename') : change?.kind === 'directory' ? t('files.newDirectory') : t('files.newFile')} confirmLoading={busy} onOk={() => { void applyChange(); }} onCancel={() => { if (!busy) setChange(null); }}>
+    <Modal className="file-change-modal" open={!!change} title={change?.action === 'rename' ? t('files.rename') : change?.kind === 'directory' ? t('files.newDirectory') : t('files.newFile')} confirmLoading={busy} onOk={() => { void applyChange(); }} onCancel={() => { if (!busy) setChange(null); }}>
       <Input aria-label={t('common.name')} value={change?.name || ''} disabled={busy} onChange={event => setChange(current => current ? { ...current, name: event.target.value } : current)} onPressEnter={() => { void applyChange(); }} />
     </Modal>
-    <Modal open={history !== null} title={t('files.history')} width="min(1100px,95vw)" onCancel={() => { if (!busy) setHistory(null); }} footer={null}>
-      <Text type="secondary">{t('files.historyHint')}</Text>
+    <Modal className="file-history-modal" open={history !== null} title={<Space><HistoryOutlined /><span>{t('files.history')}</span></Space>} width="min(1100px,95vw)" onCancel={() => { if (!busy) setHistory(null); }} footer={null}>
+      <Typography.Paragraph type="secondary">{t('files.historyHint')}</Typography.Paragraph>
       <Table rowKey="id" className="file-history" dataSource={history || []} pagination={{ pageSize: 10 }} scroll={{ x: 800 }} size="small" columns={[
         { title: t('files.modified'), dataIndex: 'created_at', width: 170, render: (value: string) => formatDate(value, i18n.language, { hour: '2-digit', minute: '2-digit' }) },
         { title: t('common.actions'), dataIndex: 'action', width: 130, render: (value: string) => t('files.historyAction.' + auditActionCode(value), { defaultValue: value }) },
@@ -382,7 +408,7 @@ export default function FileManager({ serverId, containerId, onLockedChange }: P
         { title: t('files.backup'), dataIndex: 'backup_path', width: 120, render: (value: string) => value && <Button size="small" icon={<DownloadOutlined />} disabled={busy} onClick={() => { void download({ name: value.split('/').pop() || 'backup', path: value, size: 0, mode: '', modified_at: '', is_dir: false, is_file: true, is_symlink: false }); }}>{t('files.download')}</Button> },
       ]} />
     </Modal>
-    <Modal destroyOnHidden open={!!editor} title={<Space><FileOutlined /><span className="file-editor-name">{editor?.entry.path}</span>{dirty && <Tag color="orange">{t('files.unsaved')}</Tag>}</Space>} width="min(1100px, 95vw)" onCancel={closeEditor} mask={{ closable: !dirty && !busy }} keyboard={!busy} footer={<Space><Button disabled={busy} onClick={closeEditor}>{t('files.close')}</Button><Button type="primary" icon={<SaveOutlined />} loading={busy} disabled={!dirty || editor?.entry.is_symlink} onClick={() => { void saveText(); }}>{t('common.save')}</Button></Space>}>
+    <Modal className="file-editor-modal" destroyOnHidden open={!!editor} title={<Space><FileOutlined /><span className="file-editor-name">{editor?.entry.path}</span>{dirty && <Tag color="orange">{t('files.unsaved')}</Tag>}</Space>} width="min(1100px, 95vw)" onCancel={closeEditor} mask={{ closable: !dirty && !busy }} keyboard={!busy} footer={<Space><Button disabled={busy} onClick={closeEditor}>{t('files.close')}</Button><Button type="primary" icon={<SaveOutlined />} aria-label={t('common.save')} aria-busy={busy} loading={busy} disabled={!dirty || editor?.entry.is_symlink} onClick={() => { void saveText(); }}>{t('common.save')}</Button></Space>}>
       {editor?.entry.is_symlink && <Alert type="warning" showIcon title={t('files.symlinkReadOnly')} />}
       {editor && <Suspense fallback={<div className="file-editor-loading"><Spin /><Text type="secondary">{t('files.editorLoading')}</Text></div>}>
         <FileCodeEditor key={editor.entry.path} path={editor.entry.path} value={editor.content} bytes={editor.bytes} readOnly={busy || editor.entry.is_symlink} onChange={(content, bytes) => setEditor((current) => current ? { ...current, content, bytes } : current)} onSave={() => { void saveText(); }} />
@@ -393,7 +419,6 @@ export default function FileManager({ serverId, containerId, onLockedChange }: P
           <span>{formatBytes(editorStats.bytes)} / 2 MiB</span>
           <span>UTF-8</span>
           <span>{editor.crlf ? 'CRLF' : 'LF'}</span>
-          <span>Ctrl/Cmd+S</span>
         </Text>
       )}
     </Modal>

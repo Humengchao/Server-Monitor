@@ -1,5 +1,6 @@
 import { useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Select, Space, Typography } from 'antd';
+import { Alert, Select, Typography } from 'antd';
+import { CodeOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { basicSetup } from 'codemirror';
 import { Annotation, Compartment, EditorState, Prec, Transaction } from '@codemirror/state';
@@ -103,14 +104,23 @@ export default function FileCodeEditor({ path, value, bytes, readOnly, onChange,
   }, [language, compartments]);
 
   return <div className="file-code-editor" data-theme={darkMode ? 'dark' : 'light'}>
-    <Space className="file-editor-toolbar" wrap>
-      <Typography.Text type="secondary">{t('files.language')}</Typography.Text>
-      <Select size="small" className="file-editor-language" aria-label={t('files.language')} showSearch optionFilterProp="label" value={mode} onChange={setMode} loading={!!language && loaded?.name !== language.name} options={[
-        { value: 'auto', label: t('files.languageAuto', { language: detected?.name || t('files.plainText') }) },
-        { value: 'plain', label: t('files.plainText') },
-        ...fileLanguages.map((item) => ({ value: item.name, label: item.name })),
-      ]} />
-    </Space>
+    <div className="file-editor-toolbar">
+      <div className="file-editor-identity">
+        <span className="file-editor-code-icon" aria-hidden="true"><CodeOutlined /></span>
+        <strong className="file-editor-document" title={path}>{path.split(/[/\\]/).pop() || path}</strong>
+      </div>
+      <div className="file-editor-controls">
+        <div className="file-editor-language-control">
+          <Typography.Text type="secondary">{t('files.language')}</Typography.Text>
+          <Select size="small" className="file-editor-language" aria-label={t('files.language')} showSearch optionFilterProp="label" value={mode} onChange={setMode} loading={!!language && loaded?.name !== language.name} options={[
+            { value: 'auto', label: t('files.languageAuto', { language: detected?.name || t('files.plainText') }) },
+            { value: 'plain', label: t('files.plainText') },
+            ...fileLanguages.map((item) => ({ value: item.name, label: item.name })),
+          ]} />
+        </div>
+        <span className="file-editor-shortcut" title={t('files.editorShortcut')} aria-label={`${t('files.editorShortcut')}: Ctrl / ⌘ + S`}><kbd>Ctrl / ⌘</kbd><span aria-hidden="true">+</span><kbd>S</kbd></span>
+      </div>
+    </div>
     {languageFailed && <Alert type="warning" showIcon title={t('files.highlightFailed')} />}
     <div className="file-editor-surface" ref={parent} />
   </div>;
