@@ -38,7 +38,7 @@ func Connect(databaseURL string) (*sql.DB, error) {
 }
 
 func RunMigrations(db *sql.DB) error {
-	_, err := db.Exec(migrationsSQL + "\n" + accessSQL + "\n" + notificationsSQL + "\n" + networkSQL + "\n" + aiProvidersSQL + "\n" + aiTasksSQL + "\n" + AIExtensionsSQL)
+	_, err := db.Exec(migrationsSQL + "\n" + accessSQL + "\n" + notificationsSQL + "\n" + networkSQL + "\n" + aiProvidersSQL + "\n" + aiTasksSQL + "\n" + AIExtensionsSQL + "\n" + AIPanelAlertsSQL)
 	if err != nil {
 		return fmt.Errorf("exec migrations: %w", err)
 	}

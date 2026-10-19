@@ -21,6 +21,7 @@ var ErrAITaskStepLimit = errors.New("Task reached its 24-step limit. Review the 
 var ErrAIConversationLimit = errors.New("Conversation size limit reached; start a new task with the remaining work.")
 
 type AITask struct {
+	Scope               string               `json:"scope"`
 	ID                  uuid.UUID            `json:"id"`
 	UserID              uuid.UUID            `json:"-"`
 	ServerID            uuid.UUID            `json:"server_id"`
@@ -77,11 +78,11 @@ type AIAction struct {
 	CompletedAt      *time.Time      `json:"completed_at,omitempty"`
 }
 
-const aiTaskColumns = `id,user_id,server_id,server_name,server_type,provider_id,provider_name,model,request_id,prompt,status,error,messages,target_fingerprint,provider_fingerprint,worker_id,steps,prompt_tokens,completion_tokens,created_at,updated_at,approval_mode,options`
+const aiTaskColumns = `id,user_id,server_id,server_name,server_type,provider_id,provider_name,model,request_id,prompt,status,error,messages,target_fingerprint,provider_fingerprint,worker_id,steps,prompt_tokens,completion_tokens,created_at,updated_at,approval_mode,options,scope`
 
 func scanAITask(row interface{ Scan(...any) error }) (AITask, error) {
 	var t AITask
-	err := row.Scan(&t.ID, &t.UserID, &t.ServerID, &t.ServerName, &t.ServerType, &t.ProviderID, &t.ProviderName, &t.Model, &t.RequestID, &t.Prompt, &t.Status, &t.Error, &t.Messages, &t.TargetFingerprint, &t.ProviderFingerprint, &t.WorkerID, &t.Steps, &t.PromptTokens, &t.CompletionTokens, &t.CreatedAt, &t.UpdatedAt, &t.ApprovalMode, &t.Options)
+	err := row.Scan(&t.ID, &t.UserID, &t.ServerID, &t.ServerName, &t.ServerType, &t.ProviderID, &t.ProviderName, &t.Model, &t.RequestID, &t.Prompt, &t.Status, &t.Error, &t.Messages, &t.TargetFingerprint, &t.ProviderFingerprint, &t.WorkerID, &t.Steps, &t.PromptTokens, &t.CompletionTokens, &t.CreatedAt, &t.UpdatedAt, &t.ApprovalMode, &t.Options, &t.Scope)
 	if err == nil {
 		_, err = t.DecodeOptions()
 	}
@@ -95,6 +96,12 @@ func FindAITaskRequest(ctx context.Context, db *sql.DB, user, request uuid.UUID)
 }
 
 func CreateAITask(ctx context.Context, db *sql.DB, t *AITask) error {
+	if t.Scope == "" {
+		t.Scope = "server"
+	}
+	if t.Scope == "fleet" && t.ServerID != uuid.Nil || t.Scope == "server" && t.ServerID == uuid.Nil {
+		return ErrAITaskScope
+	}
 	if t.ApprovalMode == "" {
 		t.ApprovalMode = "standard"
 	}
@@ -126,8 +133,10 @@ func CreateAITask(ctx context.Context, db *sql.DB, t *AITask) error {
 		return err
 	}
 	// Row lock also serializes task creation on the same server across callers.
-	if err = tx.QueryRowContext(ctx, `SELECT id FROM servers WHERE id=$1 AND user_id=$2 FOR UPDATE`, t.ServerID, t.UserID).Scan(&owned); err != nil {
-		return err
+	if t.Scope == "server" {
+		if err = tx.QueryRowContext(ctx, `SELECT id FROM servers WHERE id=$1 AND user_id=$2 FOR UPDATE`, t.ServerID, t.UserID).Scan(&owned); err != nil {
+			return err
+		}
 	}
 	var count int
 	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM ai_tasks WHERE user_id=$1 AND status IN ('queued','running','awaiting_approval','awaiting_input','cancel_requested')`, t.UserID).Scan(&count); err != nil {
@@ -137,15 +146,17 @@ func CreateAITask(ctx context.Context, db *sql.DB, t *AITask) error {
 		return ErrAITaskLimit
 	}
 	var active bool
-	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM ai_tasks WHERE server_id=$1 AND status IN ('queued','running','awaiting_approval','awaiting_input','cancel_requested'))`, t.ServerID).Scan(&active); err != nil {
-		return err
+	if t.Scope == "server" {
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM ai_tasks WHERE scope='server' AND server_id=$1 AND status IN ('queued','running','awaiting_approval','awaiting_input','cancel_requested'))`, t.ServerID).Scan(&active); err != nil {
+			return err
+		}
 	}
 	if active {
 		return ErrAITaskLimit
 	}
 	t.ID = uuid.New()
 	t.Status = "queued"
-	err = tx.QueryRowContext(ctx, `INSERT INTO ai_tasks(id,user_id,server_id,server_name,server_type,provider_id,provider_name,model,request_id,prompt,messages,target_fingerprint,provider_fingerprint,approval_mode,options) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING created_at,updated_at`, t.ID, t.UserID, t.ServerID, t.ServerName, t.ServerType, t.ProviderID, t.ProviderName, t.Model, t.RequestID, t.Prompt, []byte(t.Messages), t.TargetFingerprint, t.ProviderFingerprint, t.ApprovalMode, []byte(t.Options)).Scan(&t.CreatedAt, &t.UpdatedAt)
+	err = tx.QueryRowContext(ctx, `INSERT INTO ai_tasks(id,user_id,server_id,server_name,server_type,provider_id,provider_name,model,request_id,prompt,messages,target_fingerprint,provider_fingerprint,approval_mode,options,scope) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING created_at,updated_at`, t.ID, t.UserID, t.ServerID, t.ServerName, t.ServerType, t.ProviderID, t.ProviderName, t.Model, t.RequestID, t.Prompt, []byte(t.Messages), t.TargetFingerprint, t.ProviderFingerprint, t.ApprovalMode, []byte(t.Options), t.Scope).Scan(&t.CreatedAt, &t.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -389,8 +400,10 @@ func ContinueAITask(ctx context.Context, db *sql.DB, id, user, request uuid.UUID
 		return t, ErrAITaskLimit
 	}
 	var exists bool
-	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM ai_tasks WHERE id<>$1 AND server_id=$2 AND status IN ('queued','running','awaiting_approval','awaiting_input','cancel_requested'))`, id, t.ServerID).Scan(&exists); err != nil {
-		return t, err
+	if t.Scope == "server" {
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM ai_tasks WHERE scope='server' AND id<>$1 AND server_id=$2 AND status IN ('queued','running','awaiting_approval','awaiting_input','cancel_requested'))`, id, t.ServerID).Scan(&exists); err != nil {
+			return t, err
+		}
 	}
 	if exists {
 		return t, ErrAITaskLimit

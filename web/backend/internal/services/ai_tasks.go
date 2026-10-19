@@ -25,6 +25,10 @@ const aiConversationLimit = 256 * 1024
 var ErrAISecretInput = errors.New("Task text contains credentials. Remove passwords, API keys and private keys before submitting.")
 var ErrAIAgentNotEnrolled = errors.New("enroll the Agent before starting an AI task")
 
+func aiFleetTarget(user uuid.UUID) *models.Server {
+	return &models.Server{UserID: user, Name: "Server Monitor", ServerType: "panel", ConnectionMode: "panel"}
+}
+
 func AITargetFingerprint(s *models.Server) string {
 	raw, _ := json.Marshal([]any{s.ID, s.UserID, s.ConnectionMode, s.ServerType, s.Host, s.Port, s.SSHUsername, s.SSHPassword, s.SSHKey, s.SSHHostKey, s.CredentialID, s.AgentHostKey})
 	sum := sha256.Sum256(raw)
@@ -158,7 +162,11 @@ func (w *AITaskWorker) finish(t models.AITask, status, detail string) {
 }
 
 func (w *AITaskWorker) loadBound(ctx context.Context, t models.AITask) (*models.Server, models.AIProvider, error) {
-	s, err := models.GetServerByIDAndUserContext(ctx, w.db, t.ServerID, t.UserID)
+	s := aiFleetTarget(t.UserID)
+	var err error
+	if t.Scope != "fleet" {
+		s, err = models.GetServerByIDAndUserContext(ctx, w.db, t.ServerID, t.UserID)
+	}
 	if err != nil {
 		return nil, models.AIProvider{}, errors.New("The selected server is no longer accessible.")
 	}
@@ -359,6 +367,12 @@ func (w *AITaskWorker) process(ctx context.Context, t *models.AITask) error {
 		}
 		call := message.ToolCalls[0]
 		action, prepareErr := PrepareAIAction(server, call)
+		if IsAIPanelReadTool(call.Function.Name) {
+			action, prepareErr = PrepareAIPanelReadAction(call)
+		}
+		if IsAIPanelAlertTool(call.Function.Name) {
+			action, prepareErr = PrepareAIPanelAlertAction(ctx, w.db, *t, call)
+		}
 		if entry, ok := catalog[call.Function.Name]; ok {
 			action, prepareErr = prepareAIPluginAction(entry, call.Function.Arguments)
 		}
@@ -405,6 +419,12 @@ func (w *AITaskWorker) executeAction(ctx context.Context, t models.AITask, serve
 	server, p = current, provider
 	call := AIToolCall{ID: a.CallID, Type: "function", Function: AIFunctionCall{Name: a.ToolName, Arguments: string(a.Arguments)}}
 	prepared, err := PrepareAIAction(server, call)
+	if IsAIPanelReadTool(call.Function.Name) {
+		prepared, err = PrepareAIPanelReadAction(call)
+	}
+	if IsAIPanelAlertTool(call.Function.Name) {
+		prepared, err = PrepareAIPanelAlertAction(ctx, w.db, t, call)
+	}
 	var plugin models.AIPlugin
 	var pluginCall aiPluginCall
 	plugins, boundErr := w.boundPlugins(ctx, t)
@@ -451,6 +471,10 @@ func (w *AITaskWorker) executeAction(ctx context.Context, t models.AITask, serve
 			return models.CheckAIActionAuthority(check, w.db.Raw, t.ID, a.ID, t.WorkerID)
 		})
 		result, runErr = w.mcpCall(ctx, plugin, pluginCall.ToolName, pluginCall.Arguments, true, t.ApprovalMode == "readonly")
+	} else if IsAIPanelReadTool(a.ToolName) {
+		result, runErr = ExecuteAIPanelReadAction(ctx, w.db, t.UserID, prepared)
+	} else if IsAIPanelAlertTool(a.ToolName) {
+		result, runErr = ExecuteAIPanelAlertAction(ctx, w.db, t, *a)
 	} else {
 		result, runErr = w.execute(ctx, server, prepared)
 	}
@@ -506,6 +530,9 @@ func (w *AITaskWorker) Create(ctx context.Context, user, serverID, providerID, r
 	if err := selection.Normalize(); err != nil {
 		return models.AITask{}, err
 	}
+	if selection.Scope == "fleet" && serverID != uuid.Nil || selection.Scope == "server" && serverID == uuid.Nil {
+		return models.AITask{}, models.ErrAITaskScope
+	}
 	if previous, err := models.FindAITaskRequest(ctx, w.db.Raw, user, request); err == nil {
 		if previous.ServerID != serverID || previous.ProviderID != providerID || previous.Prompt != prompt || !previous.MatchesSelection(selection) {
 			return models.AITask{}, models.ErrAIRequestConflict
@@ -514,7 +541,11 @@ func (w *AITaskWorker) Create(ctx context.Context, user, serverID, providerID, r
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return models.AITask{}, err
 	}
-	server, err := models.GetServerByIDAndUserContext(ctx, w.db, serverID, user)
+	server := aiFleetTarget(user)
+	var err error
+	if selection.Scope != "fleet" {
+		server, err = models.GetServerByIDAndUserContext(ctx, w.db, serverID, user)
+	}
 	if err != nil {
 		return models.AITask{}, err
 	}
@@ -543,7 +574,7 @@ func (w *AITaskWorker) Create(ctx context.Context, user, serverID, providerID, r
 		return models.AITask{}, err
 	}
 	rawOptions, _ := json.Marshal(options)
-	task := models.AITask{UserID: user, ServerID: server.ID, ServerName: server.Name, ServerType: server.ServerType, ProviderID: p.ID, ProviderName: p.Name, Model: p.Model, RequestID: request, Prompt: prompt, TargetFingerprint: AITargetFingerprint(server), ProviderFingerprint: AIProviderFingerprint(p), Messages: messages, ApprovalMode: selection.ApprovalMode, Options: rawOptions}
+	task := models.AITask{Scope: selection.Scope, UserID: user, ServerID: server.ID, ServerName: server.Name, ServerType: server.ServerType, ProviderID: p.ID, ProviderName: p.Name, Model: p.Model, RequestID: request, Prompt: prompt, TargetFingerprint: AITargetFingerprint(server), ProviderFingerprint: AIProviderFingerprint(p), Messages: messages, ApprovalMode: selection.ApprovalMode, Options: rawOptions}
 	_, _ = task.DecodeOptions()
 	err = models.CreateAITask(ctx, w.db.Raw, &task)
 	return task, err

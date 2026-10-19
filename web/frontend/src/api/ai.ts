@@ -2,6 +2,7 @@ import client from './client';
 
 export type AIProviderKind = 'deepseek' | 'openai' | 'qwen' | 'moonshot' | 'zhipu' | 'siliconflow' | 'gemini' | 'compatible' | 'cpa';
 export type AIApprovalMode = 'readonly' | 'standard' | 'automatic';
+export type AITaskScope = 'server' | 'fleet';
 export interface AIModel { id: string; owned_by?: string }
 export interface AIModelCatalog { models: AIModel[]; fetched_at: string; source: 'provider' }
 export interface AISkill { id: string; name: string; description: string; content: string; created_at: string; updated_at: string }
@@ -15,7 +16,7 @@ export interface AIProvider {
 export interface AIProviderInput { name: string; kind: AIProviderKind; base_url: string; model: string; api_key: string; enabled: boolean; expected_updated_at?: string }
 export type AITaskStatus = 'queued' | 'running' | 'awaiting_approval' | 'awaiting_input' | 'completed' | 'failed' | 'cancel_requested' | 'canceled' | 'interrupted';
 export interface AITask {
-  id: string; server_id: string; server_name: string; server_type: string; provider_id: string; provider_name: string; model: string;
+  id: string; scope?: AITaskScope; server_id: string; server_name: string; server_type: string; provider_id: string; provider_name: string; model: string;
   prompt: string; status: AITaskStatus; error: string; created_at: string; updated_at: string; prompt_tokens: number; completion_tokens: number;
   approval_mode?: AIApprovalMode; skills?: Array<{ id: string; name: string }>; plugins?: Array<{ id: string; name: string }>;
 }
@@ -26,7 +27,7 @@ export interface AIAction {
   status: AIActionStatus; output: string; error: string; truncated: boolean; exit_code?: number; unknown: boolean; duration_ms: number; created_at: string; completed_at?: string;
 }
 export interface AITaskDetail { task: AITask; events: AIEvent[]; actions: AIAction[] }
-export interface AITaskInput { server_id: string; provider_id: string; prompt: string; request_id: string; approval_mode: AIApprovalMode; skill_ids: string[]; plugin_ids: string[] }
+export interface AITaskInput { scope: AITaskScope; server_id?: string; provider_id: string; prompt: string; request_id: string; approval_mode: AIApprovalMode; skill_ids: string[]; plugin_ids: string[] }
 
 export const aiApi = {
   providers: (signal?: AbortSignal) => client.get<AIProvider[]>('/ai/providers', { signal }),

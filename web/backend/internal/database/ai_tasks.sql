@@ -25,8 +25,12 @@ CREATE TABLE IF NOT EXISTS ai_tasks (
 );
 CREATE INDEX IF NOT EXISTS idx_ai_tasks_owner ON ai_tasks(user_id,created_at DESC,id DESC);
 CREATE INDEX IF NOT EXISTS idx_ai_tasks_queue ON ai_tasks(status,created_at);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_tasks_active_server ON ai_tasks(server_id)
-    WHERE status IN ('queued','running','awaiting_approval','awaiting_input','cancel_requested');
+ALTER TABLE ai_tasks ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT 'server' CHECK (scope IN ('server','fleet'));
+-- Fleet tasks have no remote target; the zero UUID must not serialize every
+-- account behind one global active-server lock.
+DROP INDEX IF EXISTS idx_ai_tasks_active_server;
+CREATE UNIQUE INDEX idx_ai_tasks_active_server ON ai_tasks(server_id)
+    WHERE scope='server' AND status IN ('queued','running','awaiting_approval','awaiting_input','cancel_requested');
 
 CREATE TABLE IF NOT EXISTS ai_actions (
     id UUID PRIMARY KEY,

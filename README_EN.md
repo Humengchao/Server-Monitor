@@ -49,7 +49,7 @@ The public probe refreshes every 10 seconds and displays real names, manually co
 | Network quality | Panel or assigned-host probe sources, independent ICMP packet counts, loss/RTT history and comparison across sources |
 | Log inspection | Journal time/unit/priority/literal-text queries, Docker stdout/stderr, cancellable cursor polling, and contextual incident/service links |
 | Configuration backups | Password-encrypted export and previewed restore, optional secrets, remapped cross-instance relationships, private and paused imports |
-| AI assistant | Multiple providers and CPA-compatible gateways, model discovery, Markdown conversations, three approval levels, importable Skills and MCP HTTP plugins; commands, output and token usage recorded |
+| AI assistant | Account-wide monitoring analysis, historical trends and alert-rule management; multiple providers and CPA gateways, model discovery, Markdown, three approval levels, Skills and MCP HTTP plugins |
 | Account security | Change your password and sign every other device out at once |
 | Public status page | Per-server visibility, real names and health metrics; packet loss comes from actual local probes and remains unknown without samples |
 

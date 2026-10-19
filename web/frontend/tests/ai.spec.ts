@@ -87,14 +87,14 @@ test('a task needs one owned server and submits immediately once without a plann
   await expect(start).toBeDisabled();
   await page.getByRole('combobox', { name: 'Target server', exact: true }).click();
   await page.getByTitle('Production web', { exact: true }).click();
-  await expect(page.getByText('Task content and command results from Production web will be sent to My DeepSeek.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Your task, monitoring data and command results from Production web will be sent to My DeepSeek.', { exact: true })).toBeVisible();
   state.holdCreate = true;
   await start.click();
   await start.dispatchEvent('click');
   await expect.poll(() => state.writes.filter(item => item.path === '/api/ai/tasks').length).toBe(1);
   await expect(page.getByRole('dialog')).toHaveCount(0);
   const submitted = state.writes.find(item => item.path === '/api/ai/tasks')!.body;
-  expect(submitted).toMatchObject({ server_id: 'server-one', provider_id: provider.id, prompt: 'Install and start Nginx' });
+  expect(submitted).toMatchObject({ scope: 'server', server_id: 'server-one', provider_id: provider.id, prompt: 'Install and start Nginx' });
   expect(submitted.request_id).toMatch(/^[0-9a-f]{8}-[0-9a-f-]{27}$/i);
   const created = { ...task('created-one', 'running'), prompt: String(submitted.prompt) };
   state.details.set(created.id, { task: created, events: [], actions: [] });
@@ -103,6 +103,110 @@ test('a task needs one owned server and submits immediately once without a plann
   await expect(page.getByRole('button', { name: 'Cancel task', exact: true })).toBeVisible();
   expect(state.errors).toEqual([]);
 });
+
+test('the entire panel starts without choosing a server and keeps its scope for follow-ups', async ({ page }) => {
+  const state = await setup(page);
+  await page.goto('/ai');
+  await expect(page.getByRole('radio', { name: 'Entire panel', exact: true })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByRole('radio', { name: /Standard/ })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByRole('combobox', { name: 'Target server', exact: true })).toHaveCount(0);
+  await expect(page.getByText('Your task and monitoring data from this account will be sent to My DeepSeek.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Analyze all servers and prioritize current risks', exact: true }).click();
+  await page.getByRole('button', { name: 'Start task', exact: true }).click();
+  await expect(page).toHaveURL(/task=created-one/);
+  const submitted = state.writes.find(item => item.path === '/api/ai/tasks')!.body;
+  expect(submitted).toMatchObject({ scope: 'fleet', approval_mode: 'standard', provider_id: provider.id });
+  expect(submitted).not.toHaveProperty('server_id');
+  const header = page.locator('.ai-task-header');
+  await expect(header.getByText('Server Monitor / All servers', { exact: true })).toBeVisible();
+  await expect(header.getByText('linux', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('radiogroup', { name: 'Task scope', exact: true })).toHaveCount(0);
+  await expect(header.getByRole('link', { name: 'Alert rules', exact: true })).toHaveAttribute('href', '/alerts');
+  state.details.get('created-one')!.task.status = 'completed';
+  await header.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Task instructions' }).fill('Check the 24-hour history for the busiest server');
+  await page.getByRole('button', { name: 'Send follow-up', exact: true }).click();
+  expect(state.writes.find(item => item.path.endsWith('/messages'))?.body).toMatchObject({ message: 'Check the 24-hour history for the busiest server' });
+  await page.getByRole('button', { name: 'New task', exact: true }).click();
+  await expect(page.getByRole('radio', { name: 'Entire panel', exact: true })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByRole('combobox', { name: 'Target server', exact: true })).toHaveCount(0);
+  expect(state.errors).toEqual([]);
+});
+
+test('switching to single-server scope requires an owned target before submitting', async ({ page }) => {
+  const state = await setup(page);
+  await page.goto('/ai');
+  await page.getByRole('textbox', { name: 'Task instructions' }).fill('Read the monitoring history and install Nginx');
+  await page.getByRole('radio', { name: 'Single server', exact: true }).click();
+  await expect(page).toHaveURL(/scope=server/);
+  await expect(page.getByRole('button', { name: 'Start task', exact: true })).toBeDisabled();
+  await page.getByRole('combobox', { name: 'Target server', exact: true }).click();
+  await page.getByTitle('Staging web', { exact: true }).click();
+  await page.getByRole('button', { name: 'Start task', exact: true }).click();
+  await expect.poll(() => state.writes.find(item => item.path === '/api/ai/tasks')?.body.scope).toBe('server');
+  expect(state.writes.find(item => item.path === '/api/ai/tasks')?.body).toMatchObject({ server_id: 'server-two', prompt: 'Read the monitoring history and install Nginx' });
+  expect(state.errors).toEqual([]);
+});
+
+test('a lost fleet submission stays isolated from a single-server draft and retries its original scope', async ({ page }) => {
+  const state = await setup(page);
+  let requests = 0;
+  await page.route('**/api/ai/tasks', route => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    requests++;
+    if (requests === 1) { state.writes.push({ path: '/api/ai/tasks', method: 'POST', body: route.request().postDataJSON() }); return route.abort('failed'); }
+    return route.fallback();
+  });
+  await page.goto('/ai');
+  await page.getByRole('textbox', { name: 'Task instructions' }).fill('Analyze monitoring for all servers');
+  await page.getByRole('button', { name: 'Start task', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Retry same submission', exact: true })).toBeVisible();
+  await page.evaluate(() => { window.history.pushState({}, '', '/ai?server=server-one'); window.dispatchEvent(new PopStateEvent('popstate')); });
+  await expect(page.getByRole('button', { name: 'Retry same submission', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('radio', { name: 'Single server', exact: true })).toHaveAttribute('aria-checked', 'true');
+  await page.getByRole('radio', { name: 'Entire panel', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Task instructions' })).toHaveValue('Analyze monitoring for all servers');
+  await page.getByRole('button', { name: 'Retry same submission', exact: true }).click();
+  await expect(page).toHaveURL(/task=created-one/);
+  const attempts = state.writes.filter(item => item.path === '/api/ai/tasks');
+  expect(attempts).toHaveLength(2);
+  expect(attempts[1].body).toEqual(attempts[0].body);
+  expect(attempts[1].body.scope).toBe('fleet');
+  expect(attempts[1].body).not.toHaveProperty('server_id');
+  expect(state.errors).toEqual([]);
+});
+
+test('fleet alert approval shows the panel target and sends only the saved action decision', async ({ page }) => {
+  const state = await setup(page);
+  const selected = { ...task('fleet-alert', 'awaiting_approval'), scope: 'fleet' as const, server_id: '00000000-0000-0000-0000-000000000000', server_name: 'Server Monitor', server_type: 'panel' };
+  state.details.set(selected.id, { task: selected, events: [], actions: [action({ tool_name: 'monitor_delete_alert', command: '', summary: 'Delete obsolete CPU alert', arguments: { rule_id: 'saved-rule-id' }, risk_reason: 'Deletes an alert rule' })] });
+  await page.goto('/ai?task=fleet-alert');
+  await page.getByRole('button', { name: 'Approve action', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByText('This approval applies only to the saved action shown below on Server Monitor / All servers.', { exact: true })).toBeVisible();
+  await expect(dialog.getByText(/saved-rule-id/)).toBeVisible();
+  await dialog.getByRole('button', { name: 'Approve action', exact: true }).click();
+  await expect.poll(() => state.writes.find(item => item.path.endsWith('/decision'))?.body).toEqual({ decision: 'approve' });
+  expect(state.errors).toEqual([]);
+});
+
+for (const viewport of [{ width: 1366, height: 768 }, { width: 390, height: 600 }]) {
+  test(`the fleet draft keeps its composer on screen at ${viewport.width}x${viewport.height}`, async ({ page }, testInfo) => {
+    const state = await setup(page);
+    await page.addInitScript(() => localStorage.setItem('lang', 'zh'));
+    await page.setViewportSize(viewport);
+    await page.goto('/ai');
+    await expect(page.getByRole('radio', { name: '整个面板', exact: true })).toHaveAttribute('aria-checked', 'true');
+    await page.getByRole('button', { name: '分析所有服务器当前状态，优先指出风险', exact: true }).click();
+    await expect(page.getByRole('textbox', { name: '任务说明', exact: true })).toBeInViewport({ ratio: 1 });
+    await expect(page.getByRole('button', { name: '开始任务', exact: true })).toBeInViewport({ ratio: 1 });
+    expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight + 1 && document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    await page.getByRole('radio', { name: /只读/ }).click();
+    await expect(page.getByText('可读取监控数据并执行经过验证的只读操作；服务器变更、告警规则变更和插件调用均会被阻止。', { exact: true })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath(`ai-fleet-draft-${viewport.width}.png`), fullPage: true, animations: 'disabled' });
+    expect(state.errors).toEqual([]);
+  });
+}
 
 test('a lost submission response retries the same request id without producing a second job', async ({ page }) => {
   const state = await setup(page); let requests = 0; const ids: string[] = [];
@@ -125,12 +229,12 @@ test('a lost submission response retries the same request id without producing a
 test('changing the server URL inside the workspace submits only to the newly selected server', async ({ page }) => {
   const state = await setup(page);
   await page.goto('/ai?server=server-one');
-  await expect(page.getByText('Task content and command results from Production web will be sent to My DeepSeek.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Your task, monitoring data and command results from Production web will be sent to My DeepSeek.', { exact: true })).toBeVisible();
   await page.evaluate(() => {
     window.history.pushState({}, '', '/ai?server=server-two');
     window.dispatchEvent(new PopStateEvent('popstate'));
   });
-  await expect(page.getByText('Task content and command results from Staging web will be sent to My DeepSeek.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Your task, monitoring data and command results from Staging web will be sent to My DeepSeek.', { exact: true })).toBeVisible();
   await page.getByRole('textbox', { name: 'Task instructions' }).fill('Inspect the staging configuration');
   await page.getByRole('button', { name: 'Start task', exact: true }).click();
   await expect.poll(() => state.writes.find(item => item.path === '/api/ai/tasks')?.body.server_id).toBe('server-two');
@@ -168,7 +272,7 @@ test('a lost response stays with its original submission when browser navigation
     window.history.pushState({}, '', '/ai?server=server-one');
     window.dispatchEvent(new PopStateEvent('popstate'));
   });
-  await expect(page.getByText('Task content and command results from Production web will be sent to My DeepSeek.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Your task, monitoring data and command results from Production web will be sent to My DeepSeek.', { exact: true })).toBeVisible();
   state.holdCreate = false;
   await page.getByRole('button', { name: 'Retry same submission', exact: true }).click();
   await expect(page).toHaveURL(/task=created-one/);
@@ -189,7 +293,7 @@ test('a delayed creation response cannot redirect a newer server selection', asy
     window.history.pushState({}, '', '/ai?server=server-two');
     window.dispatchEvent(new PopStateEvent('popstate'));
   });
-  await expect(page.getByText('Task content and command results from Staging web will be sent to My DeepSeek.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Your task, monitoring data and command results from Staging web will be sent to My DeepSeek.', { exact: true })).toBeVisible();
   await state.held!.fulfill({ status: 202, json: task('late-production-task', 'queued') });
   await expect(page.getByRole('textbox', { name: 'Task instructions' })).toBeEnabled();
   await expect(page).toHaveURL(/server=server-two/);

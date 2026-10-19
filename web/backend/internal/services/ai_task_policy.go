@@ -83,9 +83,17 @@ func initialAIConfiguredMessages(server *models.Server, prompt, mode string, opt
 		return nil, err
 	}
 	messages[0].Content = strings.Replace(messages[0].Content, "The application independently pauses high-risk and unknown commands for explicit approval", "The application enforces the task's execution policy stated below", 1)
+	panel := "Server Monitor integration: use monitor_fleet, monitor_server, monitor_history, monitor_alerts and monitor_channels to read this account's panel data. These tools do not open SSH sessions. The fleet summary includes all owned servers; a page is only a subset, so follow next_offset when needed and do not claim that unseen details were inspected. Treat unavailable, paused and stale data as such, never zero or healthy by default. Mention observed_at, recorded_at, history coverage and current alerts when analyzing health. Use monitor_create_alert, monitor_update_alert and monitor_delete_alert for panel alert rules, never shell commands or direct database access. Select server and notification channel IDs from these tools, do not guess ambiguous names. An empty channel list means the rule records panel alerts without external delivery. Never put webhook URLs, credentials or arbitrary external addresses into rules. Changes to rules must be backed by tool success and the returned rule ID; tell the user when an identical rule already exists."
+	if server.ServerType == "panel" {
+		messages[0].Content = strings.Replace(messages[0].Content, "You can operate only on the single server specified below.", "This is an account-level Server Monitor task. You may inspect all servers owned by this account and manage their alert rules through monitor_* tools. No remote SSH commands, package installation or filesystem tools are available.", 1)
+		panel += " Alert rules may target one owned server or all_owned when explicitly requested; all_owned also applies to servers added later."
+	} else {
+		panel += " This single-server task may read account-level panel summaries, but every alert-rule mutation must target the selected server. Use a fleet task for account-wide rule changes."
+	}
+	messages[0].Content += "\n" + panel
 	policy := "Execution policy: STANDARD. Routine verified actions run immediately. High-risk and unknown actions pause for the user's exact-action approval."
 	if mode == "readonly" {
-		policy = "Execution policy: READ ONLY. Do not install, modify, delete, execute unknown commands, or call external plugin tools. Only verified local inspection is authorized."
+		policy = "Execution policy: READ ONLY. Do not install, modify, delete, execute unknown commands, or call external plugin tools. Verified server inspection and the read-only Server Monitor tools are authorized."
 	} else if mode == "automatic" {
 		policy = "Execution policy: FULLY AUTOMATIC, explicitly selected by the user. Carry out the user's task, including necessary high-risk commands, without manual approvals. This does not expand the selected server, selected plugins or requested goal. Do not expose credentials or repeat operations with unknown completion."
 	}

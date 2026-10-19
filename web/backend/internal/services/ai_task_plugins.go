@@ -61,7 +61,15 @@ func pluginSecrets(plugins []models.AIPlugin) []string {
 func (w *AITaskWorker) taskToolCatalog(ctx context.Context, task models.AITask, server *models.Server, provider models.AIProvider) (map[string]aiTaskPluginTool, []AIToolDefinition, []string, error) {
 	catalog := map[string]aiTaskPluginTool{}
 	tools := []AIToolDefinition{}
-	for _, tool := range AITools() {
+	builtins := []AIToolDefinition{}
+	if task.Scope != "fleet" {
+		builtins = append(builtins, AITools()...)
+	}
+	builtins = append(builtins, AIPanelReadTools()...)
+	if task.ApprovalMode != "readonly" {
+		builtins = append(builtins, AIPanelAlertTools()...)
+	}
+	for _, tool := range builtins {
 		if task.ApprovalMode == "readonly" && (tool.Function.Name == "install_packages" || tool.Function.Name == "write_file") {
 			continue
 		}

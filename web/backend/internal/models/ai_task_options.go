@@ -9,14 +9,22 @@ import (
 )
 
 var ErrAITaskOptions = errors.New("choose readonly, standard or automatic approval, at most 8 skills totaling 96 KiB and 4 plugins, without duplicate IDs")
+var ErrAITaskScope = errors.New("select server scope with one server, or fleet scope without a remote execution target")
 
 type AITaskSelection struct {
+	Scope        string      `json:"scope"`
 	ApprovalMode string      `json:"approval_mode"`
 	SkillIDs     []uuid.UUID `json:"skill_ids"`
 	PluginIDs    []uuid.UUID `json:"plugin_ids"`
 }
 
 func (o *AITaskSelection) Normalize() error {
+	if o.Scope == "" {
+		o.Scope = "server"
+	}
+	if o.Scope != "server" && o.Scope != "fleet" {
+		return ErrAITaskScope
+	}
 	if o.ApprovalMode == "" {
 		o.ApprovalMode = "standard"
 	}
@@ -78,7 +86,7 @@ func (t *AITask) DecodeOptions() (AITaskOptions, error) {
 }
 
 func (t AITask) MatchesSelection(selection AITaskSelection) bool {
-	if selection.Normalize() != nil || t.ApprovalMode != selection.ApprovalMode {
+	if selection.Normalize() != nil || t.ApprovalMode != selection.ApprovalMode || t.Scope != selection.Scope {
 		return false
 	}
 	options, err := t.DecodeOptions()
@@ -99,7 +107,7 @@ func (t AITask) MatchesSelection(selection AITaskSelection) bool {
 }
 
 func (t AITask) Selection() (AITaskSelection, error) {
-	selection := AITaskSelection{ApprovalMode: t.ApprovalMode}
+	selection := AITaskSelection{ApprovalMode: t.ApprovalMode, Scope: t.Scope}
 	options, err := t.DecodeOptions()
 	if err != nil {
 		return selection, err

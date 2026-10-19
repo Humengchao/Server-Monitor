@@ -49,7 +49,7 @@ func aiTaskError(c *gin.Context, err error) {
 		c.JSON(404, gin.H{"error": "task, server or provider not found"})
 	case errors.Is(err, models.ErrAITaskConflict), errors.Is(err, models.ErrAITaskLimit), errors.Is(err, models.ErrAIRequestConflict), errors.Is(err, models.ErrAITaskStepLimit), errors.Is(err, models.ErrAIConversationLimit):
 		c.JSON(409, gin.H{"error": err.Error()})
-	case errors.Is(err, models.ErrAIProviderDisabled), errors.Is(err, models.ErrAIPluginDisabled), errors.Is(err, models.ErrAITaskOptions), errors.Is(err, services.ErrAISecretInput), errors.Is(err, services.ErrAIAgentNotEnrolled):
+	case errors.Is(err, models.ErrAIProviderDisabled), errors.Is(err, models.ErrAIPluginDisabled), errors.Is(err, models.ErrAITaskOptions), errors.Is(err, models.ErrAITaskScope), errors.Is(err, services.ErrAISecretInput), errors.Is(err, services.ErrAIAgentNotEnrolled):
 		c.JSON(400, gin.H{"error": err.Error()})
 	default:
 		c.JSON(500, gin.H{"error": "AI task operation failed; refresh its status before retrying"})
@@ -75,6 +75,7 @@ func validAIPrompt(message string) bool {
 
 func (h *AITaskHandler) Create(c *gin.Context) {
 	var req struct {
+		Scope        string      `json:"scope"`
 		ServerID     uuid.UUID   `json:"server_id"`
 		ProviderID   uuid.UUID   `json:"provider_id"`
 		RequestID    uuid.UUID   `json:"request_id"`
@@ -86,13 +87,22 @@ func (h *AITaskHandler) Create(c *gin.Context) {
 	if !readAITaskRequest(c, &req) {
 		return
 	}
-	if req.ServerID == uuid.Nil || req.ProviderID == uuid.Nil || req.RequestID == uuid.Nil || !validAIPrompt(req.Prompt) {
+	selection := models.AITaskSelection{Scope: req.Scope, ApprovalMode: req.ApprovalMode, SkillIDs: req.SkillIDs, PluginIDs: req.PluginIDs}
+	if err := selection.Normalize(); err != nil {
+		aiTaskError(c, err)
+		return
+	}
+	if (selection.Scope == "server" && req.ServerID == uuid.Nil) || (selection.Scope == "fleet" && req.ServerID != uuid.Nil) {
+		c.JSON(400, gin.H{"error": models.ErrAITaskScope.Error()})
+		return
+	}
+	if req.ProviderID == uuid.Nil || req.RequestID == uuid.Nil || !validAIPrompt(req.Prompt) {
 		c.JSON(400, gin.H{"error": "select a server and provider, supply a unique request ID, and enter a task of 1 to 16000 bytes"})
 		return
 	}
 	ctx, cancel, _, user := aiContext(c)
 	defer cancel()
-	task, err := h.worker.Create(ctx, user, req.ServerID, req.ProviderID, req.RequestID, strings.TrimSpace(req.Prompt), models.AITaskSelection{ApprovalMode: req.ApprovalMode, SkillIDs: req.SkillIDs, PluginIDs: req.PluginIDs})
+	task, err := h.worker.Create(ctx, user, req.ServerID, req.ProviderID, req.RequestID, strings.TrimSpace(req.Prompt), selection)
 	if err != nil {
 		aiTaskError(c, err)
 		return
