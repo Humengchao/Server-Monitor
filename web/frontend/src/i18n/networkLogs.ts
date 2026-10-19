@@ -1,5 +1,6 @@
 import i18n from './index';
 const en = {
+  timeRange: 'Time range', invalidTime: 'Enter a valid start and end time.', invalidTimeRange: 'The end time must be later than the start time.',
   target_address_required: 'Set the target server IP or hostname in its edit form before probing it.',
   network: 'Network monitoring', networkHint: 'One ICMP sample per minute. Packet loss is measured from sent and received packets; it is independent of SSH health.',
   add: 'Add check', edit: 'Edit check', name: 'Name', source: 'Probe source', target: 'Target server', local: 'Panel host', packets: 'Packets (1–10)',
@@ -20,6 +21,7 @@ const en = {
   bufferLimit: 'Only the latest 2,000 rows are retained in the browser.', openLogs: 'Inspect logs', networkLink: 'Network checks', chooseChecks: 'Select up to four checks',
 };
 const zh: typeof en = {
+  timeRange: '时间范围', invalidTime: '请输入有效的开始和结束时间。', invalidTimeRange: '结束时间必须晚于开始时间。',
   target_address_required: '请先在服务器编辑表单中填写探测点可达的目标 IP 或域名。',
   network: '网络监测', networkHint: '每分钟独立采样一次 ICMP。丢包率来自实际发出和收到的包数，与 SSH 在线状态相互独立。',
   add: '添加检查', edit: '编辑检查', name: '名称', source: '探测来源', target: '目标服务器', local: '面板主机', packets: '探测包数（1–10）',

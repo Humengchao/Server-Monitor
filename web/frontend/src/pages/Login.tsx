@@ -62,12 +62,12 @@ export default function Login() {
         <Text className="eyebrow">{t('auth.welcomeBack')}</Text>
         <Title level={2}>{t('login.title')}</Title>
         <Text type="secondary" className="auth-form-subtitle">{t('auth.loginSubtitle')}</Text>
-        <Form onFinish={handleLogin} size="large">
+        <Form onFinish={handleLogin} size="large" disabled={loading}>
           <Form.Item name="username" rules={[{ required: true, message: t('login.usernameRequired') }]}>
-            <Input autoComplete="username" prefix={<UserOutlined />} placeholder={t('login.usernamePlaceholder')} />
+            <Input autoComplete="username" aria-label={t('login.usernamePlaceholder')} prefix={<UserOutlined />} placeholder={t('login.usernamePlaceholder')} />
           </Form.Item>
           <Form.Item name="password" rules={[{ required: true, message: t('login.passwordRequired') }]}>
-            <Input.Password autoComplete="current-password" prefix={<LockOutlined />} placeholder={t('login.passwordPlaceholder')} />
+            <Input.Password autoComplete="current-password" aria-label={t('login.passwordPlaceholder')} prefix={<LockOutlined />} placeholder={t('login.passwordPlaceholder')} />
           </Form.Item>
           <Form.Item className="auth-submit">
             <Button type="primary" htmlType="submit" loading={loading} block>

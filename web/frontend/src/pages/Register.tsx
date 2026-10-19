@@ -52,18 +52,18 @@ export default function Register() {
         <Text className="eyebrow">{t('auth.createAccount')}</Text>
         <Title level={2}>{t('register.title')}</Title>
         <Text type="secondary" className="auth-form-subtitle">{t('auth.registerSubtitle')}</Text>
-        <Form onFinish={handleRegister} size="large">
+        <Form onFinish={handleRegister} size="large" disabled={loading}>
           <Form.Item name="username" rules={[
             { required: true, message: t('register.usernameRequired') },
             { min: 3, message: t('register.usernameMin') },
           ]}>
-            <Input autoComplete="username" prefix={<UserOutlined />} placeholder={t('register.usernamePlaceholder')} />
+            <Input autoComplete="username" aria-label={t('register.usernamePlaceholder')} prefix={<UserOutlined />} placeholder={t('register.usernamePlaceholder')} />
           </Form.Item>
           <Form.Item name="password" rules={[
             { required: true, message: t('register.passwordRequired') },
             { min: 6, message: t('register.passwordMin') },
           ]}>
-            <Input.Password autoComplete="new-password" prefix={<LockOutlined />} maxLength={72} placeholder={t('register.passwordPlaceholder')} />
+            <Input.Password autoComplete="new-password" aria-label={t('register.passwordPlaceholder')} prefix={<LockOutlined />} maxLength={72} placeholder={t('register.passwordPlaceholder')} />
           </Form.Item>
           <Form.Item className="auth-submit">
             <Button type="primary" htmlType="submit" loading={loading} block>

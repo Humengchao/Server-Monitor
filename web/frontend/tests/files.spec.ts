@@ -59,6 +59,23 @@ test('listing shows a home crumb, entry counts and a live filter', async ({ page
   expect(state.errors).toEqual([]);
 });
 
+test('directory breadcrumbs support keyboard navigation and respect unsaved changes', async ({ page }) => {
+  await fixture(page);
+  const location = page.locator('.file-location');
+  const home = location.getByRole('button', { name: '/home', exact: true, includeHidden: true });
+  await expect(home).toBeEnabled();
+  const navigation = page.waitForRequest(request => new URL(request.url()).pathname.endsWith('/files') && new URL(request.url()).searchParams.get('path') === '/home');
+  await home.focus();
+  await page.keyboard.press('Enter');
+  await navigation;
+  await page.getByRole('button', { name: 'nginx.conf', exact: true }).click();
+  await expect(page.locator('.cm-content')).toBeVisible();
+  await page.locator('.cm-content').press('ControlOrMeta+End');
+  await page.locator('.cm-content').press('x');
+  await expect(home).toBeDisabled();
+  await expect(location.locator('[aria-current="page"]')).toHaveText('deploy');
+});
+
 test('row actions are labelled icon buttons and respect the text limit', async ({ page }) => {
   await fixture(page);
   const file = page.getByRole('row').filter({ hasText: 'nginx.conf' });

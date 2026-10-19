@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   App, Alert, Button, Card, ColorPicker, Col, Form, Input, Modal, Popconfirm, Row, Space, Table, Tag as AntTag, Typography,
 } from 'antd';
@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { tagsApi, Tag } from '../api/servers';
 import { authApi } from '../api/auth';
 import { useAuthStore } from '../store/authStore';
+import './Settings.css';
 
 const { Title, Text } = Typography;
 
@@ -28,6 +29,8 @@ export default function Settings() {
   const [tags, setTags] = useState<Tag[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [savingTag, setSavingTag] = useState(false);
+  const savingTagRef = useRef(false);
   const [form] = Form.useForm();
   const [passwordForm] = Form.useForm<PasswordFormValues>();
   const [savingPassword, setSavingPassword] = useState(false);
@@ -61,14 +64,20 @@ export default function Settings() {
   };
 
   const handleCreate = async (values: { name: string; color: unknown }) => {
+    if (savingTagRef.current) return;
+    savingTagRef.current = true;
+    setSavingTag(true);
     try {
-      await tagsApi.create(values.name, toHexColor(values.color));
+      await tagsApi.create(values.name.trim(), toHexColor(values.color));
       message.success(t('settings.tagCreated'));
       setModalOpen(false);
       form.resetFields();
       loadTags();
     } catch {
       message.error(t('settings.tagCreateFailed'));
+    } finally {
+      savingTagRef.current = false;
+      setSavingTag(false);
     }
   };
 
@@ -108,12 +117,13 @@ export default function Settings() {
       title: t('common.name'),
       dataIndex: 'name',
       key: 'name',
-      render: (name: string, record: Tag) => <AntTag color={record.color}>{name}</AntTag>,
+      render: (name: string, record: Tag) => <AntTag color={record.color} style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{name}</AntTag>,
     },
     {
       title: t('common.color'),
       dataIndex: 'color',
       key: 'color',
+      width: 100,
       render: (color: string) => (
         <Space>
           <span className="color-dot" style={{ background: color }} />
@@ -146,10 +156,10 @@ export default function Settings() {
       <Row gutter={[18, 18]}>
         <Col xs={24} xl={13}>
           <Card
-            className="panel-card"
+            className="panel-card settings-tags-card"
             title={<Space><TagsOutlined />{t('settings.tagManagement')}</Space>}
             extra={
-              <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
+              <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => { form.resetFields(); setModalOpen(true); }}>
                 {t('settings.createTag')}
               </Button>
             }
@@ -163,6 +173,8 @@ export default function Settings() {
               size="small"
               loading={loading}
               pagination={false}
+              scroll={{ x: 340 }}
+              tableLayout="fixed"
             />
           </Card>
         </Col>
@@ -172,7 +184,7 @@ export default function Settings() {
             <div className="account-identity">
               <span>{user?.username?.trim().charAt(0).toUpperCase() || 'U'}</span>
               <div>
-                <strong>{user?.username}</strong>
+                <strong style={{ overflowWrap: 'anywhere' }}>{user?.username}</strong>
                 <Text type="secondary">{t('settings.signedIn')}</Text>
               </div>
             </div>
@@ -189,7 +201,7 @@ export default function Settings() {
               layout="vertical"
               onFinish={handleChangePassword}
               requiredMark={false}
-              disabled={!token}
+              disabled={!token || savingPassword}
             >
               <Form.Item
                 name="current_password"
@@ -235,12 +247,14 @@ export default function Settings() {
       <Modal
         title={t('settings.createTag')}
         open={modalOpen}
-        onCancel={() => setModalOpen(false)}
+        onCancel={() => { if (!savingTagRef.current) setModalOpen(false); }}
         onOk={() => form.submit()}
+        confirmLoading={savingTag}
+        cancelButtonProps={{ disabled: savingTag }}
         destroyOnHidden
       >
-        <Form form={form} layout="vertical" onFinish={handleCreate}>
-          <Form.Item name="name" label={t('settings.tagName')} rules={[{ required: true }]}>
+        <Form form={form} layout="vertical" onFinish={handleCreate} disabled={savingTag}>
+          <Form.Item name="name" label={t('settings.tagName')} rules={[{ required: true, whitespace: true }]}>
             <Input placeholder={t('settings.tagNamePlaceholder')} maxLength={32} />
           </Form.Item>
           <Form.Item name="color" label={t('settings.color')} initialValue="#4f7cff">

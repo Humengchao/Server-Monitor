@@ -9,6 +9,7 @@ import { networkApi } from '../api/network';
 import type { NetworkCheck, NetworkCheckInput, NetworkHistory } from '../api/network';
 import { usePolling } from '../hooks/usePolling';
 import '../i18n/networkLogs';
+import './Operations.css';
 
 const number = (value: number | null | undefined, suffix = '') => value == null ? '—' : `${value.toFixed(2)}${suffix}`;
 const colors = ['#4f7cff', '#18b690', '#e8944a', '#d9639b'];
@@ -97,7 +98,7 @@ export default function Network() {
     }
     return [...rows.values()].sort((a, b) => a.time! - b.time!);
   }, [history]);
-  return <div>
+  return <div className="operations-page network-page">
     <div className="page-heading"><div><Typography.Title level={2}>{t('network')}</Typography.Title><Typography.Text type="secondary">{t('networkHint')}</Typography.Text></div><Space><Button onClick={() => { void load(); }}>{t('refresh')}</Button><Button type="primary" onClick={() => open('new')}>{t('add')}</Button></Space></div>
     {error && <Alert type="warning" title={t('failed')} showIcon />}
     <Card className="panel-card"><Table<NetworkCheck> rowKey="id" loading={loading} dataSource={checks} scroll={{ x: 1100 }} pagination={{ pageSize: 20 }} columns={[
@@ -113,12 +114,12 @@ export default function Network() {
       { title: t('time'), render: (_, check) => check.latest ? new Date(check.latest.recorded_at).toLocaleTimeString() : '—' },
       { title: '', render: (_, check) => <Space><Button size="small" disabled={paused(check) || !!busy} loading={busy === check.id} onClick={() => { void run(check.id); }}>{t('run')}</Button><Button size="small" onClick={() => open(check)}>{t('edit')}</Button><Popconfirm title={t('confirm')} onConfirm={async () => { try { await networkApi.delete(check.id); await load(); } catch { message.error(t('failed')); } }}><Button size="small" danger>{t('remove')}</Button></Popconfirm></Space> },
     ]} /></Card>
-    <Card title={t('compare')} style={{ marginTop: 20 }}><Space wrap><Select mode="multiple" maxCount={4} aria-label={t('chooseChecks')} placeholder={t('chooseChecks')} value={selected} onChange={ids => setSelection({ target, ids })} style={{ minWidth: 300, maxWidth: '100%' }} options={checks.map(check => ({ value: check.id, label: `${check.name} · ${serverName(check.source_server_id)}` }))} /><Select value={hours} onChange={setHours} options={[{ value: 1, label: t('hour') }, { value: 24, label: t('day') }, { value: 168, label: t('week') }]} /></Space>
+    <Card title={t('compare')} style={{ marginTop: 20 }}><div className="network-comparison-controls"><Select mode="multiple" maxCount={4} aria-label={t('chooseChecks')} placeholder={t('chooseChecks')} value={selected} onChange={ids => setSelection({ target, ids })} options={checks.map(check => ({ value: check.id, label: `${check.name} · ${serverName(check.source_server_id)}` }))} /><Select aria-label={t('timeRange')} value={hours} onChange={setHours} options={[{ value: 1, label: t('hour') }, { value: 24, label: t('day') }, { value: 168, label: t('week') }]} /></div>
       <Typography.Paragraph type="secondary">{t('historyHint')}</Typography.Paragraph>
       {historyError && <Alert type="warning" title={t('failed')} />}
       {Object.values(history).some(value => value.truncated) && <Alert type="info" title={t('partialHistory')} />}
-      <ResponsiveContainer width="100%" height={260}><LineChart data={chart}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="time" type="number" domain={['dataMin', 'dataMax']} tickFormatter={value => new Date(value).toLocaleTimeString()} /><YAxis unit=" ms" /><Tooltip labelFormatter={value => new Date(Number(value)).toLocaleString()} /><Legend />{selected.map((id, index) => <Line key={id} name={checks.find(check => check.id === id)?.name || id} dataKey={id} stroke={colors[index]} dot={false} connectNulls={false} isAnimationActive={false} />)}</LineChart></ResponsiveContainer>
-      <Table rowKey="id" pagination={false} dataSource={selected.map(id => ({ id, name: checks.find(check => check.id === id)?.name, ...history[id]?.summary }))} columns={[
+      <ResponsiveContainer width="100%" height={260}><LineChart data={chart}><CartesianGrid stroke="var(--border)" strokeDasharray="3 3" /><XAxis dataKey="time" type="number" domain={['dataMin', 'dataMax']} tick={{ fill: 'var(--muted)' }} tickFormatter={value => new Date(value).toLocaleTimeString()} /><YAxis unit=" ms" tick={{ fill: 'var(--muted)' }} /><Tooltip contentStyle={{ background: 'var(--surface)', borderColor: 'var(--border)', color: 'var(--text)', borderRadius: 8 }} labelFormatter={value => new Date(Number(value)).toLocaleString()} /><Legend />{selected.map((id, index) => <Line key={id} name={checks.find(check => check.id === id)?.name || id} dataKey={id} stroke={colors[index]} dot={false} connectNulls={false} isAnimationActive={false} />)}</LineChart></ResponsiveContainer>
+      <Table rowKey="id" scroll={{ x: 700 }} pagination={false} dataSource={selected.map(id => ({ id, name: checks.find(check => check.id === id)?.name, ...history[id]?.summary }))} columns={[
         { title: t('name'), dataIndex: 'name' }, { title: t('sent'), render: (_, row) => row.sent == null ? '—' : `${row.sent} / ${row.received}` },
         { title: t('loss'), render: (_, row) => number(row.loss_percent, '%') }, { title: t('avg'), render: (_, row) => number(row.avg_ms, ' ms') },
         { title: t('known'), dataIndex: 'known_samples' }, { title: t('unknownCount'), dataIndex: 'unknown_samples' },

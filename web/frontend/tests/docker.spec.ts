@@ -8,7 +8,7 @@ const en: Record<string, string> = JSON.parse(await readFile(new URL('../src/i18
 const running = { id: 'a'.repeat(64), name: 'web', image: 'nginx:1.27', state: 'running', status: 'Up 2 days', ports: '0.0.0.0:80->80/tcp', created: '2 days ago' };
 const exited = { id: 'b'.repeat(64), name: 'job', image: 'acme/job', state: 'exited', status: 'Exited (0) 1 hour ago', ports: '', created: '1 hour ago' };
 
-async function fixture(page: Page) {
+async function fixture(page: Page, containerName = running.name) {
   const hosts = sampleFleet().slice(0, 1);
   hosts[0].has_docker = true;
   hosts[0].docker_version = '24.0.7';
@@ -25,7 +25,7 @@ async function fixture(page: Page) {
     const url = new URL(route.request().url());
     const path = url.pathname;
     if (path === '/api/servers') return route.fulfill({ json: hosts });
-    if (path.endsWith('/docker/containers')) return route.fulfill({ json: [running, exited] });
+    if (path.endsWith('/docker/containers')) return route.fulfill({ json: [{ ...running, name: containerName }, exited] });
     if (path.endsWith('/docker/stats')) return route.fulfill({ json: [] });
     if (/\/docker\/containers\/[a-f]+\/logs$/.test(path)) {
       state.tails.push(url.searchParams.get('tail') || '');
@@ -35,7 +35,7 @@ async function fixture(page: Page) {
   });
   await page.goto('/docker');
   await page.locator('.ant-collapse-header').first().click();
-  await expect(page.getByText('web', { exact: true })).toBeVisible();
+  await expect(page.getByText(containerName, { exact: true })).toBeVisible();
   return state;
 }
 
@@ -51,6 +51,33 @@ test('container rows expose named icon controls that follow the container state'
   await expect(job.getByRole('button', { name: en['docker.stop'], exact: true })).toHaveCount(0);
   await expect(job.getByRole('button', { name: en['nav.files'], exact: true })).toBeDisabled();
   expect(state.errors).toEqual([]);
+});
+
+test('phone logs keep the title, close button and tools within the drawer', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const name = 'production-web-' + 'service'.repeat(12);
+  await fixture(page, name);
+  await page.getByRole('row').filter({ hasText: name }).getByRole('button', { name: en['docker.logs'], exact: true }).click();
+  const drawer = page.getByRole('dialog');
+  await expect(drawer.locator('.docker-logs')).toContainText('line 40');
+  for (const selector of ['.ant-drawer-title', '.ant-drawer-close', '.docker-logs-tools button', '.docker-logs-tools .ant-select']) {
+    for (const control of await drawer.locator(selector).all()) {
+      // Loading finishes before the drawer's opening animation does.
+      await expect.poll(async () => {
+        const box = await control.boundingBox();
+        return box ? box.x + box.width : Infinity;
+      }, { message: selector }).toBeLessThanOrEqual(391);
+      const box = await control.boundingBox();
+      expect(box, selector).not.toBeNull();
+      expect(box!.x, selector).toBeGreaterThanOrEqual(0);
+    }
+  }
+  await drawer.getByRole('switch', { name: en['docker.logsWrap'] }).click();
+  await expect(drawer.locator('.docker-logs')).toHaveCSS('white-space', 'pre');
+  await drawer.locator('.docker-logs').focus();
+  await expect(drawer.locator('.docker-logs')).toBeFocused();
+  await drawer.locator('.ant-drawer-close').click();
+  await expect(drawer).not.toBeVisible();
 });
 
 test('the logs drawer can change depth, wrapping and refresh without reopening', async ({ page }) => {

@@ -1,8 +1,8 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
-  Table, Button, Modal, Form, Input, Select, Space, Typography, Popconfirm, App, Tag, Card, Empty,
+  Alert, Table, Button, Modal, Form, Input, Select, Space, Typography, Popconfirm, App, Tag, Card, Empty,
 } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, KeyOutlined, WindowsOutlined, DesktopOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, KeyOutlined, WindowsOutlined, DesktopOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { credentialsApi, Credential } from '../api/credentials';
 import { formatDateTime } from '../utils/format';
@@ -27,26 +27,45 @@ export default function Credentials() {
   const { message } = App.useApp();
   const [creds, setCreds] = useState<Credential[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [savingCredential, setSavingCredential] = useState(false);
   const [editing, setEditing] = useState<Credential | null>(null);
   const [form] = Form.useForm();
+  const requestRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(false);
   const credentialType = Form.useWatch('credential_type', form) || 'linux';
 
   const load = useCallback(async () => {
+    if (!mountedRef.current) return;
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
     setLoading(true);
     try {
-      const res = await credentialsApi.list();
+      const res = await credentialsApi.list(controller.signal);
+      if (controller.signal.aborted || requestRef.current !== controller) return;
       setCreds(res.data || []);
+      setLoadError(false);
     } catch {
-      message.error(t('credential.loadFailed'));
+      if (controller.signal.aborted || requestRef.current !== controller) return;
+      setLoadError(true);
+    } finally {
+      if (!controller.signal.aborted && requestRef.current === controller) {
+        requestRef.current = null;
+        setLoading(false);
+      }
     }
-    setLoading(false);
-  }, [message, t]);
+  }, []);
 
   useEffect(() => {
+    mountedRef.current = true;
     const timer = window.setTimeout(() => { void load(); }, 0);
-    return () => window.clearTimeout(timer);
+    return () => {
+      mountedRef.current = false;
+      window.clearTimeout(timer);
+      requestRef.current?.abort();
+    };
   }, [load]);
 
   const handleSubmit = async (values: CredentialFormValues) => {
@@ -178,6 +197,13 @@ export default function Credentials() {
       </div>
 
       <Card className="panel-card">
+        {loadError && <Alert
+          type="error"
+          showIcon
+          title={t('credential.loadFailed')}
+          style={{ marginBottom: 16 }}
+          action={<Button size="small" loading={loading} icon={<ReloadOutlined />} onClick={() => { void load(); }}>{t('common.refresh')}</Button>}
+        />}
         <Table
           className="server-table"
           dataSource={creds}
@@ -186,7 +212,7 @@ export default function Credentials() {
           loading={loading}
           pagination={false}
           scroll={{ x: 760 }}
-          locale={{ emptyText: (
+          locale={{ emptyText: loadError ? '—' : (
             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('credential.empty')}>
               <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>{t('credential.add')}</Button>
             </Empty>
@@ -203,7 +229,7 @@ export default function Credentials() {
         width={480}
       >
         <Form form={form} layout="vertical" onFinish={handleSubmit} disabled={savingCredential}>
-          <Form.Item name="name" label={t('credential.name')} rules={[{ required: true }]}>
+          <Form.Item name="name" label={t('credential.name')} rules={[{ required: true, whitespace: true }]}>
             <Input placeholder={t(credentialType === 'windows' ? 'credential.nameWindowsPlaceholder' : 'credential.namePlaceholder')} />
           </Form.Item>
           <Form.Item name="credential_type" label={t('common.type')} initialValue="linux">
@@ -212,7 +238,7 @@ export default function Credentials() {
               <Select.Option value="windows"><WindowsOutlined /> Windows</Select.Option>
             </Select>
           </Form.Item>
-          <Form.Item name="ssh_username" label={t(credentialType === 'windows' ? 'credential.username' : 'credential.sshUsername')} rules={[{ required: true }]}>
+          <Form.Item name="ssh_username" label={t(credentialType === 'windows' ? 'credential.username' : 'credential.sshUsername')} rules={[{ required: true, whitespace: true }]}>
             <Input placeholder={t(credentialType === 'windows' ? 'credential.usernamePlaceholder' : 'credential.sshUsernamePlaceholder')} />
           </Form.Item>
           <Form.Item name="ssh_password" label={t(credentialType === 'windows' ? 'credential.password' : 'credential.sshPassword')} rules={credentialType === 'windows' && !editing ? [{ required: true }] : undefined}>

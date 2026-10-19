@@ -49,14 +49,24 @@ button, input, textarea, select { font: inherit; }
   position: sticky;
   top: 0;
   z-index: 20;
-  height: 100vh;
+  height: 100dvh;
   background:
     radial-gradient(circle at 20% 0%, rgba(79, 124, 255, .22), transparent 32%),
     linear-gradient(180deg, #151d34 0%, var(--sidebar) 58%, #0d1425 100%);
   box-shadow: 10px 0 32px rgba(8, 13, 27, .12);
 }
 
+.app-sidebar .ant-layout-sider-children,
+.mobile-navigation-drawer .ant-drawer-body { display: flex; flex-direction: column; min-height: 0; }
+.sidebar-navigation { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #46516e transparent; }
+.mobile-menu-button.ant-btn { display: none; }
+.mobile-navigation-drawer .ant-drawer-content { color: #fff; background: var(--sidebar); }
+.mobile-navigation-drawer .ant-drawer-header { border-color: rgba(214, 222, 247, .12); }
+.mobile-navigation-drawer .ant-drawer-title,
+.mobile-navigation-drawer .ant-drawer-close { color: #d6def7; }
+
 .brand-lockup {
+  flex-shrink: 0;
   height: 88px;
   padding: 22px 22px 18px;
   display: flex;
@@ -101,23 +111,28 @@ button, input, textarea, select { font: inherit; }
 }
 
 .sidebar-footer {
-  position: absolute;
-  bottom: 24px;
-  left: 24px;
+  flex-shrink: 0;
+  min-height: 28px;
+  margin: 12px 24px 20px;
   display: flex;
   align-items: center;
   gap: 9px;
   color: rgba(214, 222, 247, .6);
   font-size: 12px;
 }
+.sidebar-footer > span:nth-child(2) { min-width: 0; overflow-wrap: anywhere; }
+.sidebar-footer .ant-btn { flex-shrink: 0; margin-left: auto; color: #aeb8d2; }
+.sidebar-footer .ant-btn:hover { color: #fff !important; background: rgba(255,255,255,.08) !important; }
 
 .sidebar-status-dot {
+  flex-shrink: 0;
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: #30d7a3;
   box-shadow: 0 0 0 4px rgba(48, 215, 163, .12), 0 0 14px rgba(48, 215, 163, .55);
 }
+.sidebar-status-dot.unknown { background: #8793b0; box-shadow: 0 0 0 4px rgba(135, 147, 176, .12); }
 
 .app-main { min-width: 0; background: var(--app-bg); }
 
@@ -135,18 +150,20 @@ button, input, textarea, select { font: inherit; }
   backdrop-filter: blur(18px);
 }
 
-.page-context { display: flex; flex-direction: column; line-height: 1.25; }
+.page-context { min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
 .page-context .page-context-label { font-size: 11px; text-transform: uppercase; letter-spacing: .9px; }
-.page-context strong { margin-top: 3px; font-size: 15px; color: var(--text); }
+.page-context strong { margin-top: 3px; font-size: 15px; color: var(--text); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .header-actions { height: 100%; }
 .header-icon-button.ant-btn { min-width: 38px; min-height: 38px; color: var(--muted); }
 .header-icon-button.ant-btn:hover { color: #4f7cff; background: rgba(79, 124, 255, .09); }
 .header-divider { width: 1px; height: 24px; margin: 0 5px; background: var(--border); }
 .user-chip { padding: 4px 6px 4px 4px; display: flex; align-items: center; gap: 9px; color: var(--text); font-size: 13px; font-weight: 600; }
 .user-chip .ant-avatar { color: #fff; background: linear-gradient(135deg, #6e92ff, #665be5); box-shadow: 0 5px 14px rgba(79,124,255,.24); }
+.user-chip > span:not(.ant-avatar) { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .app-content { min-width: 0; background: var(--app-bg); }
 .content-inner { width: 100%; max-width: 1640px; margin: 0 auto; padding: 30px 32px 40px; }
+.page-loading { display: grid; place-items: center; min-height: 240px; flex: 1; }
 .network-banner {
   margin-bottom: 16px;
   padding: 10px 14px;
@@ -940,16 +957,10 @@ button, input, textarea, select { font: inherit; }
 .account-identity .ant-typography { font-size: 11px; }
 
 @media (max-width: 991px) {
-  .app-sidebar.ant-layout-sider { position: fixed; }
-  /* Collapsed to zero width, the brand lockup and the absolutely positioned
-     footer still paint over the page content; clip them instead. */
-  .app-sidebar.ant-layout-sider-zero-width > * { display: none; }
-  .app-sidebar.ant-layout-sider-zero-width .ant-layout-sider-zero-width-trigger { display: flex; }
-  /* Sit the drawer trigger inside the header strip rather than on top of the
-     page title below it. */
-  .app-sidebar .ant-layout-sider-zero-width-trigger { top: 14px; align-items: center; justify-content: center; }
+  .mobile-menu-button.ant-btn { display: inline-flex; flex-shrink: 0; margin-right: 12px; }
   .content-inner { padding: 24px 20px 32px; }
-  .app-header.ant-layout-header { padding: 0 20px 0 64px; }
+  .app-header.ant-layout-header { padding: 0 20px; gap: 8px; }
+  .page-context { flex: 1; }
   .auth-page { grid-template-columns: 1fr; background: var(--app-bg); }
   .auth-showcase { display: none; }
   .auth-form-side { min-height: 100vh; padding: 28px; background: radial-gradient(circle at 10% 0%, rgba(79,124,255,.14), transparent 40%), var(--app-bg); }
@@ -959,7 +970,7 @@ button, input, textarea, select { font: inherit; }
 }
 
 @media (max-width: 640px) {
-  .app-header.ant-layout-header { height: 64px; padding-right: 12px; }
+  .app-header.ant-layout-header { height: 64px; padding: 0 12px; }
   .page-context { display: none; }
   .header-actions { width: 100%; justify-content: flex-end; }
   .header-action-text, .user-chip > span { display: none; }

@@ -16,6 +16,7 @@ import { serversApi, Server, DockerContainer } from '../api/servers';
 import { formatBytes, severityColor } from '../utils/format';
 import { usePolling } from '../hooks/usePolling';
 import { createRequestQueue } from '../utils/requestQueue';
+import './Docker.css';
 const queueStats = createRequestQueue(4);
 function mergeStats(containers: DockerContainer[], stats: DockerContainer[]) {
   const readings = new Map(stats.map(item => [item.id, item]));
@@ -194,15 +195,16 @@ function LogsModal({ serverId, containerId, containerName, onClose }: {
 
   return (
     <Drawer
+      className="docker-logs-drawer"
       title={t('docker.logsTitle', { name: containerName })}
       open
       onClose={onClose}
       maskClosable={false}
       placement="right"
       rootStyle={{ position: 'fixed' }}
-      styles={{ body: { padding: 0, background: '#1e1e2e' }, wrapper: { width: '80vw' } }}
+      styles={{ body: { padding: 0, background: '#1e1e2e' }, wrapper: { width: 'min(1200px, 100vw)' } }}
       extra={(
-        <Space size={8} className="docker-logs-tools">
+        <Space size={8} wrap className="docker-logs-tools">
           <Button size="small" onClick={() => navigate('/logs?' + new URLSearchParams({ server: serverId, container: containerId }))}>{t('openLogs', { ns: 'networkLogs' })}</Button>
           <Select size="small" value={tail} onChange={setTail} aria-label={t('docker.logsTail', { count: tail })} options={LOG_TAILS.map((count) => ({ value: count, label: t('docker.logsTail', { count }) }))} />
           <Tooltip title={t('docker.logsWrap')}><Switch size="small" checked={wrap} onChange={setWrap} aria-label={t('docker.logsWrap')} /></Tooltip>
@@ -214,7 +216,7 @@ function LogsModal({ serverId, containerId, containerName, onClose }: {
       {loading ? (
         <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
       ) : (
-        <pre ref={bodyRef} className="docker-logs" style={{ whiteSpace: wrap ? 'pre-wrap' : 'pre', wordBreak: wrap ? 'break-all' : 'normal' }}>
+        <pre ref={bodyRef} className="docker-logs" tabIndex={0} role="region" aria-label={t('docker.logsTitle', { name: containerName })} style={{ whiteSpace: wrap ? 'pre-wrap' : 'pre', wordBreak: wrap ? 'break-all' : 'normal' }}>
           {logs}
         </pre>
       )}

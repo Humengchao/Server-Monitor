@@ -1,5 +1,5 @@
-import React, { useCallback, useContext, useEffect, useState } from 'react';
-import { Layout as AntLayout, Menu, Button, Avatar, Badge, Space, Tooltip, Typography } from 'antd';
+import React, { Suspense, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { Layout as AntLayout, Menu, Button, Avatar, Badge, Drawer, Space, Spin, Tooltip, Typography } from 'antd';
 import {
   DashboardOutlined,
   SunOutlined,
@@ -15,6 +15,8 @@ import {
   DisconnectOutlined,
   FolderOpenOutlined,
   RobotOutlined,
+  MenuOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -36,8 +38,23 @@ export default function AppLayout() {
   const { user } = useAuthStore();
   const { t, i18n } = useTranslation();
   const { t: op } = useTranslation('operations');
-  const [activeAlerts, setActiveAlerts] = useState(0);
+  const [activeAlerts, setActiveAlerts] = useState<number | null>(null);
+  const [alertError, setAlertError] = useState(false);
+  const alertRequestRef = useRef<AbortController | null>(null);
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 991px)').matches);
+  const [navigationLocation, setNavigationLocation] = useState<string | null>(null);
+  const navigationOpen = isMobile && navigationLocation === location.key;
+
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 991px)');
+    const onChange = () => {
+      setIsMobile(query.matches);
+      setNavigationLocation(null);
+    };
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, []);
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -51,14 +68,24 @@ export default function AppLayout() {
   }, []);
 
   const refreshAlertBadge = useCallback(() => {
-    alertsApi.summary()
-      .then((res) => setActiveAlerts(res.data?.active || 0))
-      .catch(() => undefined);
-  }, []);
+    alertRequestRef.current?.abort();
+    if (!isOnline) return;
+    const controller = new AbortController();
+    alertRequestRef.current = controller;
+    return alertsApi.summary(controller.signal).then((res) => {
+      if (controller.signal.aborted) return;
+      setActiveAlerts(res.data?.active || 0);
+      setAlertError(false);
+    }).catch(() => {
+      if (!controller.signal.aborted) setAlertError(true);
+    });
+  }, [isOnline]);
+
+  useEffect(() => () => alertRequestRef.current?.abort(), []);
 
   // The alert engine evaluates on its own cadence, so a 30s poll is enough to
   // keep the badge honest without adding noticeable request load.
-  usePolling(refreshAlertBadge, 30000, { leading: false });
+  usePolling(refreshAlertBadge, 30000, { leading: false, enabled: isOnline });
 
   // Also refresh on navigation, so acknowledging an alert and leaving the page
   // updates the badge without waiting out the interval.
@@ -75,7 +102,7 @@ export default function AppLayout() {
       label: (
         <span className="nav-label-with-badge">
           {t('nav.alerts')}
-          {activeAlerts > 0 && <em>{activeAlerts > 99 ? '99+' : activeAlerts}</em>}
+          {activeAlerts !== null && activeAlerts > 0 && <em>{activeAlerts > 99 ? '99+' : activeAlerts}</em>}
         </span>
       ),
     },
@@ -102,39 +129,56 @@ export default function AppLayout() {
   const currentItem = menuItems.find((item) => item.key === selectedKey);
   const currentLabel = selectedKey === '/alerts' ? t('nav.alerts') : currentItem?.label;
   const userInitial = user?.username?.trim().charAt(0).toUpperCase() || 'U';
+  const alertStatusUnknown = !isOnline || alertError || activeAlerts === null;
+  const sidebarContent = <>
+    <div className="brand-lockup">
+      <div className="brand-mark"><CloudServerOutlined /></div>
+      <div className="brand-copy">
+        <span>{t('app.title')}</span>
+        <small>{t('nav.controlCenter')}</small>
+      </div>
+    </div>
+    <nav className="sidebar-navigation" aria-label={t('nav.navigation')}>
+      <Menu
+        className="sidebar-menu"
+        theme="dark"
+        mode="inline"
+        selectedKeys={[selectedKey]}
+        items={menuItems}
+        onClick={({ key }) => {
+          setNavigationLocation(null);
+          navigate(key);
+        }}
+      />
+    </nav>
+    <div className="sidebar-footer" role="status" aria-live="polite">
+      <span className={`sidebar-status-dot${alertStatusUnknown ? ' unknown' : activeAlerts > 0 ? ' alerting' : ''}`} />
+      <span>{!isOnline ? t('nav.offline') : alertError ? t('nav.alertStatusUnavailable') : activeAlerts === null ? t('common.loading') : activeAlerts > 0 ? t('nav.systemAlerting', { count: activeAlerts }) : t('nav.noActiveAlerts')}</span>
+      {alertError && isOnline && <Button type="text" size="small" icon={<ReloadOutlined />} aria-label={t('nav.retryAlerts')} onClick={refreshAlertBadge} />}
+    </div>
+  </>;
 
   return (
     <AntLayout className="app-shell">
-      <Sider className="app-sidebar" width={248} breakpoint="lg" collapsedWidth="0">
-        <div className="brand-lockup">
-          <div className="brand-mark"><CloudServerOutlined /></div>
-          <div className="brand-copy">
-            <span>{t('app.title')}</span>
-            <small>{t('nav.controlCenter')}</small>
-          </div>
-        </div>
-        <Menu
-          className="sidebar-menu"
-          theme="dark"
-          mode="inline"
-          selectedKeys={[selectedKey]}
-          items={menuItems}
-          onClick={({ key }) => navigate(key)}
-        />
-        <div className="sidebar-footer">
-          <span className={`sidebar-status-dot${activeAlerts > 0 ? ' alerting' : ''}`} />
-          <span>{activeAlerts > 0 ? t('nav.systemAlerting', { count: activeAlerts }) : t('nav.systemOnline')}</span>
-        </div>
-      </Sider>
+      {isMobile ? <Drawer
+        rootClassName="mobile-navigation-drawer"
+        placement="left"
+        title={t('nav.navigation')}
+        open={navigationOpen}
+        size={280}
+        onClose={() => setNavigationLocation(null)}
+        styles={{ body: { padding: 0 } }}
+      >{sidebarContent}</Drawer> : <Sider className="app-sidebar" width={248}>{sidebarContent}</Sider>}
       <AntLayout className="app-main">
         <Header className="app-header">
+          <Button className="mobile-menu-button header-icon-button" type="text" icon={<MenuOutlined />} aria-label={t('nav.openNavigation')} aria-expanded={navigationOpen} aria-haspopup="dialog" onClick={() => setNavigationLocation(location.key)} />
           <div className="page-context">
             <Text type="secondary" className="page-context-label">{t('nav.workspace')}</Text>
             <strong>{currentLabel || t('server.serverDetail')}</strong>
           </div>
           <Space size={6} className="header-actions">
-            <Tooltip title={t('nav.alerts')}>
-              <Badge count={activeAlerts} size="small" offset={[-4, 4]}>
+            <Tooltip title={alertError ? t('nav.alertStatusUnavailable') : t('nav.alerts')}>
+              <Badge count={activeAlerts ?? 0} size="small" offset={[-4, 4]}>
                 <Button
                   className="header-icon-button"
                   type="text"
@@ -155,7 +199,7 @@ export default function AppLayout() {
             <div className="header-divider" />
             <div className="user-chip">
               <Avatar size={34}>{userInitial}</Avatar>
-              <span>{user?.username}</span>
+              <span title={user?.username}>{user?.username}</span>
             </div>
             <Tooltip title={t('nav.logout')}>
               <Button className="header-icon-button" type="text" aria-label={t('nav.logout')} icon={<LogoutOutlined />} onClick={handleLogout} />
@@ -170,7 +214,9 @@ export default function AppLayout() {
                 <span>{t('nav.networkOffline')}</span>
               </div>
             )}
-            <Outlet />
+            <Suspense fallback={<div className="page-loading" role="status" aria-label={t('common.loading')}><Spin size="large" /></div>}>
+              <Outlet />
+            </Suspense>
           </div>
         </Content>
       </AntLayout>

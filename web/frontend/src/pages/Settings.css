@@ -1,0 +1,19 @@
+.settings-page .account-identity > div {
+  min-width: 0;
+}
+
+@media (max-width: 575px) {
+  .settings-tags-card .ant-card-head-wrapper {
+    flex-wrap: wrap;
+    gap: 10px;
+    padding-block: 14px;
+  }
+
+  .settings-tags-card .ant-card-head-title {
+    flex: 1 0 100%;
+  }
+
+  .settings-tags-card .ant-card-extra {
+    margin-inline-start: 0;
+  }
+}

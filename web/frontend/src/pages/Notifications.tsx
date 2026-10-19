@@ -7,6 +7,7 @@ import type { DeliveryStatus, NotificationChannel, NotificationChannelInput, Not
 import { usePolling } from '../hooks/usePolling';
 import { formatDateTime } from '../utils/format';
 import '../i18n/notifications';
+import './Operations.css';
 
 const types: NotificationType[] = ['telegram', 'wecom', 'dingtalk', 'email', 'webhook'];
 const statuses: DeliveryStatus[] = ['pending', 'sending', 'retry', 'succeeded', 'failed', 'canceled'];
@@ -95,11 +96,11 @@ export default function Notifications() {
   </Space>;
   const rows = result?.page === page ? result.rows : [];
 
-  return <div style={{ padding: 24 }}>
-    <Space style={{ width: '100%', justifyContent: 'space-between', flexWrap: 'wrap' }}>
-      <div><Typography.Title level={3}>{t('title')}</Typography.Title><Typography.Paragraph type="secondary">{t('hint')}</Typography.Paragraph></div>
+  return <div className="operations-page notifications-page">
+    <div className="page-heading">
+      <div><Typography.Title level={2}>{t('title')}</Typography.Title><Typography.Paragraph type="secondary">{t('hint')}</Typography.Paragraph></div>
       <Space><Button icon={<ReloadOutlined />} loading={loading} disabled={busy} onClick={() => void load()}>{t('refresh')}</Button><Button type="primary" icon={<PlusOutlined />} disabled={busy} onClick={() => edit()}>{t('add')}</Button></Space>
-    </Space>
+    </div>
     {loadError && <Alert type="error" showIcon title={t('loadFailed')} style={{ marginBottom: 16 }} />}
     <Tabs activeKey={tab} onChange={setTab} items={[
       { key: 'channels', label: t('channels'), children: <Card><Table<NotificationChannel> rowKey="id" dataSource={channels} loading={loading && !channels.length} pagination={false}
@@ -111,14 +112,14 @@ export default function Notifications() {
         ]} /></Card> },
       { key: 'deliveries', label: t('deliveries'), children: <Card>
         <Alert type="info" title={t('deliveryHint')} style={{ marginBottom: 16 }} />
-        <Space wrap style={{ marginBottom: 16 }}>
-          <Select aria-label={t('status')} allowClear placeholder={t('status')} style={{ width: 180 }} value={page.status}
+        <div className="notification-filters">
+          <Select aria-label={t('status')} allowClear placeholder={t('status')} value={page.status}
             options={statuses.map(status => ({ value: status, label: t(status === 'failed' ? 'failedStatus' : status) }))}
             onChange={status => setPage(current => ({ ...current, status, cursor: '', previous: [] }))} />
-          <Select aria-label={t('channel')} allowClear placeholder={t('channel')} style={{ width: 200 }} value={page.channel_id}
+          <Select aria-label={t('channel')} allowClear showSearch optionFilterProp="label" placeholder={t('channel')} value={page.channel_id}
             options={channels.map(channel => ({ value: channel.id, label: channel.name }))}
             onChange={channel_id => setPage(current => ({ ...current, channel_id, cursor: '', previous: [] }))} />
-        </Space>
+        </div>
         <Table<NotificationDelivery> rowKey="id" dataSource={rows} loading={loading && !rows.length} pagination={false} scroll={{ x: 1050 }}
           locale={{ emptyText: <Empty description={t('noDeliveries')} /> }} columns={[
             { title: '#', render: (_, row) => <Space orientation="vertical"><span>{row.id}</span>{row.retry_of && <Typography.Text type="secondary">{t('retryOf', { id: row.retry_of })}</Typography.Text>}</Space> },

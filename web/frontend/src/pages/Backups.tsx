@@ -3,6 +3,7 @@ import { Alert, App, Button, Card, Checkbox, Descriptions, Form, Input, Space, T
 import { useTranslation } from 'react-i18next';
 import client from '../api/client';
 import '../i18n/operations';
+import './Operations.css';
 
 interface Preview { backup_id: string; servers: number; credentials: number; tags: number; rules: number; notification_channels: number; network_checks: number; agent_servers: number; includes_credentials: boolean; already_imported: boolean; server_names: string[] }
 interface PreviewResponse { preview: Preview; digest: string }
@@ -82,7 +83,7 @@ export default function Backups() {
     if (!snapshot || snapshot.preview.already_imported || !valid || reading || operation.current || confirmation.current) return;
     confirmation.current = modal.confirm({
       title: t('restoreConfirm'),
-      content: <Typography.Text>{snapshot.preview.server_names.join(' · ')}</Typography.Text>,
+      content: <Typography.Text style={{ overflowWrap: 'anywhere' }}>{snapshot.preview.server_names.join(' · ')}</Typography.Text>,
       afterClose: () => { confirmation.current = null; },
       onOk: async () => {
         if (snapshot.revision !== revision.current) { message.warning(t('previewChanged')); return; }
@@ -113,7 +114,7 @@ export default function Backups() {
     } catch { if (mounted.current && sequence === fileSequence.current) message.error(t('fileReadFailed')); }
     finally { if (mounted.current && sequence === fileSequence.current) setReading(false); }
   };
-  return <div className="page-content"><Typography.Title level={3}>{t('backupTitle')}</Typography.Title>
+  return <div className="operations-page backups-page"><div className="page-heading"><Typography.Title level={2}>{t('backupTitle')}</Typography.Title></div>
     <Form layout="vertical" style={{ maxWidth: 560 }} disabled={busy}>
       <Form.Item label={t('accountPassword')}><Input.Password aria-label={t('accountPassword')} autoComplete="current-password" value={account} onChange={event => { invalidate(); setAccount(event.target.value); }} /></Form.Item>
       <Form.Item label={t('backupPassword')}><Input.Password aria-label={t('backupPassword')} autoComplete="new-password" value={password} onChange={event => { invalidate(); setPassword(event.target.value); }} /></Form.Item>
@@ -124,10 +125,10 @@ export default function Backups() {
           <Button type="primary" aria-label={t('export')} aria-busy={busy} onClick={() => { void exportBackup(); }} disabled={!valid || busy || reading} loading={busy}>{t('export')}</Button></Space>
       </Card>
       <Card title={t('import')}><Alert type="info" title={t('restoreHint')} />
-        <Form.Item label={t('file')} style={{ marginTop: 16 }}><input type="file" accept=".smbak" aria-label={t('chooseFile')} disabled={busy} onChange={event => {
+        <Form.Item layout="vertical" label={t('file')} style={{ marginTop: 16 }}><input className="backup-file-input" type="file" accept=".smbak" aria-label={t('chooseFile')} disabled={busy} onChange={event => {
           const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; void readFile(file);
         }} /></Form.Item>
-        <Space wrap><Typography.Text>{filename}</Typography.Text>{reading && <Typography.Text>{t('readingFile')}</Typography.Text>}
+        <Space wrap className="backup-file-actions"><Typography.Text>{filename}</Typography.Text>{reading && <Typography.Text role="status">{t('readingFile')}</Typography.Text>}
           <Button aria-label={t('preview')} aria-busy={busy} disabled={!valid || !data || busy || reading} onClick={() => { void previewBackup(); }}>{t('preview')}</Button></Space>
         {preview && <div style={{ marginTop: 16 }}>
           <Descriptions column={{ xs: 1, sm: 2, md: 3 }} bordered items={[

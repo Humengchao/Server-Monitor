@@ -32,8 +32,8 @@ export const authApi = {
 
   me: () => client.get('/auth/me'),
 
-  getLoginHistory: (limit = 20, offset = 0) =>
-    client.get<{ records: LoginHistoryItem[]; total: number }>('/auth/login-history', { params: { limit, offset } }),
+  getLoginHistory: (limit = 20, offset = 0, signal?: AbortSignal) =>
+    client.get<{ records: LoginHistoryItem[]; total: number }>('/auth/login-history', { params: { limit, offset }, signal }),
 
   // skipAuthRedirect: a rejected current password must surface as a form error,
   // never as a forced sign-out.

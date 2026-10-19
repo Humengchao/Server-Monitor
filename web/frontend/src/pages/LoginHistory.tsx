@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Button, Card, Result, Table, Tag, Typography } from 'antd';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, Button, Card, Result, Table, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
@@ -18,24 +18,41 @@ export default function LoginHistory() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [page, setPage] = useState(1);
+  const requestRef = useRef<AbortController | null>(null);
+  const failedPageRef = useRef(1);
 
-  const fetchData = async (p: number) => {
+  const fetchData = useCallback(async (p: number) => {
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
     setLoading(true);
+    setError(false);
     try {
-      const res = await authApi.getLoginHistory(20, (p - 1) * 20);
+      const res = await authApi.getLoginHistory(20, (p - 1) * 20, controller.signal);
+      if (controller.signal.aborted || requestRef.current !== controller) return;
       setRecords(res.data.records || []);
       setTotal(res.data.total || 0);
+      setPage(p);
       setError(false);
     } catch {
+      if (controller.signal.aborted || requestRef.current !== controller) return;
+      failedPageRef.current = p;
       setError(true);
+    } finally {
+      if (!controller.signal.aborted && requestRef.current === controller) {
+        requestRef.current = null;
+        setLoading(false);
+      }
     }
-    setLoading(false);
-  };
+  }, []);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => { void fetchData(page); }, 0);
-    return () => window.clearTimeout(timer);
-  }, [page]);
+    const timer = window.setTimeout(() => { void fetchData(1); }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      requestRef.current?.abort();
+    };
+  }, [fetchData]);
 
   const columns: ColumnsType<LoginHistoryItem> = [
     {
@@ -90,9 +107,17 @@ export default function LoginHistory() {
         <Result
           status="error"
           title={t('loginHistory.loadFailed')}
-          extra={<Button type="primary" icon={<ReloadOutlined />} onClick={() => { void fetchData(page); }}>{t('common.refresh')}</Button>}
+          extra={<Button type="primary" icon={<ReloadOutlined />} onClick={() => { void fetchData(failedPageRef.current); }}>{t('common.refresh')}</Button>}
         />
       ) : (
+      <>
+      {error && <Alert
+        type="error"
+        showIcon
+        title={t('loginHistory.loadFailed')}
+        style={{ marginBottom: 16 }}
+        action={<Button size="small" icon={<ReloadOutlined />} onClick={() => { void fetchData(failedPageRef.current); }}>{t('common.refresh')}</Button>}
+      />}
       <Table
         className="server-table"
         rowKey="id"
@@ -105,10 +130,12 @@ export default function LoginHistory() {
           current: page,
           total,
           pageSize: 20,
-          onChange: setPage,
+          onChange: (next) => { void fetchData(next); },
+          showSizeChanger: false,
           showTotal: (cnt) => t('loginHistory.total', { count: cnt }),
         }}
       />
+      </>
       )}
       </Card>
     </div>

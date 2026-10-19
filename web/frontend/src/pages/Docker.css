@@ -1,0 +1,15 @@
+.docker-logs-drawer .ant-drawer-header { flex-wrap: wrap; gap: 12px 20px; }
+.docker-logs-drawer .ant-drawer-header-title { min-width: 0; flex: 1 1 220px; }
+.docker-logs-drawer .ant-drawer-title { min-width: 0; overflow-wrap: anywhere; }
+.docker-logs-drawer .ant-drawer-close { flex-shrink: 0; }
+.docker-logs-drawer .ant-drawer-extra { min-width: 0; margin-inline-start: 0; }
+.docker-logs-drawer .docker-logs:focus-visible { outline: 2px solid #8ba7ff; outline-offset: -2px; }
+
+@media (max-width: 767px) {
+  .docker-logs-drawer .ant-drawer-header { padding: 16px; }
+  .docker-logs-drawer .ant-drawer-header-title,
+  .docker-logs-drawer .ant-drawer-extra { flex-basis: 100%; }
+  .docker-logs-drawer .ant-drawer-title { font-size: 15px; }
+  .docker-logs-drawer .docker-logs-tools { width: 100%; }
+  .docker-logs-drawer .docker-logs-tools .ant-btn { min-height: 32px; }
+}

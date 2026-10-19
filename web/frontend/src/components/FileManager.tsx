@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import type { Text as EditorText } from '@codemirror/state';
-import type { DragEvent } from 'react';
+import type { DragEvent, ReactNode } from 'react';
 import { Alert, App, Breadcrumb, Button, Card, Empty, Input, Modal, Progress, Space, Spin, Table, Tag, Tooltip, Typography } from 'antd';
 import {
   ArrowUpOutlined, CloudUploadOutlined, CodeOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, FileAddOutlined, FileImageOutlined, FileOutlined, FilePdfOutlined, FileTextOutlined, FileZipOutlined,
@@ -328,12 +328,15 @@ export default function FileManager({ serverId, containerId, onLockedChange }: P
     },
   ];
   const parts = (listing?.path || '').split('/').filter(Boolean);
+  const crumb = (path: string, title: ReactNode, current = false) => current
+    ? <span aria-current="page">{title}</span>
+    : <button type="button" className="file-crumb-button" aria-label={path} title={path} disabled={locked} onClick={() => { void loadDirectory(path); }}>{title}</button>;
   const breadcrumbs = [
-    { title: <span className="file-crumb-root" aria-label="/"><HomeOutlined /></span>, onClick: () => { if (!locked) void loadDirectory('/'); } },
+    { title: crumb('/', <span className="file-crumb-root" aria-label="/"><HomeOutlined /></span>, parts.length === 0) },
     ...parts.map((part, index) => {
       let path = (listing?.path.startsWith('/') ? '/' : '') + parts.slice(0, index + 1).join('/');
       if (/^\/?[A-Za-z]:$/.test(path)) path += '/';
-      return { title: part, onClick: () => { if (!locked) void loadDirectory(path); } };
+      return { title: crumb(path, part, index === parts.length - 1) };
     }),
   ];
 

@@ -219,6 +219,19 @@ async function backupFixture(page: Page) {
 }
 async function pickBackup(page: Page) { await page.getByLabel('Choose backup file', { exact: true }).setInputFiles({ name: 'fixture.smbak', mimeType: 'application/octet-stream', buffer: opaqueBackup }); }
 
+test('backup file selection and long filenames fit a narrow phone without hiding restore actions', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 740 });
+  const { errors } = await backupFixture(page);
+  const filename = `${'long-backup-filename-'.repeat(8)}.smbak`;
+  await page.getByLabel('Choose backup file', { exact: true }).setInputFiles({ name: filename, mimeType: 'application/octet-stream', buffer: opaqueBackup });
+  await expect(page.getByText(filename, { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+  await page.getByRole('button', { name: 'Preview restore', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Restore this backup', exact: true })).toBeEnabled();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+  expect(errors).toEqual([]);
+});
+
 test('backup export downloads opaque encrypted bytes and reads JSON errors from Blob responses', async ({ page }) => {
   const { state, errors } = await backupFixture(page);
   const download = page.waitForEvent('download');

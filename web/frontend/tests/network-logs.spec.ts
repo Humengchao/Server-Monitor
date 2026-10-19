@@ -163,3 +163,44 @@ test('incident logs link has an exact twenty-minute window and never guesses a s
   expect(Date.parse(url.searchParams.get('until')!)).toBe(observedAt + 600000);
   expect(url.searchParams.has('unit')).toBe(false);
 });
+
+test('network comparison controls and summary stay inside a narrow phone viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 740 });
+  const errors = await setup(page);
+  await page.route('**/api/network/checks', route => route.fulfill({ json: [{ ...check, name: 'Probe-with-a-very-long-unbroken-name-for-mobile-layout' }] }));
+  await page.route('**/api/network/checks/*/history?**', route => route.fulfill({ json: { samples: [sample], summary: { sent: 5, received: 4, loss_percent: 20, avg_ms: 12 }, truncated: false } }));
+  await page.goto('/network');
+  await expect(page.getByRole('combobox', { name: 'Select up to four checks' })).toBeVisible();
+  await expect(page.getByText('20.00%').last()).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+  const range = page.getByRole('combobox', { name: 'Time range', exact: true });
+  await range.click();
+  await page.getByText('Last 24 hours', { exact: true }).click();
+  await expect(page.locator('.network-comparison-controls')).toContainText('Last 24 hours');
+  expect(errors).toEqual([]);
+});
+
+test('invalid log time ranges keep the displayed results and do not submit a request', async ({ page }) => {
+  const errors = await setup(page);
+  const requests: URL[] = [];
+  await page.route('**/api/servers/target/logs?**', route => {
+    requests.push(new URL(route.request().url()));
+    return route.fulfill({ json: { entries: [{ id: 'initial', time: new Date(observedAt).toISOString(), message: 'Keep this visible while fixing filters', stream: 'journal' }], scanned: 1 } });
+  });
+  await page.goto('/logs?server=target');
+  await expect(page.getByText('Keep this visible while fixing filters', { exact: true })).toBeVisible();
+  await page.getByLabel('From', { exact: true }).fill('2030-06-02T10:00');
+  await page.getByLabel('Until (empty for current time)', { exact: true }).fill('2030-06-01T10:00');
+  await page.getByRole('button', { name: 'Apply filters', exact: true }).click();
+  await expect(page.getByText('The end time must be later than the start time.', { exact: true })).toBeVisible();
+  expect(requests).toHaveLength(1);
+  const output = page.getByRole('region', { name: 'Logs', exact: true });
+  await expect(output).toContainText('Keep this visible while fixing filters');
+  await output.focus();
+  await expect(output).toBeFocused();
+  await page.getByLabel('Until (empty for current time)', { exact: true }).fill('2030-06-03T10:00');
+  await expect(page.getByText('The end time must be later than the start time.', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Apply filters', exact: true }).click();
+  await expect.poll(() => requests.length).toBe(2);
+  expect(errors).toEqual([]);
+});

@@ -12,7 +12,7 @@ export interface Credential {
 }
 
 export const credentialsApi = {
-  list: () => client.get<Credential[]>('/credentials'),
+  list: (signal?: AbortSignal) => client.get<Credential[]>('/credentials', { signal }),
 
   create: (data: {
     name: string;
