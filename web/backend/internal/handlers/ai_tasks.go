@@ -49,7 +49,7 @@ func aiTaskError(c *gin.Context, err error) {
 		c.JSON(404, gin.H{"error": "task, server or provider not found"})
 	case errors.Is(err, models.ErrAITaskConflict), errors.Is(err, models.ErrAITaskLimit), errors.Is(err, models.ErrAIRequestConflict):
 		c.JSON(409, gin.H{"error": err.Error()})
-	case errors.Is(err, models.ErrAIProviderDisabled), errors.Is(err, services.ErrAISecretInput), errors.Is(err, services.ErrAIAgentNotEnrolled):
+	case errors.Is(err, models.ErrAIProviderDisabled), errors.Is(err, models.ErrAIPluginDisabled), errors.Is(err, models.ErrAITaskOptions), errors.Is(err, services.ErrAISecretInput), errors.Is(err, services.ErrAIAgentNotEnrolled):
 		c.JSON(400, gin.H{"error": err.Error()})
 	default:
 		c.JSON(500, gin.H{"error": "AI task operation failed; refresh its status before retrying"})
@@ -75,10 +75,13 @@ func validAIPrompt(message string) bool {
 
 func (h *AITaskHandler) Create(c *gin.Context) {
 	var req struct {
-		ServerID   uuid.UUID `json:"server_id"`
-		ProviderID uuid.UUID `json:"provider_id"`
-		RequestID  uuid.UUID `json:"request_id"`
-		Prompt     string    `json:"prompt"`
+		ServerID     uuid.UUID   `json:"server_id"`
+		ProviderID   uuid.UUID   `json:"provider_id"`
+		RequestID    uuid.UUID   `json:"request_id"`
+		Prompt       string      `json:"prompt"`
+		ApprovalMode string      `json:"approval_mode"`
+		SkillIDs     []uuid.UUID `json:"skill_ids"`
+		PluginIDs    []uuid.UUID `json:"plugin_ids"`
 	}
 	if !readAITaskRequest(c, &req) {
 		return
@@ -89,7 +92,7 @@ func (h *AITaskHandler) Create(c *gin.Context) {
 	}
 	ctx, cancel, _, user := aiContext(c)
 	defer cancel()
-	task, err := h.worker.Create(ctx, user, req.ServerID, req.ProviderID, req.RequestID, strings.TrimSpace(req.Prompt))
+	task, err := h.worker.Create(ctx, user, req.ServerID, req.ProviderID, req.RequestID, strings.TrimSpace(req.Prompt), models.AITaskSelection{ApprovalMode: req.ApprovalMode, SkillIDs: req.SkillIDs, PluginIDs: req.PluginIDs})
 	if err != nil {
 		aiTaskError(c, err)
 		return

@@ -67,13 +67,14 @@ func NormalizeAIProvider(p *AIProvider) error {
 	if p.Name == "" || len(p.Name) > 128 || strings.ContainsFunc(p.Name, unicode.IsControl) {
 		return errors.New("provider name must be 1 to 128 bytes without control characters")
 	}
-	if p.Kind != "deepseek" && p.Kind != "compatible" {
-		return errors.New("provider kind must be deepseek or compatible")
+	baseURL, known := aiProviderBaseURLs[p.Kind]
+	if !known {
+		return errors.New("unsupported AI provider kind")
+	}
+	if p.BaseURL == "" {
+		p.BaseURL = baseURL
 	}
 	if p.Kind == "deepseek" {
-		if p.BaseURL == "" {
-			p.BaseURL = DefaultDeepSeekBaseURL
-		}
 		if p.Model == "" {
 			p.Model = DefaultDeepSeekModel
 		}
@@ -88,6 +89,22 @@ func NormalizeAIProvider(p *AIProvider) error {
 		return errors.New("API key must contain at most 4096 visible ASCII characters")
 	}
 	return nil
+}
+
+// Only protocol-compatible endpoints are presets. Model IDs are discovered
+// from each account's live catalog rather than inferred from a static list.
+// Custom endpoints deliberately have no default to avoid sending keys to an
+// unintended provider; changing any saved endpoint still requires a new key.
+var aiProviderBaseURLs = map[string]string{
+	"deepseek":    DefaultDeepSeekBaseURL,
+	"openai":      "https://api.openai.com/v1",
+	"qwen":        "https://dashscope.aliyuncs.com/compatible-mode/v1",
+	"moonshot":    "https://api.moonshot.cn/v1",
+	"zhipu":       "https://open.bigmodel.cn/api/paas/v4",
+	"siliconflow": "https://api.siliconflow.cn/v1",
+	"gemini":      "https://generativelanguage.googleapis.com/v1beta/openai",
+	"compatible":  "",
+	"cpa":         "",
 }
 
 func ParseAIBaseURL(raw string) (*url.URL, error) {

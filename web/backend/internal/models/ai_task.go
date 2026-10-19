@@ -19,27 +19,31 @@ var ErrAITaskLimit = errors.New("finish or cancel the active task on this server
 var ErrAIRequestConflict = errors.New("this request ID was already used with different content; use a new request ID")
 
 type AITask struct {
-	ID                  uuid.UUID       `json:"id"`
-	UserID              uuid.UUID       `json:"-"`
-	ServerID            uuid.UUID       `json:"server_id"`
-	ServerName          string          `json:"server_name"`
-	ServerType          string          `json:"server_type"`
-	ProviderID          uuid.UUID       `json:"provider_id"`
-	ProviderName        string          `json:"provider_name"`
-	Model               string          `json:"model"`
-	RequestID           uuid.UUID       `json:"-"`
-	Prompt              string          `json:"prompt"`
-	Status              string          `json:"status"`
-	Error               string          `json:"error"`
-	Messages            json.RawMessage `json:"-"`
-	TargetFingerprint   string          `json:"-"`
-	ProviderFingerprint string          `json:"-"`
-	WorkerID            string          `json:"-"`
-	Steps               int             `json:"steps"`
-	PromptTokens        int64           `json:"prompt_tokens"`
-	CompletionTokens    int64           `json:"completion_tokens"`
-	CreatedAt           time.Time       `json:"created_at"`
-	UpdatedAt           time.Time       `json:"updated_at"`
+	ID                  uuid.UUID            `json:"id"`
+	UserID              uuid.UUID            `json:"-"`
+	ServerID            uuid.UUID            `json:"server_id"`
+	ServerName          string               `json:"server_name"`
+	ServerType          string               `json:"server_type"`
+	ProviderID          uuid.UUID            `json:"provider_id"`
+	ProviderName        string               `json:"provider_name"`
+	Model               string               `json:"model"`
+	RequestID           uuid.UUID            `json:"-"`
+	Prompt              string               `json:"prompt"`
+	Status              string               `json:"status"`
+	Error               string               `json:"error"`
+	Messages            json.RawMessage      `json:"-"`
+	TargetFingerprint   string               `json:"-"`
+	ProviderFingerprint string               `json:"-"`
+	WorkerID            string               `json:"-"`
+	Steps               int                  `json:"steps"`
+	PromptTokens        int64                `json:"prompt_tokens"`
+	CompletionTokens    int64                `json:"completion_tokens"`
+	CreatedAt           time.Time            `json:"created_at"`
+	UpdatedAt           time.Time            `json:"updated_at"`
+	ApprovalMode        string               `json:"approval_mode"`
+	Options             json.RawMessage      `json:"-"`
+	Skills              []AITaskExtensionRef `json:"skills"`
+	Plugins             []AITaskExtensionRef `json:"plugins"`
 }
 type AIEvent struct {
 	ID        int64      `json:"id"`
@@ -71,11 +75,14 @@ type AIAction struct {
 	CompletedAt      *time.Time      `json:"completed_at,omitempty"`
 }
 
-const aiTaskColumns = `id,user_id,server_id,server_name,server_type,provider_id,provider_name,model,request_id,prompt,status,error,messages,target_fingerprint,provider_fingerprint,worker_id,steps,prompt_tokens,completion_tokens,created_at,updated_at`
+const aiTaskColumns = `id,user_id,server_id,server_name,server_type,provider_id,provider_name,model,request_id,prompt,status,error,messages,target_fingerprint,provider_fingerprint,worker_id,steps,prompt_tokens,completion_tokens,created_at,updated_at,approval_mode,options`
 
 func scanAITask(row interface{ Scan(...any) error }) (AITask, error) {
 	var t AITask
-	err := row.Scan(&t.ID, &t.UserID, &t.ServerID, &t.ServerName, &t.ServerType, &t.ProviderID, &t.ProviderName, &t.Model, &t.RequestID, &t.Prompt, &t.Status, &t.Error, &t.Messages, &t.TargetFingerprint, &t.ProviderFingerprint, &t.WorkerID, &t.Steps, &t.PromptTokens, &t.CompletionTokens, &t.CreatedAt, &t.UpdatedAt)
+	err := row.Scan(&t.ID, &t.UserID, &t.ServerID, &t.ServerName, &t.ServerType, &t.ProviderID, &t.ProviderName, &t.Model, &t.RequestID, &t.Prompt, &t.Status, &t.Error, &t.Messages, &t.TargetFingerprint, &t.ProviderFingerprint, &t.WorkerID, &t.Steps, &t.PromptTokens, &t.CompletionTokens, &t.CreatedAt, &t.UpdatedAt, &t.ApprovalMode, &t.Options)
+	if err == nil {
+		_, err = t.DecodeOptions()
+	}
 	return t, err
 }
 func GetAITask(ctx context.Context, db *sql.DB, id, user uuid.UUID) (AITask, error) {
@@ -86,6 +93,16 @@ func FindAITaskRequest(ctx context.Context, db *sql.DB, user, request uuid.UUID)
 }
 
 func CreateAITask(ctx context.Context, db *sql.DB, t *AITask) error {
+	if t.ApprovalMode == "" {
+		t.ApprovalMode = "standard"
+	}
+	if len(t.Options) == 0 {
+		t.Options = json.RawMessage(`{}`)
+	}
+	selection, err := t.Selection()
+	if err != nil {
+		return err
+	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -97,7 +114,7 @@ func CreateAITask(ctx context.Context, db *sql.DB, t *AITask) error {
 	}
 	previous, err := scanAITask(tx.QueryRowContext(ctx, `SELECT `+aiTaskColumns+` FROM ai_tasks WHERE user_id=$1 AND request_id=$2`, t.UserID, t.RequestID))
 	if err == nil {
-		if previous.ServerID != t.ServerID || previous.ProviderID != t.ProviderID || previous.Prompt != t.Prompt {
+		if previous.ServerID != t.ServerID || previous.ProviderID != t.ProviderID || previous.Prompt != t.Prompt || !previous.MatchesSelection(selection) {
 			return ErrAIRequestConflict
 		}
 		*t = previous
@@ -126,7 +143,7 @@ func CreateAITask(ctx context.Context, db *sql.DB, t *AITask) error {
 	}
 	t.ID = uuid.New()
 	t.Status = "queued"
-	err = tx.QueryRowContext(ctx, `INSERT INTO ai_tasks(id,user_id,server_id,server_name,server_type,provider_id,provider_name,model,request_id,prompt,messages,target_fingerprint,provider_fingerprint) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING created_at,updated_at`, t.ID, t.UserID, t.ServerID, t.ServerName, t.ServerType, t.ProviderID, t.ProviderName, t.Model, t.RequestID, t.Prompt, []byte(t.Messages), t.TargetFingerprint, t.ProviderFingerprint).Scan(&t.CreatedAt, &t.UpdatedAt)
+	err = tx.QueryRowContext(ctx, `INSERT INTO ai_tasks(id,user_id,server_id,server_name,server_type,provider_id,provider_name,model,request_id,prompt,messages,target_fingerprint,provider_fingerprint,approval_mode,options) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING created_at,updated_at`, t.ID, t.UserID, t.ServerID, t.ServerName, t.ServerType, t.ProviderID, t.ProviderName, t.Model, t.RequestID, t.Prompt, []byte(t.Messages), t.TargetFingerprint, t.ProviderFingerprint, t.ApprovalMode, []byte(t.Options)).Scan(&t.CreatedAt, &t.UpdatedAt)
 	if err != nil {
 		return err
 	}

@@ -55,6 +55,10 @@ func (e *AIProviderError) Error() string {
 		return "AI response exceeded the 2 MiB limit"
 	case "invalid_response":
 		return "AI provider returned an invalid chat completion"
+	case "invalid_models_response":
+		return "AI provider returned an invalid model catalog; enter a model ID manually"
+	case "models_not_supported":
+		return "AI provider does not support model discovery at this endpoint; enter a model ID manually"
 	case "incomplete_response":
 		return "AI generation did not finish; no tool actions were accepted"
 	case "invalid_request":
@@ -269,6 +273,10 @@ func validateAIInput(messages []AIMessage, tools []AIToolDefinition) (map[string
 		inputBytes += len(message.Content) + len(message.ReasoningContent) + len(message.ToolCallID)
 		for _, call := range message.ToolCalls {
 			inputBytes += len(call.ID) + len(call.Type) + len(call.Function.Name) + len(call.Function.Arguments)
+			inputBytes += len(aiToolSignature(call))
+			if !validAIToolSignature(call) {
+				return nil, bad
+			}
 		}
 		if inputBytes > aiRequestBodyLimit {
 			return nil, bad
@@ -310,6 +318,10 @@ func (c *AIClient) complete(ctx context.Context, provider models.AIProvider, mes
 		return empty, err
 	}
 	body := map[string]any{"model": provider.Model, "messages": messages, "stream": false, "max_tokens": maxTokens}
+	if provider.Kind == "openai" {
+		delete(body, "max_tokens")
+		body["max_completion_tokens"] = maxTokens
+	}
 	if len(tools) > 0 {
 		body["tools"] = tools
 		body["tool_choice"] = "auto"
@@ -325,16 +337,26 @@ func (c *AIClient) complete(ctx context.Context, provider models.AIProvider, mes
 	if err != nil {
 		return empty, err
 	}
+	raw, err := c.requestJSON(ctx, provider, http.MethodPost, endpoint, data)
+	if err != nil {
+		return empty, err
+	}
+	return parseAICompletion(raw, allowed)
+}
+
+// Both model discovery and chat completions use the same one-shot pinned TLS
+// transport. No upstream response body or network exception leaves this layer.
+func (c *AIClient) requestJSON(ctx context.Context, provider models.AIProvider, method, endpoint string, data []byte) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, AIProviderTimeout)
 	defer cancel()
 	pin, err := c.resolveEndpoint(ctx, endpoint)
 	if err != nil {
-		return empty, err
+		return nil, err
 	}
 	ctx = context.WithValue(ctx, aiPinnedEndpointKey{}, pin)
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
+	request, err := http.NewRequestWithContext(ctx, method, endpoint, bytes.NewReader(data))
 	if err != nil {
-		return empty, &AIProviderError{Code: "invalid_configuration"}
+		return nil, &AIProviderError{Code: "invalid_configuration"}
 	}
 	request.Header.Set("Authorization", "Bearer "+provider.APIKey)
 	request.Header.Set("Content-Type", "application/json")
@@ -343,37 +365,39 @@ func (c *AIClient) complete(ctx context.Context, provider models.AIProvider, mes
 	response, err := c.client.Do(request)
 	if err != nil {
 		if ctx.Err() != nil {
-			return empty, ctx.Err()
+			return nil, ctx.Err()
 		}
-		return empty, &AIProviderError{Code: "connection_failed"}
+		return nil, &AIProviderError{Code: "connection_failed"}
 	}
 	defer response.Body.Close()
 	switch {
 	case response.StatusCode >= 300 && response.StatusCode < 400:
-		return empty, &AIProviderError{Code: "redirect_rejected"}
+		return nil, &AIProviderError{Code: "redirect_rejected"}
 	case response.StatusCode == 401 || response.StatusCode == 403:
-		return empty, &AIProviderError{Code: "authentication_failed"}
+		return nil, &AIProviderError{Code: "authentication_failed"}
 	case response.StatusCode == 429:
-		return empty, &AIProviderError{Code: "rate_limited"}
+		return nil, &AIProviderError{Code: "rate_limited"}
+	case method == http.MethodGet && (response.StatusCode == 404 || response.StatusCode == 405 || response.StatusCode == 501):
+		return nil, &AIProviderError{Code: "models_not_supported"}
 	case response.StatusCode >= 500:
-		return empty, &AIProviderError{Code: "upstream_unavailable"}
+		return nil, &AIProviderError{Code: "upstream_unavailable"}
 	case response.StatusCode < 200 || response.StatusCode >= 300:
-		return empty, &AIProviderError{Code: "request_rejected"}
+		return nil, &AIProviderError{Code: "request_rejected"}
 	}
 	if response.ContentLength > AIProviderBodyLimit {
-		return empty, &AIProviderError{Code: "response_too_large"}
+		return nil, &AIProviderError{Code: "response_too_large"}
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, AIProviderBodyLimit+1))
 	if err != nil {
 		if ctx.Err() != nil {
-			return empty, ctx.Err()
+			return nil, ctx.Err()
 		}
-		return empty, &AIProviderError{Code: "invalid_response"}
+		return nil, &AIProviderError{Code: "invalid_response"}
 	}
 	if len(raw) > AIProviderBodyLimit {
-		return empty, &AIProviderError{Code: "response_too_large"}
+		return nil, &AIProviderError{Code: "response_too_large"}
 	}
-	return parseAICompletion(raw, allowed)
+	return raw, nil
 }
 
 func parseAICompletion(raw []byte, allowed map[string]bool) (AICompletion, error) {
@@ -424,7 +448,7 @@ func parseAICompletion(raw []byte, allowed map[string]bool) (AICompletion, error
 			if call.ID == "" || len(call.ID) > 128 || strings.ContainsFunc(call.ID, func(r rune) bool { return unicode.IsControl(r) || unicode.IsSpace(r) }) || ids[call.ID] || call.Type != "function" || !allowed[call.Function.Name] || !aiFunctionName.MatchString(call.Function.Name) {
 				return empty, bad
 			}
-			if !validAIProtocolObject([]byte(call.Function.Arguments), 65536) {
+			if !validAIProtocolObject([]byte(call.Function.Arguments), 65536) || !validAIToolSignature(call) {
 				return empty, bad
 			}
 			var arguments map[string]json.RawMessage
@@ -442,6 +466,12 @@ func parseAICompletion(raw []byte, allowed map[string]bool) (AICompletion, error
 }
 
 func (c *AIClient) Test(ctx context.Context, provider models.AIProvider) error {
-	_, err := c.complete(ctx, provider, []AIMessage{{Role: "user", Content: "Reply with the single word OK."}}, nil, 32)
+	// Reasoning-enabled providers count hidden reasoning toward the output
+	// budget. A 32-token probe can truncate before producing even "OK".
+	limit := 1024
+	if provider.Kind == "deepseek" {
+		limit = 32 // This adapter explicitly disables DeepSeek thinking.
+	}
+	_, err := c.complete(ctx, provider, []AIMessage{{Role: "user", Content: "Reply with the single word OK."}}, nil, limit)
 	return err
 }

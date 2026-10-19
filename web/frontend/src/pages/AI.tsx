@@ -1,20 +1,28 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, App, Button, Empty, Form, Input, Modal, Select, Space, Spin, Switch, Tag, Typography } from 'antd';
-import { CheckOutlined, CloseOutlined, CloudServerOutlined, CodeOutlined, DeleteOutlined, EditOutlined, ExperimentOutlined, HistoryOutlined, KeyOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SafetyCertificateOutlined, SendOutlined, SettingOutlined, StopOutlined } from '@ant-design/icons';
+import { Alert, App, AutoComplete, Button, Empty, Form, Input, Modal, Select, Space, Spin, Switch, Tag, Typography } from 'antd';
+import { ApiOutlined, CheckOutlined, CloseOutlined, CloudServerOutlined, CodeOutlined, DeleteOutlined, EditOutlined, ExperimentOutlined, HistoryOutlined, KeyOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SafetyCertificateOutlined, SendOutlined, SettingOutlined, StopOutlined } from '@ant-design/icons';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { aiApi } from '../api/ai';
-import type { AIAction, AIProvider, AIProviderInput, AITask, AITaskDetail, AITaskInput, AITaskStatus } from '../api/ai';
+import type { AIAction, AIApprovalMode, AIModelCatalog, AIPlugin, AIProvider, AIProviderInput, AIProviderKind, AISkill, AITask, AITaskDetail, AITaskInput, AITaskStatus } from '../api/ai';
 import { serversApi } from '../api/servers';
 import type { Server } from '../api/servers';
 import { usePolling } from '../hooks/usePolling';
 import { formatDateTime } from '../utils/format';
+import AIMarkdown from '../components/AIMarkdown';
+import AIExtensions from '../components/AIExtensions';
 import '../i18n/ai';
 import './AI.css';
 
 const activeStatuses: AITaskStatus[] = ['queued', 'running', 'awaiting_approval', 'awaiting_input', 'cancel_requested'];
 const statusColors: Partial<Record<AITaskStatus | AIAction['status'], string>> = { running: 'processing', queued: 'processing', awaiting_approval: 'warning', awaiting_input: 'gold', completed: 'success', succeeded: 'success', failed: 'error', rejected: 'error', interrupted: 'warning' };
 const deepseek = { kind: 'deepseek' as const, base_url: 'https://api.deepseek.com', model: 'deepseek-flash' };
+const providerPresets: Record<AIProviderKind, { name: string; base_url: string; model: string }> = {
+  deepseek: { name: 'DeepSeek', ...deepseek }, openai: { name: 'OpenAI', base_url: 'https://api.openai.com/v1', model: '' },
+  qwen: { name: 'Qwen / 千问', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: '' }, moonshot: { name: 'Moonshot / Kimi', base_url: 'https://api.moonshot.cn/v1', model: '' },
+  zhipu: { name: 'Zhipu / 智谱', base_url: 'https://open.bigmodel.cn/api/paas/v4', model: '' }, siliconflow: { name: 'SiliconFlow', base_url: 'https://api.siliconflow.cn/v1', model: '' },
+  gemini: { name: 'Gemini', base_url: 'https://generativelanguage.googleapis.com/v1beta/openai', model: '' }, cpa: { name: 'CPA / API proxy', base_url: '', model: '' }, compatible: { name: 'Compatible API', base_url: '', model: '' },
+};
 function errorText(error: unknown, fallback: string): string { return (error as { response?: { data?: { error?: string } } })?.response?.data?.error || fallback; }
 function argumentsText(action: AIAction) { return JSON.stringify(action.arguments, null, 2); }
 
@@ -25,10 +33,38 @@ function ProviderSettings({ providers, onChanged, onClose }: { providers: AIProv
   const [busy, setBusy] = useState(false);
   const [form] = Form.useForm<AIProviderInput>();
   const baseURL = Form.useWatch('base_url', form);
+  const kind = Form.useWatch('kind', form);
+  const [catalog, setCatalog] = useState<AIModelCatalog | null>(null);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelError, setModelError] = useState('');
+  const modelRequest = useRef<AbortController | null>(null);
   const request = useRef<AbortController | null>(null);
   const mounted = useRef(false);
   const confirmation = useRef<ReturnType<typeof modal.confirm> | null>(null);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; request.current?.abort(); confirmation.current?.destroy(); }; }, []);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; request.current?.abort(); modelRequest.current?.abort(); confirmation.current?.destroy(); }; }, []);
+  const refreshModels = useCallback(async () => {
+    modelRequest.current?.abort();
+    const controller = new AbortController(); modelRequest.current = controller;
+    const values = form.getFieldsValue();
+    const saved = editing && editing !== 'new' && values.base_url?.trim() === editing.base_url && values.kind === editing.kind && !values.api_key;
+    if (!saved && !values.api_key?.trim()) { setModelError(t('modelsNeedKey')); setModelsLoading(false); return; }
+    setModelsLoading(true); setModelError('');
+    try {
+      const result = saved ? await aiApi.models(editing.id, controller.signal) : await aiApi.previewModels({ kind: values.kind, base_url: values.base_url?.trim(), api_key: values.api_key }, controller.signal);
+      if (mounted.current && !controller.signal.aborted) setCatalog(result.data);
+    } catch (error) { if (mounted.current && !controller.signal.aborted) setModelError(errorText(error, t('modelsFailed'))); }
+    finally { if (modelRequest.current === controller) { modelRequest.current = null; if (mounted.current) setModelsLoading(false); } }
+  }, [editing, form, t]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setCatalog(null); setModelError(''); setModelsLoading(false);
+      if (editing && editing !== 'new' && baseURL === editing.base_url && kind === editing.kind) void refreshModels();
+    }, 0);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'visible' && editing && editing !== 'new' && baseURL === editing.base_url && kind === editing.kind && !form.getFieldValue('api_key')) void refreshModels();
+    }, 300000);
+    return () => { window.clearTimeout(timer); window.clearInterval(interval); modelRequest.current?.abort(); };
+  }, [editing, baseURL, kind, refreshModels, form]);
   const mutate = async (operation: (signal: AbortSignal) => Promise<unknown>, success: string) => {
     if (request.current) return false;
     const controller = new AbortController(); request.current = controller; setBusy(true);
@@ -73,10 +109,13 @@ function ProviderSettings({ providers, onChanged, onClose }: { providers: AIProv
       <Typography.Title level={5}>{t(editing === 'new' ? 'addProvider' : 'editProvider')}</Typography.Title>
       <div className="ai-provider-form-grid">
         <Form.Item name="name" label={t('providerName')} rules={[{ required: true, whitespace: true, message: t('required') }]}><Input maxLength={128} /></Form.Item>
-        <Form.Item name="kind" label={t('kind')}><Select options={[{ value: 'deepseek', label: t('deepseek') }, { value: 'compatible', label: t('compatible') }]} onChange={kind => form.setFieldsValue({ api_key: '', ...(kind === 'deepseek' ? deepseek : { base_url: '', model: '' }) })} /></Form.Item>
+        <Form.Item name="kind" label={t('kind')}><Select virtual={false} options={Object.entries(providerPresets).map(([value, preset]) => ({ value, label: value === 'compatible' ? t('compatible') : preset.name }))} onChange={(value: AIProviderKind) => { const preset = providerPresets[value]; form.setFieldsValue({ kind: value, name: preset.name, api_key: '', base_url: preset.base_url, model: preset.model }); }} /></Form.Item>
       </div>
       <Form.Item name="base_url" label={t('baseURL')} rules={[{ required: true, message: t('required') }, { validator: (_, value) => { try { const url = new URL(value); return url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash ? Promise.resolve() : Promise.reject(new Error(t('invalidURL'))); } catch { return Promise.reject(new Error(t('invalidURL'))); } } }]}><Input autoComplete="off" maxLength={2048} /></Form.Item>
-      <Form.Item name="model" label={t('model')} rules={[{ required: true, whitespace: true, message: t('required') }]}><Input autoComplete="off" maxLength={128} /></Form.Item>
+      <Typography.Paragraph className="ai-provider-compatibility" type="secondary">{t('proxyHint')}</Typography.Paragraph>
+      <Form.Item name="model" label={t('model')} rules={[{ required: true, whitespace: true, message: t('required') }]}><AutoComplete options={(catalog?.models || []).map(model => ({ value: model.id }))} filterOption={(input, option) => String(option?.value).toLowerCase().includes(input.toLowerCase())}><Input autoComplete="off" maxLength={128} placeholder={t('modelPlaceholder')} /></AutoComplete></Form.Item>
+      <div className="ai-model-catalog"><Button size="small" aria-label={t('refreshModels')} icon={<ReloadOutlined spin={modelsLoading} />} disabled={busy || modelsLoading} onClick={() => { void refreshModels(); }}>{t('refreshModels')}</Button><span>{catalog ? t('modelsUpdated', { count: catalog.models.length, time: new Date(catalog.fetched_at).toLocaleTimeString() }) : t('modelsHint')}</span></div>
+      {modelError && <Alert className="ai-model-error" type="warning" showIcon title={t('modelsFailed')} description={modelError} />}
       <Form.Item name="api_key" label={t('apiKey')} dependencies={['base_url']} extra={editing !== 'new' && editing?.has_api_key ? t('endpointKey') : undefined} rules={[{ required: needsKey, message: t('required') }]}>
         <Input.Password autoComplete="new-password" maxLength={4096} placeholder={editing !== 'new' && editing?.has_api_key ? t('keyKept') : undefined} />
       </Form.Item>
@@ -94,7 +133,7 @@ function ActionCard({ action, task, canDecide, busy, onDecision }: { action: AIA
     {approval && <div className="ai-risk-context"><strong>{t('approvalTitle')}</strong><span>{task.server_name}</span><p>{action.risk_reason || t('riskReason')}</p></div>}
     {action.command && <pre className="ai-command" aria-label={t('command')}>{action.command}</pre>}
     <details className="ai-action-arguments"><summary>{t('arguments')}</summary><pre>{argumentsText(action)}</pre></details>
-    {(action.output || action.error || action.status === 'succeeded') && <div className="ai-action-output"><span>{t('output')}</span><pre>{action.output || t('noOutput')}</pre>{action.error && <p role="status" className="ai-error-text">{action.error}</p>}</div>}
+    {(action.output || action.error || action.status === 'succeeded') && <details className="ai-action-output" open={action.status === 'failed' || action.status === 'running'}><summary><span>{t('output')}</span><small>{t('expandOutput')}</small></summary><pre>{action.output || t('noOutput')}</pre>{action.error && <p role="status" className="ai-error-text">{action.error}</p>}</details>}
     {action.truncated && <p className="ai-action-note">{t('truncated')}</p>}
     {action.unknown && <Alert type="warning" showIcon title={t('unknown')} />}
     <footer><span>{action.exit_code == null ? '' : t('exitCode', { code: action.exit_code })}</span><span>{action.duration_ms > 0 ? t('duration', { duration: action.duration_ms }) : ''}</span></footer>
@@ -102,7 +141,7 @@ function ActionCard({ action, task, canDecide, busy, onDecision }: { action: AIA
   </article>;
 }
 
-type Submission = { request_id: string; prompt: string; server_id: string; provider_id: string; taskId?: string; workspace: string };
+type Submission = AITaskInput & { taskId?: string; workspace: string };
 export default function AI() {
   const { t, i18n } = useTranslation('ai');
   const { message, modal } = App.useApp();
@@ -115,6 +154,13 @@ export default function AI() {
   const [providerId, setProviderId] = useState('');
   const [prompt, setPrompt] = useState('');
   const [settings, setSettings] = useState(false);
+  const [extensionsOpen, setExtensionsOpen] = useState(false);
+  const [skills, setSkills] = useState<AISkill[]>([]);
+  const [plugins, setPlugins] = useState<AIPlugin[]>([]);
+  const [extensionsError, setExtensionsError] = useState(false);
+  const [skillIds, setSkillIds] = useState<string[]>([]);
+  const [pluginIds, setPluginIds] = useState<string[]>([]);
+  const [approvalMode, setApprovalMode] = useState<AIApprovalMode>('standard');
   const [loadError, setLoadError] = useState(false);
   const [metadataLoading, setMetadataLoading] = useState(true);
   const [page, setPage] = useState({ cursor: '', previous: [] as string[] });
@@ -141,15 +187,21 @@ export default function AI() {
   const selectedProviderId = uncertain?.provider_id ?? providerId;
   const chosenProvider = providers.find(provider => provider.id === selectedProviderId);
   const chosenServer = servers.find(server => server.id === serverId);
+  const selectedMode = uncertain?.approval_mode ?? approvalMode;
+  const selectedSkills = uncertain?.skill_ids ?? skillIds;
+  const selectedPlugins = uncertain?.plugin_ids ?? pluginIds;
+  const extensionsUnavailable = selectedSkills.some(id => !skills.some(skill => skill.id === id)) || selectedPlugins.some(id => !plugins.some(plugin => plugin.id === id && plugin.enabled));
   const canFollowup = currentTask && ['awaiting_input', 'completed'].includes(currentTask.status);
   const canCancel = currentTask && activeStatuses.includes(currentTask.status) && currentTask.status !== 'cancel_requested';
   const readMetadata = useCallback(async () => {
     if (!mounted.current) return;
     metadataRequest.current?.abort(); const controller = new AbortController(); metadataRequest.current = controller;
     try {
-      const [providerResponse, serverResponse] = await Promise.all([aiApi.providers(controller.signal), serversApi.list(controller.signal)]);
+      const [providerResponse, serverResponse, skillResponse, pluginResponse] = await Promise.all([aiApi.providers(controller.signal), serversApi.list(controller.signal), aiApi.skills(controller.signal).catch(() => null), aiApi.plugins(controller.signal).catch(() => null)]);
       if (!mounted.current || controller.signal.aborted) return;
       setProviders(providerResponse.data || []); setServers(serverResponse.data || []); setLoadError(false);
+      if (skillResponse) setSkills(skillResponse.data || []); if (pluginResponse) setPlugins(pluginResponse.data || []);
+      setExtensionsError(!skillResponse || !pluginResponse);
       // A saved selection becoming unavailable must not redirect an existing
       // draft to a different provider without the user's choice.
       setProviderId(id => id || providerResponse.data.find(provider => provider.enabled && provider.has_api_key)?.id || '');
@@ -197,7 +249,7 @@ export default function AI() {
   const refreshRef = useRef({ readTask, readHistory });
   useEffect(() => { refreshRef.current = { readTask, readHistory }; }, [readTask, readHistory]);
   const selectTask = (id: string) => { if (!submitting) setParams({ task: id }); };
-  const freshTask = () => { if (submitting) return; setPrompt(''); const target = currentTask?.server_id || serverId; setParams(target ? { server: target } : {}); };
+  const freshTask = () => { if (submitting) return; setPrompt(''); setApprovalMode('standard'); setSkillIds([]); setPluginIds([]); const target = currentTask?.server_id || serverId; setParams(target ? { server: target } : {}); };
   const clearUncertain = (key: string) => setUncertainSubmissions(previous => {
     const next = { ...previous }; delete next[key]; return next;
   });
@@ -208,8 +260,8 @@ export default function AI() {
       const text = prompt.trim(); if (!text) return;
       if (new TextEncoder().encode(text).length > 16000 || text.includes('\0')) { message.error(t('promptTooLong')); return; }
       if (taskId) { if (!currentTask || !canFollowup) return; }
-      else if (!chosenServer || !chosenProvider?.enabled || !chosenProvider.has_api_key) return;
-      value = { request_id: crypto.randomUUID(), prompt: text, server_id: currentTask?.server_id || serverId, provider_id: currentTask?.provider_id || providerId, taskId: taskId || undefined, workspace };
+      else if (!chosenServer || !chosenProvider?.enabled || !chosenProvider.has_api_key || extensionsUnavailable) return;
+      value = { request_id: crypto.randomUUID(), prompt: text, server_id: currentTask?.server_id || serverId, provider_id: currentTask?.provider_id || providerId, approval_mode: currentTask?.approval_mode || approvalMode, skill_ids: currentTask?.skills?.map(skill => skill.id) || [...skillIds], plugin_ids: currentTask?.plugins?.map(plugin => plugin.id) || [...pluginIds], taskId: taskId || undefined, workspace };
     }
     setSubmitting(true);
     const controller = new AbortController(); mutation.current = controller;
@@ -218,7 +270,7 @@ export default function AI() {
     detailRequest.current?.abort(); detailRequest.current = null;
     try {
       const response = value.taskId ? await aiApi.message(value.taskId, { message: value.prompt, request_id: value.request_id }, controller.signal)
-        : await aiApi.createTask({ server_id: value.server_id, provider_id: value.provider_id, prompt: value.prompt, request_id: value.request_id } satisfies AITaskInput, controller.signal);
+        : await aiApi.createTask({ server_id: value.server_id, provider_id: value.provider_id, prompt: value.prompt, request_id: value.request_id, approval_mode: value.approval_mode, skill_ids: value.skill_ids, plugin_ids: value.plugin_ids } satisfies AITaskInput, controller.signal);
       if (!mounted.current || controller.signal.aborted) return;
       clearUncertain(value.workspace); setPage({ cursor: '', previous: [] });
       setDetail(previous => previous?.task.id === response.data.id ? { ...previous, task: response.data } : previous);
@@ -271,7 +323,7 @@ export default function AI() {
     return items.sort((a, b) => Date.parse(a.time) - Date.parse(b.time));
   }, [current]);
   return <div className="ai-page">
-    <div className="page-heading ai-page-heading"><span className="ai-page-icon" aria-hidden="true"><RobotOutlined /></span><div><Typography.Text className="eyebrow">{t('eyebrow')}</Typography.Text><Typography.Title level={2}>{t('title')}</Typography.Title><Typography.Text type="secondary">{t('description')}</Typography.Text></div><Button aria-label={t('providers')} icon={<SettingOutlined />} onClick={() => setSettings(true)}>{t('providers')}</Button></div>
+    <div className="page-heading ai-page-heading"><span className="ai-page-icon" aria-hidden="true"><RobotOutlined /></span><div><Typography.Text className="eyebrow">{t('eyebrow')}</Typography.Text><Typography.Title level={2}>{t('title')}</Typography.Title><Typography.Text type="secondary">{t('description')}</Typography.Text></div><Space className="ai-heading-actions" wrap><Button aria-label={t('extensions')} icon={<ApiOutlined />} onClick={() => setExtensionsOpen(true)}>{t('extensions')}</Button><Button aria-label={t('providers')} icon={<SettingOutlined />} onClick={() => setSettings(true)}>{t('providers')}</Button></Space></div>
     {loadError && <Alert type="error" showIcon title={t('loadFailed')} action={<Button size="small" onClick={() => { void readMetadata(); }}>{t('retry')}</Button>} />}
     <div className="ai-workspace">
       <aside className="ai-sidebar" aria-label={t('history')}><header><span><HistoryOutlined />{t('history')}</span><Button type="text" size="small" icon={<PlusOutlined />} aria-label={t('newTask')} disabled={submitting} onClick={freshTask} /></header>
@@ -280,26 +332,29 @@ export default function AI() {
         <div className="ai-history-paging"><Button size="small" disabled={!page.previous.length} onClick={() => setPage(value => ({ cursor: value.previous[value.previous.length - 1], previous: value.previous.slice(0, -1) }))}>{t('previous')}</Button><Button size="small" disabled={history?.page !== page || !history.next} onClick={() => { if (history?.next) setPage({ cursor: history.next, previous: [...page.previous, page.cursor] }); }}>{t('next')}</Button></div>
       </aside>
       <section className="ai-conversation" aria-label={t('title')}>
-        {currentTask ? <header className="ai-task-header"><div><span className="ai-task-server"><CloudServerOutlined />{currentTask.server_name}<Tag>{currentTask.server_type}</Tag></span><small>{currentTask.provider_name} · {currentTask.model}</small></div><Space wrap><Tag color={statusColors[currentTask.status]}>{t(currentTask.status)}</Tag><Button type="text" icon={<ReloadOutlined />} aria-label={t('refresh')} onClick={() => { void readTask(); }} />{canCancel && <Button danger icon={<StopOutlined />} aria-label={t('cancelTask')} disabled={actionBusy || submitting} onClick={() => { void act(currentTask.id, signal => aiApi.cancel(currentTask.id, signal), t('cancelRequested')); }}>{t('cancelTask')}</Button>}</Space></header> : null}
+        {currentTask ? <header className="ai-task-header"><div><span className="ai-task-server"><CloudServerOutlined />{currentTask.server_name}<Tag>{currentTask.server_type}</Tag></span><small>{currentTask.provider_name} · {currentTask.model}</small><div className="ai-task-capabilities"><Tag className={`ai-mode-tag ai-mode-${currentTask.approval_mode || 'standard'}`} icon={<SafetyCertificateOutlined />}>{t(`mode_${currentTask.approval_mode || 'standard'}`)}</Tag>{currentTask.skills?.map(skill => <Tag key={skill.id}>Skill · {skill.name}</Tag>)}{currentTask.plugins?.map(plugin => <Tag key={plugin.id}>MCP · {plugin.name}</Tag>)}</div></div><Space wrap><Tag color={statusColors[currentTask.status]}>{t(currentTask.status)}</Tag><Button type="text" icon={<ReloadOutlined />} aria-label={t('refresh')} onClick={() => { void readTask(); }} />{canCancel && <Button danger icon={<StopOutlined />} aria-label={t('cancelTask')} disabled={actionBusy || submitting} onClick={() => { void act(currentTask.id, signal => aiApi.cancel(currentTask.id, signal), t('cancelRequested')); }}>{t('cancelTask')}</Button>}</Space></header> : null}
         <div className="ai-conversation-body">
-          {!taskId && <div className="ai-welcome"><span className="ai-welcome-icon"><RobotOutlined /></span><Typography.Title level={3}>{t('welcomeTitle')}</Typography.Title><p>{t('welcomeHint')}</p><div className="ai-execution-note"><CodeOutlined /><span>{t('executeHint')}</span></div></div>}
+          {!taskId && <div className="ai-welcome"><span className="ai-welcome-icon"><RobotOutlined /></span><Typography.Title level={3}>{t('welcomeTitle')}</Typography.Title><p>{t('welcomeHint')}</p><div className="ai-prompt-examples">{['exampleInspect', 'exampleInstall', 'exampleLogs'].map(key => <button type="button" key={key} disabled={submitting || !!uncertain} onClick={() => setPrompt(t(key))}><CodeOutlined />{t(key)}</button>)}</div></div>}
           {taskId && !current && !detailError && <div className="ai-task-loading"><Spin /></div>}
           {detailError && <Alert type="warning" showIcon title={t(detailError)} action={<Button onClick={() => { void readTask(); }}>{t('retry')}</Button>} />}
           {currentTask?.error && <Alert type="error" showIcon title={currentTask.error} />}
           {currentTask && ['cancel_requested', 'canceled', 'interrupted'].includes(currentTask.status) && <Alert type="info" showIcon title={t(currentTask.status === 'canceled' ? 'canceledHint' : 'cancelHint')} />}
-          {current && <div className="ai-timeline">{timeline.map(item => item.action ? <ActionCard key={item.key} action={item.action} task={current.task} canDecide={current.task.status === 'awaiting_approval'} busy={actionBusy || submitting} onDecision={decide} /> : item.event && <article key={item.key} className={`ai-event ai-event-${item.event.kind}`}><header><span>{t(item.event.kind)}</span><time>{formatDateTime(item.event.created_at, i18n.language)}</time></header><div>{item.event.content}</div></article>)}{!timeline.length && <p className="ai-event-waiting">{t('noEvents')}</p>}</div>}
+          {current && <div className="ai-timeline">{timeline.map(item => item.action ? <ActionCard key={item.key} action={item.action} task={current.task} canDecide={current.task.status === 'awaiting_approval'} busy={actionBusy || submitting} onDecision={decide} /> : item.event && <article key={item.key} className={`ai-event ai-event-${item.event.kind}`}><header><span>{item.event.kind === 'assistant' && <RobotOutlined />}{t(item.event.kind)}</span><time>{formatDateTime(item.event.created_at, i18n.language)}</time></header>{item.event.kind === 'assistant' ? <AIMarkdown>{item.event.content}</AIMarkdown> : <div>{item.event.content}</div>}</article>)}{!timeline.length && <p className="ai-event-waiting">{t('noEvents')}</p>}</div>}
         </div>
         {currentTask && <div className="ai-task-usage"><span>{t('tokens')}: {t('inputTokens')} {currentTask.prompt_tokens.toLocaleString()} · {t('outputTokens')} {currentTask.completion_tokens.toLocaleString()}</span><span>{t('updated', { time: new Date(currentTask.updated_at).toLocaleTimeString(i18n.language) })}</span></div>}
         <div className="ai-composer">
           {uncertain && <Alert type="warning" showIcon title={t('submitUncertain')} action={<Button disabled={submitting} loading={submitting} aria-label={t('retrySubmission')} onClick={() => { void send(uncertain); }}>{t('retrySubmission')}</Button>} />}
           {!taskId && <div className="ai-composer-targets"><label><span>{t('server')}</span><Select aria-label={t('server')} showSearch optionFilterProp="label" placeholder={t('selectServer')} value={chosenServer?.id} onChange={id => setParams({ server: id }, { replace: true })} disabled={submitting || !!uncertain} loading={metadataLoading} options={servers.map(server => ({ value: server.id, label: server.name }))} /></label><label><span>{t('provider')}</span><Select aria-label={t('provider')} placeholder={t('selectProvider')} value={chosenProvider?.enabled && chosenProvider.has_api_key ? selectedProviderId : undefined} onChange={setProviderId} disabled={submitting || !!uncertain} loading={metadataLoading} options={enabledProviders.map(provider => ({ value: provider.id, label: `${provider.name} · ${provider.model}` }))} /></label></div>}
+          {!taskId && <><div className="ai-permission-selector" role="radiogroup" aria-label={t('approvalMode')}>{(['readonly', 'standard', 'automatic'] as AIApprovalMode[]).map(mode => <button key={mode} type="button" role="radio" aria-checked={selectedMode === mode} className={`ai-permission-option ${selectedMode === mode ? 'selected' : ''} ai-permission-${mode}`} disabled={submitting || !!uncertain} onClick={() => setApprovalMode(mode)}><span><SafetyCertificateOutlined />{t(`mode_${mode}`)}</span><small>{t(`modeBrief_${mode}`)}</small></button>)}</div><p className={`ai-mode-explanation ${selectedMode === 'automatic' ? 'automatic' : ''}`}>{t(`modeHint_${selectedMode}`)}</p><details className="ai-task-extension-picker"><summary><ApiOutlined />{t('taskExtensions')}<span>{selectedSkills.length + selectedPlugins.length ? t('extensionsSelected', { count: selectedSkills.length + selectedPlugins.length }) : t('optional')}</span></summary><div className="ai-composer-targets"><label><span>Skills</span><Select mode="multiple" aria-label="Skills" placeholder={t('selectSkills')} value={selectedSkills} maxCount={8} maxTagCount="responsive" onChange={setSkillIds} disabled={submitting || !!uncertain} options={skills.map(skill => ({ value: skill.id, label: skill.name }))} /></label><label><span>{t('plugins')}</span><Select mode="multiple" aria-label={t('plugins')} placeholder={t('selectPlugins')} value={selectedPlugins} maxCount={4} maxTagCount="responsive" onChange={setPluginIds} disabled={submitting || !!uncertain} options={plugins.filter(plugin => plugin.enabled).map(plugin => ({ value: plugin.id, label: plugin.name }))} /></label></div>{selectedMode === 'readonly' && selectedPlugins.length > 0 && <p>{t('readonlyPlugins')}</p>}<Button size="small" type="link" onClick={() => setExtensionsOpen(true)}>{t('manageExtensions')}</Button></details></>}
+          {!taskId && (extensionsError || extensionsUnavailable) && <Alert type="warning" title={t(extensionsError ? 'extensionsLoadFailed' : 'extensionsUnavailable')} action={extensionsError ? <Button size="small" onClick={() => { void readMetadata(); }}>{t('retry')}</Button> : undefined} />}
           {!taskId && selectedProviderId && (!chosenProvider?.enabled || !chosenProvider.has_api_key) && enabledProviders.length > 0 && <Alert type="warning" title={t('providerUnavailable')} />}
           {!taskId && !metadataLoading && !enabledProviders.length && <Alert type="info" title={t('noProvider')} action={<Button onClick={() => setSettings(true)}>{t('addProvider')}</Button>} />}
-          {(!taskId || canFollowup) ? <><Input.TextArea aria-label={t('taskPrompt')} value={uncertain?.prompt ?? prompt} onChange={event => setPrompt(event.target.value)} placeholder={t(taskId ? 'followupPlaceholder' : 'placeholder')} autoSize={{ minRows: 3, maxRows: 8 }} maxLength={16000} disabled={submitting || !!uncertain} /><div className="ai-composer-footer"><p><SafetyCertificateOutlined />{currentTask ? t('shareSelected', { server: currentTask.server_name, provider: currentTask.provider_name }) : chosenServer && chosenProvider ? t('shareSelected', { server: chosenServer.name, provider: chosenProvider.name }) : t('shareHint')}</p><Button type="primary" icon={<SendOutlined />} aria-label={t(taskId ? 'followup' : 'submit')} aria-busy={submitting} loading={submitting} disabled={submitting || actionBusy || !!uncertain || !prompt.trim() || (!taskId && (!chosenServer || !chosenProvider?.enabled || !chosenProvider.has_api_key))} onClick={() => { void send(); }}>{t(taskId ? 'followup' : 'submit')}</Button></div></> : currentTask ? <p className="ai-composer-state">{t(activeStatuses.includes(currentTask.status) ? currentTask.status === 'awaiting_input' ? 'waiting' : 'working' : 'readOnly')}</p> : null}
+          {(!taskId || canFollowup) ? <><Input.TextArea aria-label={t('taskPrompt')} value={uncertain?.prompt ?? prompt} onChange={event => setPrompt(event.target.value)} placeholder={t(taskId ? 'followupPlaceholder' : 'placeholder')} autoSize={{ minRows: 3, maxRows: 8 }} maxLength={16000} disabled={submitting || !!uncertain} /><div className="ai-composer-footer"><p><SafetyCertificateOutlined />{currentTask ? t('shareSelected', { server: currentTask.server_name, provider: currentTask.provider_name }) : chosenServer && chosenProvider ? t('shareSelected', { server: chosenServer.name, provider: chosenProvider.name }) : t('shareHint')}</p><Button type="primary" icon={<SendOutlined />} aria-label={t(taskId ? 'followup' : 'submit')} aria-busy={submitting} loading={submitting} disabled={submitting || actionBusy || !!uncertain || !prompt.trim() || (!taskId && (!chosenServer || !chosenProvider?.enabled || !chosenProvider.has_api_key || extensionsUnavailable))} onClick={() => { void send(); }}>{t(taskId ? 'followup' : 'submit')}</Button></div></> : currentTask ? <p className="ai-composer-state">{t(activeStatuses.includes(currentTask.status) ? currentTask.status === 'awaiting_input' ? 'waiting' : 'working' : 'readOnly')}</p> : null}
           <small className="ai-background-note">{t('leaveHint')}{currentTask && canCancel ? ` ${t('cancelHint')}` : ''}</small>
         </div>
       </section>
     </div>
     {settings && <ProviderSettings providers={providers} onChanged={readMetadata} onClose={() => setSettings(false)} />}
+    {extensionsOpen && <AIExtensions skills={skills} plugins={plugins} onChanged={readMetadata} onClose={() => setExtensionsOpen(false)} />}
   </div>;
 }

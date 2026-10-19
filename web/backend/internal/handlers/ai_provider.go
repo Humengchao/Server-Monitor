@@ -19,6 +19,7 @@ import (
 type aiProviderClient interface {
 	ValidateEndpoint(context.Context, string) error
 	Test(context.Context, models.AIProvider) error
+	ListModels(context.Context, models.AIProvider) ([]services.AIAvailableModel, error)
 }
 type AIProviderHandler struct {
 	client aiProviderClient
@@ -36,6 +37,9 @@ func RegisterAIProviderRoutes(secured *gin.RouterGroup, client *services.AIClien
 	group.PUT("/:id", h.Update)
 	group.DELETE("/:id", h.Delete)
 	group.POST("/:id/test", middleware.RateLimit(6, time.Minute), h.Test)
+	discoveryLimit := middleware.RateLimit(20, time.Minute)
+	group.GET("/:id/models", discoveryLimit, h.Models)
+	group.POST("/models", discoveryLimit, h.PreviewModels)
 }
 
 type aiProviderRequest struct {
@@ -226,4 +230,77 @@ func (h *AIProviderHandler) Test(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true, "model": provider.Model})
+}
+
+// Models never accepts a replacement URL or key: it can only contact the
+// authenticated owner's saved endpoint using its encrypted-at-rest key.
+func (h *AIProviderHandler) Models(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	id, ok := aiProviderID(c)
+	if !ok {
+		return
+	}
+	ctx, cancel, db, userID := aiProviderContext(c)
+	provider, err := models.GetAIProvider(ctx, db, id, userID)
+	cancel()
+	if err != nil {
+		aiProviderStorageError(c, err)
+		return
+	}
+	if !provider.Enabled {
+		aiProviderStorageError(c, models.ErrAIProviderDisabled)
+		return
+	}
+	h.discoverModels(c, provider)
+}
+
+// PreviewModels resolves the initial-setup dependency: the user can discover
+// model IDs before choosing and saving one. Only an explicitly supplied key
+// is accepted, never a provider ID or a key recovered from another endpoint.
+func (h *AIProviderHandler) PreviewModels(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	req, ok := readAIProviderRequest(c)
+	if !ok {
+		return
+	}
+	provider := models.AIProvider{Name: "Model discovery", Kind: "compatible", Model: "model-catalog", APIKey: req.APIKey, Enabled: true}
+	if req.Kind != nil {
+		provider.Kind = *req.Kind
+	}
+	if req.BaseURL != nil {
+		provider.BaseURL = *req.BaseURL
+	}
+	if err := models.NormalizeAIProvider(&provider); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	if provider.APIKey == "" {
+		aiProviderStorageError(c, models.ErrAIProviderKey)
+		return
+	}
+	h.discoverModels(c, provider)
+}
+
+func (h *AIProviderHandler) discoverModels(c *gin.Context, provider models.AIProvider) {
+	select {
+	case h.tests <- struct{}{}:
+		defer func() { <-h.tests }()
+	default:
+		c.JSON(429, gin.H{"error": "AI provider requests are busy"})
+		return
+	}
+	available, err := h.client.ListModels(c.Request.Context(), provider)
+	if err != nil {
+		code, message := services.SafeAIProviderError(err)
+		status := http.StatusBadGateway
+		if code == "timeout" {
+			status = http.StatusGatewayTimeout
+		}
+		c.JSON(status, gin.H{"error": message, "code": code})
+		return
+	}
+	if available == nil {
+		available = []services.AIAvailableModel{}
+	}
+	c.JSON(http.StatusOK, gin.H{"models": available, "fetched_at": time.Now().UTC(), "source": "provider"})
 }

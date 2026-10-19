@@ -45,6 +45,54 @@ func TestAIProviderDefaultsAndURLValidation(t *testing.T) {
 	}
 }
 
+func TestAIProviderPresetsAndCustomGatewayRequireModelSelection(t *testing.T) {
+	for kind, baseURL := range map[string]string{
+		"openai":      "https://api.openai.com/v1",
+		"qwen":        "https://dashscope.aliyuncs.com/compatible-mode/v1",
+		"moonshot":    "https://api.moonshot.cn/v1",
+		"zhipu":       "https://open.bigmodel.cn/api/paas/v4",
+		"siliconflow": "https://api.siliconflow.cn/v1",
+		"gemini":      "https://generativelanguage.googleapis.com/v1beta/openai",
+	} {
+		provider := AIProvider{Name: "fixture", Kind: kind, Model: "selected-model"}
+		if err := NormalizeAIProvider(&provider); err != nil || provider.BaseURL != baseURL {
+			t.Fatalf("wrong preset %s: %+v %v", kind, provider.Public(), err)
+		}
+		provider.Model = ""
+		if NormalizeAIProvider(&provider) == nil {
+			t.Fatalf("%s silently selected an undiscovered model", kind)
+		}
+	}
+	for _, kind := range []string{"compatible", "cpa"} {
+		provider := AIProvider{Name: "gateway", Kind: kind, Model: "gateway/model"}
+		if NormalizeAIProvider(&provider) == nil {
+			t.Fatal("custom gateway accepted without an explicit URL")
+		}
+		provider.BaseURL = "https://proxy.example/custom/v1"
+		if err := NormalizeAIProvider(&provider); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestAIProviderNewKindsPersistWithEncryptedKeys(t *testing.T) {
+	db, user := aiProviderFixture(t)
+	ctx := context.Background()
+	for kind := range aiProviderBaseURLs {
+		provider := AIProvider{UserID: user, Name: kind, Kind: kind, Model: "selected-model", APIKey: "fixture-secret", Enabled: true}
+		if kind == "cpa" || kind == "compatible" {
+			provider.BaseURL = "https://gateway.example/v1"
+		}
+		if err := SaveAIProvider(ctx, db, &provider, true); err != nil {
+			t.Fatalf("cannot persist %s: %v", kind, err)
+		}
+		stored, err := GetAIProvider(ctx, db, provider.ID, user)
+		if err != nil || stored.Kind != kind || stored.APIKey != "fixture-secret" || stored.Model != "selected-model" {
+			t.Fatalf("new provider kind not retained: %s %v", kind, err)
+		}
+	}
+}
+
 func aiProviderFixture(t *testing.T) (*DB, uuid.UUID) {
 	t.Helper()
 	raw := testdb.Open(t)

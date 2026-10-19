@@ -139,6 +139,7 @@ func SetupFeatures(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCac
 	if features.AI != nil && features.AIClient != nil {
 		handlers.RegisterAIProviderRoutes(secured, features.AIClient)
 		handlers.RegisterAITaskRoutes(secured, features.AI)
+		handlers.RegisterAIExtensionRoutes(secured, services.NewAIMCPClient(features.AIClient))
 	}
 	backupH := handlers.NewBackupHandler()
 	backups := secured.Group("/backups", middleware.RateLimit(6, time.Minute))

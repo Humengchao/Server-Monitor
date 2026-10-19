@@ -53,11 +53,14 @@ type AITaskWorker struct {
 	workers  sync.WaitGroup
 	complete func(context.Context, models.AIProvider, []AIMessage, []AIToolDefinition) (AICompletion, error)
 	execute  func(context.Context, *models.Server, AIAction) (AIActionResult, error)
+	mcpList  func(context.Context, models.AIPlugin) ([]AIMCPTool, error)
+	mcpCall  func(context.Context, models.AIPlugin, string, json.RawMessage, bool, bool) (AIActionResult, error)
 }
 
 func NewAITaskWorker(db *models.DB, client *AIClient) *AITaskWorker {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &AITaskWorker{db: db, client: client, ctx: ctx, cancel: cancel, done: make(chan struct{}), complete: client.Complete, execute: ExecuteAIAction}
+	mcp := NewAIMCPClient(client)
+	return &AITaskWorker{db: db, client: client, ctx: ctx, cancel: cancel, done: make(chan struct{}), complete: client.Complete, execute: ExecuteAIAction, mcpList: mcp.ListTools, mcpCall: mcp.CallTool}
 }
 func (w *AITaskWorker) Start() { go w.loop() }
 func (w *AITaskWorker) Stop()  { w.cancel(); <-w.done }
@@ -191,9 +194,9 @@ func boundedAIText(s string, limit int) string {
 
 var aiPrivateKeyBlock = regexp.MustCompile(`(?s)-----BEGIN [^-\r\n]*PRIVATE KEY-----.*?(?:-----END [^-\r\n]*PRIVATE KEY-----|$)`)
 
-func aiKnownSecret(s string, server *models.Server, p models.AIProvider) bool {
+func aiKnownSecret(s string, server *models.Server, p models.AIProvider, extraSecrets ...string) bool {
 	contains := func(value string) bool {
-		for _, secret := range []string{p.APIKey, server.SSHPassword, server.SSHKey} {
+		for _, secret := range append([]string{p.APIKey, server.SSHPassword, server.SSHKey}, extraSecrets...) {
 			if secret != "" && strings.Contains(value, secret) {
 				return true
 			}
@@ -246,8 +249,8 @@ func aiKnownSecret(s string, server *models.Server, p models.AIProvider) bool {
 	return walk(s, 0)
 }
 
-func redactAIText(s string, server *models.Server, p models.AIProvider) string {
-	for _, secret := range []string{p.APIKey, server.SSHPassword, server.SSHKey} {
+func redactAIText(s string, server *models.Server, p models.AIProvider, extraSecrets ...string) string {
+	for _, secret := range append([]string{p.APIKey, server.SSHPassword, server.SSHKey}, extraSecrets...) {
 		if secret != "" {
 			s = strings.ReplaceAll(s, secret, "[redacted credential]")
 		}
@@ -257,7 +260,7 @@ func redactAIText(s string, server *models.Server, p models.AIProvider) string {
 	// File tools return JSON; escaped quotes, backslashes or Unicode may hide
 	// the literal spelling of a configured credential. Refuse any remaining
 	// decoded secret rather than forwarding or persisting the encoded value.
-	if aiKnownSecret(s, server, p) {
+	if aiKnownSecret(s, server, p, extraSecrets...) {
 		return "[redacted credential-like content]"
 	}
 	return s
@@ -282,6 +285,10 @@ func (w *AITaskWorker) process(ctx context.Context, t *models.AITask) error {
 	if err != nil {
 		return err
 	}
+	catalog, tools, secrets, err := w.taskToolCatalog(ctx, *t, server, provider)
+	if err != nil {
+		return err
+	}
 	pending, err := models.PendingApprovedAIAction(ctx, w.db.Raw, t.ID, t.UserID)
 	if err != nil {
 		return errors.New("Could not read the pending operation.")
@@ -299,19 +306,29 @@ func (w *AITaskWorker) process(ctx context.Context, t *models.AITask) error {
 		if err != nil {
 			return err
 		}
-		completion, err := w.complete(ctx, provider, messages, AITools())
+		if _, err = w.boundPlugins(ctx, *t); err != nil {
+			return err
+		}
+		completion, err := w.complete(ctx, provider, messages, tools)
 		if err != nil {
 			_, detail := SafeAIProviderError(err)
 			return errors.New(detail)
 		}
 		message := completion.Message
 		message.Role = "assistant"
-		message.Content = redactAIText(message.Content, server, provider)
+		message.Content = redactAIText(message.Content, server, provider, secrets...)
 		// Credentials never re-enter context even if an upstream model echoes them.
-		message.ReasoningContent = redactAIText(message.ReasoningContent, server, provider)
+		message.ReasoningContent = redactAIText(message.ReasoningContent, server, provider, secrets...)
 		blockedSecret := false
 		for i := range message.ToolCalls {
-			if aiKnownSecret(message.ToolCalls[i].Function.Arguments, server, provider) {
+			if aiKnownSecret(message.ToolCalls[i].ID, server, provider, secrets...) || aiKnownSecret(message.ToolCalls[i].Function.Name, server, provider, secrets...) {
+				return errors.New("Model tool identity contained credentials; the response was refused without being recorded.")
+			}
+			if aiKnownSecret(aiToolSignature(message.ToolCalls[i]), server, provider, secrets...) {
+				message.ToolCalls[i].ExtraContent = nil
+				blockedSecret = true
+			}
+			if aiKnownSecret(message.ToolCalls[i].Function.Arguments, server, provider, secrets...) {
 				message.ToolCalls[i].Function.Arguments = `{"redacted":true}`
 				blockedSecret = true
 			}
@@ -339,11 +356,18 @@ func (w *AITaskWorker) process(ctx context.Context, t *models.AITask) error {
 		}
 		call := message.ToolCalls[0]
 		action, prepareErr := PrepareAIAction(server, call)
+		if entry, ok := catalog[call.Function.Name]; ok {
+			action, prepareErr = prepareAIPluginAction(entry, call.Function.Arguments)
+		}
+		requiresApproval := false
+		if prepareErr == nil {
+			requiresApproval, prepareErr = aiActionApproval(t.ApprovalMode, action)
+		}
 		if blockedSecret {
 			prepareErr = errors.New("Tool arguments contained credentials; the operation was refused and the secret was not recorded. Do not include credentials in tool arguments.")
 		}
 		if prepareErr != nil {
-			content, _ := json.Marshal(map[string]string{"error": boundedAIText(redactAIText(prepareErr.Error(), server, provider), 2000)})
+			content, _ := json.Marshal(map[string]string{"error": boundedAIText(redactAIText(prepareErr.Error(), server, provider, secrets...), 2000)})
 			messages = append(messages, AIMessage{Role: "tool", ToolCallID: call.ID, Content: string(content)})
 			// This rejection is also persisted so restarts never leave an orphan
 			// call that a later model turn could reinterpret as executed.
@@ -356,7 +380,7 @@ func (w *AITaskWorker) process(ctx context.Context, t *models.AITask) error {
 			}
 			continue
 		}
-		stored := models.AIAction{CallID: call.ID, ToolName: action.ToolName, Arguments: action.Arguments, Summary: action.Summary, Command: action.Command, RequiresApproval: action.RequiresApproval, RiskReason: action.RiskReason, Mutating: action.Mutating}
+		stored := models.AIAction{CallID: call.ID, ToolName: action.ToolName, Arguments: action.Arguments, Summary: action.Summary, Command: action.Command, RequiresApproval: requiresApproval, RiskReason: action.RiskReason, Mutating: action.Mutating}
 		if err = models.InsertAIAction(ctx, w.db.Raw, t.ID, t.WorkerID, &stored); err != nil {
 			return errors.New("Could not record the operation; nothing was executed.")
 		}
@@ -378,21 +402,42 @@ func (w *AITaskWorker) executeAction(ctx context.Context, t models.AITask, serve
 	server, p = current, provider
 	call := AIToolCall{ID: a.CallID, Type: "function", Function: AIFunctionCall{Name: a.ToolName, Arguments: string(a.Arguments)}}
 	prepared, err := PrepareAIAction(server, call)
+	var plugin models.AIPlugin
+	var pluginCall aiPluginCall
+	plugins, boundErr := w.boundPlugins(ctx, t)
+	if boundErr != nil {
+		return boundErr
+	}
+	secrets := pluginSecrets(plugins)
+	if a.ToolName == "mcp_tool" {
+		prepared, plugin, pluginCall, secrets, err = w.prepareStoredPluginAction(ctx, t, server, p, *a)
+	}
 	if err != nil {
 		return errors.New("The saved operation no longer satisfies execution policy. Start a new task.")
 	}
-	if prepared.Command != a.Command || prepared.RequiresApproval != a.RequiresApproval || prepared.ToolName != a.ToolName {
+	requiresApproval, err := aiActionApproval(t.ApprovalMode, prepared)
+	if err != nil {
+		return err
+	}
+	if prepared.Command != a.Command || requiresApproval != a.RequiresApproval || prepared.ToolName != a.ToolName {
 		return errors.New("The operation policy changed. Review a new task before executing.")
 	}
 	if err = models.StartAIAction(ctx, w.db.Raw, t.ID, a.ID, t.WorkerID); err != nil {
 		return errors.New("The operation was canceled or could not be recorded; it was not started.")
 	}
-	result, runErr := w.execute(ctx, server, prepared)
+	prepared.ApprovalMode = t.ApprovalMode
+	var result AIActionResult
+	var runErr error
+	if a.ToolName == "mcp_tool" {
+		result, runErr = w.mcpCall(ctx, plugin, pluginCall.ToolName, pluginCall.Arguments, true, t.ApprovalMode == "readonly")
+	} else {
+		result, runErr = w.execute(ctx, server, prepared)
+	}
 	if aiContainsSecrets(result.Output) {
 		result.Output = "[output withheld: credential-like material]"
 	}
-	a.Output = boundedAIText(redactAIText(result.Output, server, p), 64*1024)
-	a.Error = boundedAIText(redactAIText(result.Error, server, p), 2000)
+	a.Output = boundedAIText(redactAIText(result.Output, server, p, secrets...), 64*1024)
+	a.Error = boundedAIText(redactAIText(result.Error, server, p, secrets...), 2000)
 	a.ExitCode = result.ExitCode
 	a.Unknown = result.Unknown
 	a.Truncated = result.Truncated || len(result.Output) > 64*1024
@@ -433,9 +478,16 @@ func (w *AITaskWorker) executeAction(ctx context.Context, t models.AITask, serve
 }
 
 // CreateAITask validates scope before the worker can ever see a queued task.
-func (w *AITaskWorker) Create(ctx context.Context, user, serverID, providerID, request uuid.UUID, prompt string) (models.AITask, error) {
+func (w *AITaskWorker) Create(ctx context.Context, user, serverID, providerID, request uuid.UUID, prompt string, selections ...models.AITaskSelection) (models.AITask, error) {
+	selection := models.AITaskSelection{}
+	if len(selections) > 0 {
+		selection = selections[0]
+	}
+	if err := selection.Normalize(); err != nil {
+		return models.AITask{}, err
+	}
 	if previous, err := models.FindAITaskRequest(ctx, w.db.Raw, user, request); err == nil {
-		if previous.ServerID != serverID || previous.ProviderID != providerID || previous.Prompt != prompt {
+		if previous.ServerID != serverID || previous.ProviderID != providerID || previous.Prompt != prompt || !previous.MatchesSelection(selection) {
 			return models.AITask{}, models.ErrAIRequestConflict
 		}
 		return previous, nil
@@ -462,7 +514,17 @@ func (w *AITaskWorker) Create(ctx context.Context, user, serverID, providerID, r
 			return models.AITask{}, ErrAIAgentNotEnrolled
 		}
 	}
-	task := models.AITask{UserID: user, ServerID: server.ID, ServerName: server.Name, ServerType: server.ServerType, ProviderID: p.ID, ProviderName: p.Name, Model: p.Model, RequestID: request, Prompt: prompt, TargetFingerprint: AITargetFingerprint(server), ProviderFingerprint: AIProviderFingerprint(p), Messages: InitialAITaskMessages(server, prompt)}
+	options, err := w.snapshotOptions(ctx, user, selection, server, p, prompt)
+	if err != nil {
+		return models.AITask{}, err
+	}
+	messages, err := initialAIConfiguredMessages(server, prompt, selection.ApprovalMode, options)
+	if err != nil {
+		return models.AITask{}, err
+	}
+	rawOptions, _ := json.Marshal(options)
+	task := models.AITask{UserID: user, ServerID: server.ID, ServerName: server.Name, ServerType: server.ServerType, ProviderID: p.ID, ProviderName: p.Name, Model: p.Model, RequestID: request, Prompt: prompt, TargetFingerprint: AITargetFingerprint(server), ProviderFingerprint: AIProviderFingerprint(p), Messages: messages, ApprovalMode: selection.ApprovalMode, Options: rawOptions}
+	_, _ = task.DecodeOptions()
 	err = models.CreateAITask(ctx, w.db.Raw, &task)
 	return task, err
 }
@@ -475,11 +537,15 @@ func (w *AITaskWorker) Continue(ctx context.Context, user, id, request uuid.UUID
 	if accepted {
 		return task, nil
 	}
+	plugins, err := w.boundPlugins(ctx, task)
+	if err != nil {
+		return models.AITask{}, fmt.Errorf("%w: %s", models.ErrAITaskConflict, err.Error())
+	}
 	server, provider, err := w.loadBound(ctx, task)
 	if err != nil {
 		return models.AITask{}, fmt.Errorf("%w: %s", models.ErrAITaskConflict, err.Error())
 	}
-	if aiKnownSecret(message, server, provider) {
+	if aiKnownSecret(message, server, provider, pluginSecrets(plugins)...) {
 		return models.AITask{}, ErrAISecretInput
 	}
 	return models.ContinueAITask(ctx, w.db.Raw, id, user, request, message)

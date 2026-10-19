@@ -17,9 +17,16 @@ import (
 type fakeAIProviderClient struct {
 	validations int
 	tests       int
+	discoveries int
 	err         error
 	provider    models.AIProvider
 	validate    func(context.Context, string) error
+}
+
+func (f *fakeAIProviderClient) ListModels(_ context.Context, p models.AIProvider) ([]services.AIAvailableModel, error) {
+	f.discoveries++
+	f.provider = p
+	return []services.AIAvailableModel{{ID: "new-model", OwnedBy: "fixture"}}, f.err
 }
 
 func (f *fakeAIProviderClient) ValidateEndpoint(ctx context.Context, endpoint string) error {
@@ -57,6 +64,7 @@ func TestAIProviderHTTPKeyRetentionOwnershipAndSafeUpstreamErrors(t *testing.T) 
 	router.PUT("/providers/:id", h.Update)
 	router.DELETE("/providers/:id", h.Delete)
 	router.POST("/providers/:id/test", h.Test)
+	router.GET("/providers/:id/models", h.Models)
 	request := func(method, path, body string, foreign bool) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -105,14 +113,26 @@ func TestAIProviderHTTPKeyRetentionOwnershipAndSafeUpstreamErrors(t *testing.T) 
 	if response.Code != 200 || response.Body.String() != "[]" {
 		t.Fatal("foreign list leaked provider", response.Body.String())
 	}
-	for _, action := range []struct{ method, suffix, body string }{{"PUT", "", `{"name":"foreign"}`}, {"DELETE", "", ""}, {"POST", "/test", ""}} {
+	for _, action := range []struct{ method, suffix, body string }{{"PUT", "", `{"name":"foreign"}`}, {"DELETE", "", ""}, {"POST", "/test", ""}, {"GET", "/models", ""}} {
 		response = request(action.method, path+action.suffix, action.body, true)
 		if response.Code != 404 {
 			t.Fatal("foreign provider accessible", response.Code, response.Body.String())
 		}
 	}
-	if client.tests != 0 {
+	if client.tests != 0 || client.discoveries != 0 {
 		t.Fatal("foreign caller invoked provider")
+	}
+	response = request("GET", path+"/models", "", false)
+	if response.Code != 200 || strings.Contains(response.Body.String(), "private-") || !strings.Contains(response.Body.String(), `"id":"new-model"`) || response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("model discovery failed or exposed credentials", response.Code, response.Body.String())
+	}
+	if client.provider.APIKey != "private-replacement" || client.provider.BaseURL != "https://other.example/v1" {
+		t.Fatal("model discovery used stale provider")
+	}
+	client.err = &services.AIProviderError{Code: "models_not_supported"}
+	response = request("GET", path+"/models", "", false)
+	if response.Code != 502 || !strings.Contains(response.Body.String(), `"code":"models_not_supported"`) {
+		t.Fatal("unsupported model catalog not reported", response.Code, response.Body.String())
 	}
 	client.err = &services.AIProviderError{Code: "authentication_failed"}
 	response = request("POST", path+"/test", "", false)
@@ -135,6 +155,10 @@ func TestAIProviderHTTPKeyRetentionOwnershipAndSafeUpstreamErrors(t *testing.T) 
 	if response.Code != 400 || client.tests != 2 {
 		t.Fatal("disabled provider was sent")
 	}
+	response = request("GET", path+"/models", "", false)
+	if response.Code != 400 || client.discoveries != 2 {
+		t.Fatal("disabled provider catalog was sent")
+	}
 	response = request("DELETE", path, "", false)
 	if response.Code != 204 {
 		t.Fatal(response.Code, response.Body.String())
@@ -142,6 +166,36 @@ func TestAIProviderHTTPKeyRetentionOwnershipAndSafeUpstreamErrors(t *testing.T) 
 	response = request("DELETE", path, "", false)
 	if response.Code != 404 {
 		t.Fatal("missing delete succeeded")
+	}
+}
+
+func TestAIProviderModelPreviewNeedsExplicitKeyAndDoesNotStore(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	client := &fakeAIProviderClient{}
+	h := &AIProviderHandler{client: client, tests: make(chan struct{}, 4)}
+	router := gin.New()
+	// No DB is installed: preview must never read or persist credentials.
+	router.POST("/models", h.PreviewModels)
+	request := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", "/models", strings.NewReader(body))
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		return recorder
+	}
+	for _, body := range []string{`{"kind":"openai"}`, `{"kind":"cpa","api_key":"secret"}`, `{"kind":"cpa","base_url":"http://127.0.0.1/v1","api_key":"secret"}`, `{"kind":"openai","api_key":"secret","provider_id":"someone"}`, `{"kind":"openai","api_key":"secret"} {}`} {
+		response := request(body)
+		if response.Code != 400 || client.discoveries != 0 {
+			t.Fatalf("invalid preview reached provider: %d %s", response.Code, response.Body.String())
+		}
+	}
+	response := request(`{"kind":"openai","api_key":"private-preview-key"}`)
+	if response.Code != 200 || client.discoveries != 1 || client.provider.BaseURL != "https://api.openai.com/v1" || client.provider.APIKey != "private-preview-key" || strings.Contains(response.Body.String(), "private-preview-key") {
+		t.Fatalf("preview failed: %d %s", response.Code, response.Body.String())
+	}
+	client.err = context.DeadlineExceeded
+	response = request(`{"kind":"cpa","base_url":"https://gateway.example/api/v1","api_key":"private-preview-key"}`)
+	if response.Code != 504 || !strings.Contains(response.Body.String(), `"code":"timeout"`) {
+		t.Fatalf("preview timeout failed: %d %s", response.Code, response.Body.String())
 	}
 }
 

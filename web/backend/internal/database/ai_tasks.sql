@@ -71,3 +71,5 @@ CREATE TABLE IF NOT EXISTS ai_task_messages (
 -- Old accepted requests did not retain a digest. Their empty marker remains
 -- idempotent: return the existing task without appending or executing anything.
 ALTER TABLE ai_task_messages ADD COLUMN IF NOT EXISTS message_hash TEXT NOT NULL DEFAULT '';
+ALTER TABLE ai_tasks ADD COLUMN IF NOT EXISTS approval_mode TEXT NOT NULL DEFAULT 'standard' CHECK (approval_mode IN ('readonly','standard','automatic'));
+ALTER TABLE ai_tasks ADD COLUMN IF NOT EXISTS options JSONB NOT NULL DEFAULT '{}';

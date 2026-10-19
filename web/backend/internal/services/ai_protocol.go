@@ -99,9 +99,33 @@ type AIMessage struct {
 }
 
 type AIToolCall struct {
-	ID       string         `json:"id"`
-	Type     string         `json:"type"`
-	Function AIFunctionCall `json:"function"`
+	ID           string              `json:"id"`
+	Type         string              `json:"type"`
+	Function     AIFunctionCall      `json:"function"`
+	ExtraContent *AIToolExtraContent `json:"extra_content,omitempty"`
+}
+
+// Gemini's OpenAI-compatible endpoint requires the original thought signature
+// on continued tool calls. Retain only this documented opaque field, not
+// arbitrary provider extensions. It stays in the private model conversation.
+type AIToolExtraContent struct {
+	Google *AIGoogleToolContent `json:"google,omitempty"`
+}
+
+type AIGoogleToolContent struct {
+	ThoughtSignature string `json:"thought_signature,omitempty"`
+}
+
+func aiToolSignature(call AIToolCall) string {
+	if call.ExtraContent == nil || call.ExtraContent.Google == nil {
+		return ""
+	}
+	return call.ExtraContent.Google.ThoughtSignature
+}
+
+func validAIToolSignature(call AIToolCall) bool {
+	signature := aiToolSignature(call)
+	return len(signature) <= 65536 && !strings.ContainsFunc(signature, func(r rune) bool { return r < 33 || r > 126 })
 }
 
 type AIFunctionCall struct {

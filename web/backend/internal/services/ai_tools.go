@@ -29,6 +29,7 @@ const (
 )
 
 type AIAction struct {
+	ApprovalMode     string          `json:"-"`
 	ToolName         string          `json:"tool_name"`
 	Arguments        json.RawMessage `json:"arguments"`
 	Summary          string          `json:"summary"`
@@ -267,6 +268,9 @@ func ExecuteAIAction(ctx context.Context, server *models.Server, action AIAction
 	if prepared.Command != action.Command || prepared.Mutating != action.Mutating || prepared.RequiresApproval != action.RequiresApproval || prepared.RiskReason != action.RiskReason || !reflect.DeepEqual(preparedArguments, originalArguments) {
 		return result, errors.New("action changed; prepare it again and obtain any required approval")
 	}
+	if _, err := aiActionApproval(action.ApprovalMode, prepared); err != nil {
+		return result, err
+	}
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
@@ -403,7 +407,7 @@ func executeAIFile(ctx context.Context, client *ssh.Client, server *models.Serve
 		if aiContainsSecrets(string(current)) {
 			return result, errors.New("existing file contains credentials; refusing an AI rewrite")
 		}
-		if !action.RequiresApproval && !aiSafeConfiguration(filename, string(current), server.ServerType) {
+		if action.ApprovalMode != "automatic" && !action.RequiresApproval && !aiSafeConfiguration(filename, string(current), server.ServerType) {
 			return result, errors.New("existing configuration contains unverified or security directives; preserve them so the replacement receives approval, or use an explicitly reviewed command")
 		}
 		if err := ctx.Err(); err != nil {
