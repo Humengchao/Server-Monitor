@@ -1,6 +1,7 @@
 import i18n from './index';
 
 const en = {
+  conversation: 'Task conversation',
   pluginToolCount: '{{count}} tools',
   clearToken: 'Remove saved token', endpointToken: 'Changing the endpoint requires a new token or explicitly removing the saved token.',
   code: 'Code', copyCode: 'Copy code', copy: 'Copy', copied: 'Copied', copyFailed: 'Copy failed. Select the text to copy it.', imageOmitted: 'Image omitted', expandOutput: 'Expand to view',
@@ -36,6 +37,7 @@ const en = {
   tokens: 'Tokens', inputTokens: 'Input', outputTokens: 'Output', taskTarget: 'Task target', modelLabel: 'Model', updated: 'Updated {{time}}', noEvents: 'Waiting for the first task update…', providerUnavailable: 'The selected provider is unavailable. Choose another provider, or add or enable one before starting a new task.',
 };
 const zh: typeof en = {
+  conversation: '任务对话',
   pluginToolCount: '{{count}} 个工具',
   endpointToken: '修改地址时必须提供新令牌，或显式清除已保存的令牌。',
   clearToken: '清除已保存的令牌',

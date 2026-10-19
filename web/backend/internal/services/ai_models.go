@@ -68,7 +68,7 @@ func parseAIModels(raw []byte, apiKey string) ([]AIAvailableModel, error) {
 		}
 		// A gateway may accidentally echo credentials in metadata. Do not turn
 		// model discovery into a route that returns a saved key to the browser.
-		if apiKey != "" && (strings.Contains(model.ID, apiKey) || strings.Contains(model.OwnedBy, apiKey)) {
+		if aiContainsEncodedToken([]byte(model.ID), apiKey) || aiContainsEncodedToken([]byte(model.OwnedBy), apiKey) {
 			return nil, bad
 		}
 		if !seen[model.ID] {

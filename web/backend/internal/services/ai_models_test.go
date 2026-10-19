@@ -67,6 +67,27 @@ func TestAIModelsRejectsUnsafeAndMalformedMetadata(t *testing.T) {
 	}
 }
 
+func TestAIModelsRejectsEncodedCredentialMetadata(t *testing.T) {
+	// A compatible gateway may wrap its diagnostics in JSON strings. A single
+	// decode must not make the stored API key available through model discovery.
+	key := "fixture-private-key"
+	encoded := `"\u0066ixture-private-key"`
+	for _, field := range []string{"id", "owned_by"} {
+		t.Run(field, func(t *testing.T) {
+			model := map[string]string{"id": "safe-model"}
+			model[field] = encoded
+			raw, err := json.Marshal(map[string]any{"data": []any{model}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := parseAIModels(raw, key)
+			if err == nil || result != nil {
+				t.Fatal("encoded saved credential was returned in model metadata")
+			}
+		})
+	}
+}
+
 func TestAIModelsUpstreamErrorsNeverEchoBodies(t *testing.T) {
 	for _, fixture := range []struct {
 		status int

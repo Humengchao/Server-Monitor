@@ -363,6 +363,88 @@ func TestAIMCPCallRejectsCaseAliasedFieldsAndNULBeforePersistence(t *testing.T) 
 	}
 }
 
+func TestAIMCPMalformedResultsNeverBecomeSuccessfulActions(t *testing.T) {
+	for name, resultJSON := range map[string]string{
+		"null-error":         `{"content":[],"isError":null}`,
+		"null-block":         `{"content":[null]}`,
+		"missing-block-type": `{"content":[{"text":"failed"}]}`,
+		"missing-text":       `{"content":[{"type":"text"}]}`,
+		"null-text":          `{"content":[{"type":"text","text":null}]}`,
+		"null-structured":    `{"content":[],"structuredContent":null}`,
+		"array-structured":   `{"content":[],"structuredContent":[]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var calls atomic.Int32
+			transport, _ := localAIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				req := aiMCPReadRequest(t, r)
+				if aiMCPInitialize(t, w, r, req) {
+					return
+				}
+				calls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%q,"result":%s}`, req.ID, resultJSON)
+			}))
+			result, err := NewAIMCPClient(transport).CallTool(context.Background(), aiMCPTestPlugin(), "change", json.RawMessage(`{}`), true, false)
+			code, _ := SafeAIMCPError(err)
+			if code != "invalid_response" || !result.Unknown || result.Output != "" || calls.Load() != 1 {
+				t.Fatalf("malformed result was treated as a success or retried: %+v %v", result, err)
+			}
+		})
+	}
+}
+
+func TestAIMCPAuthorizationIsRecheckedAfterHandshakeAndDNS(t *testing.T) {
+	for _, phase := range []string{"initialize", "call_dns", "unchanged"} {
+		t.Run(phase, func(t *testing.T) {
+			var revoked atomic.Bool
+			var checks, calls, deletes, lookups atomic.Int32
+			transport, _ := localAIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodDelete {
+					deletes.Add(1)
+				}
+				req := aiMCPReadRequest(t, r)
+				if req.Method == "initialize" && phase == "initialize" {
+					revoked.Store(true)
+				}
+				if aiMCPInitialize(t, w, r, req) {
+					return
+				}
+				calls.Add(1)
+				aiMCPReply(w, req.ID, map[string]any{"content": []any{map[string]string{"type": "text", "text": "finished"}}})
+			}))
+			lookup := transport.lookupIP
+			transport.lookupIP = func(ctx context.Context, host string) ([]net.IP, error) {
+				// initialize, initialized, and finally tools/call each resolve.
+				if lookups.Add(1) == 3 && phase == "call_dns" {
+					revoked.Store(true)
+				}
+				return lookup(ctx, host)
+			}
+			ctx := WithAIMCPAuthorization(context.Background(), func(context.Context) error {
+				checks.Add(1)
+				if revoked.Load() {
+					return errors.New("internal authorization detail must stay private")
+				}
+				return nil
+			})
+			result, err := NewAIMCPClient(transport).CallTool(ctx, aiMCPTestPlugin(), "change", json.RawMessage(`{}`), true, false)
+			if checks.Load() != 1 || deletes.Load() != 1 || result.Unknown {
+				t.Fatalf("authorization/session lifecycle was lost: checks=%d deletes=%d result=%+v", checks.Load(), deletes.Load(), result)
+			}
+			if phase == "unchanged" {
+				if err != nil || calls.Load() != 1 || result.Output != "finished\n" {
+					t.Fatalf("valid authority did not execute: %+v %v calls=%d", result, err, calls.Load())
+				}
+				return
+			}
+			code, safe := SafeAIMCPError(err)
+			if code != "authorization_revoked" || calls.Load() != 0 || strings.Contains(safe, "internal authorization") {
+				t.Fatalf("revoked authority reached tools/call or leaked error: %+v %v calls=%d", result, err, calls.Load())
+			}
+		})
+	}
+}
+
 func TestAIMCPSessionsEndOnceWithoutReplayingOrOverridingResults(t *testing.T) {
 	for _, scenario := range []string{"list", "call", "stateless", "init_failure", "delete_405", "delete_redirect", "delete_timeout", "call_disconnect", "call_cancel"} {
 		t.Run(scenario, func(t *testing.T) {
@@ -465,10 +547,10 @@ func TestAIMCPKnownTokenIsDetectedInsideNestedJSONText(t *testing.T) {
 	inner, _ := json.Marshal(map[string]string{"value": token})
 	nested, _ := json.Marshal(map[string]string{"payload": string(inner)})
 	outer, _ := json.Marshal(map[string]any{"content": []any{map[string]string{"type": "text", "text": string(nested)}}})
-	if !aiMCPContainsToken(outer, token) {
+	if !aiContainsEncodedToken(outer, token) {
 		t.Fatal("nested JSON hid the known plugin token")
 	}
-	if aiMCPContainsToken([]byte(`{"description":"ordinary tool"}`), token) {
+	if aiContainsEncodedToken([]byte(`{"description":"ordinary tool"}`), token) {
 		t.Fatal("ordinary metadata rejected")
 	}
 	transport, _ := localAIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

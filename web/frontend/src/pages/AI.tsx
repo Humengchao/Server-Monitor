@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, App, AutoComplete, Button, Empty, Form, Input, Modal, Select, Space, Spin, Switch, Tag, Typography } from 'antd';
+import { Alert, App, AutoComplete, Button, Drawer, Empty, Form, Input, Modal, Select, Space, Spin, Switch, Tag, Typography } from 'antd';
 import { ApiOutlined, CheckOutlined, CloseOutlined, CloudServerOutlined, CodeOutlined, DeleteOutlined, EditOutlined, ExperimentOutlined, HistoryOutlined, KeyOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SafetyCertificateOutlined, SendOutlined, SettingOutlined, StopOutlined } from '@ant-design/icons';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -8,6 +8,7 @@ import type { AIAction, AIApprovalMode, AIModelCatalog, AIPlugin, AIProvider, AI
 import { serversApi } from '../api/servers';
 import type { Server } from '../api/servers';
 import { usePolling } from '../hooks/usePolling';
+import { useMediaQuery } from '../hooks/useMediaQuery';
 import { formatDateTime } from '../utils/format';
 import AIMarkdown from '../components/AIMarkdown';
 import AIExtensions from '../components/AIExtensions';
@@ -34,6 +35,7 @@ function ProviderSettings({ providers, onChanged, onClose }: { providers: AIProv
   const [form] = Form.useForm<AIProviderInput>();
   const baseURL = Form.useWatch('base_url', form);
   const kind = Form.useWatch('kind', form);
+  const apiKey = Form.useWatch('api_key', form);
   const [catalog, setCatalog] = useState<AIModelCatalog | null>(null);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelError, setModelError] = useState('');
@@ -58,13 +60,13 @@ function ProviderSettings({ providers, onChanged, onClose }: { providers: AIProv
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setCatalog(null); setModelError(''); setModelsLoading(false);
-      if (editing && editing !== 'new' && baseURL === editing.base_url && kind === editing.kind) void refreshModels();
+      if (editing && editing !== 'new' && baseURL === editing.base_url && kind === editing.kind && !apiKey) void refreshModels();
     }, 0);
     const interval = window.setInterval(() => {
       if (document.visibilityState === 'visible' && editing && editing !== 'new' && baseURL === editing.base_url && kind === editing.kind && !form.getFieldValue('api_key')) void refreshModels();
     }, 300000);
     return () => { window.clearTimeout(timer); window.clearInterval(interval); modelRequest.current?.abort(); };
-  }, [editing, baseURL, kind, refreshModels, form]);
+  }, [editing, baseURL, kind, apiKey, refreshModels, form]);
   const mutate = async (operation: (signal: AbortSignal) => Promise<unknown>, success: string) => {
     if (request.current) return false;
     const controller = new AbortController(); request.current = controller; setBusy(true);
@@ -81,7 +83,7 @@ function ProviderSettings({ providers, onChanged, onClose }: { providers: AIProv
   };
   const save = async (values: AIProviderInput) => {
     const payload = { ...values, name: values.name.trim(), base_url: values.base_url.trim(), model: values.model.trim(), api_key: values.api_key || '' };
-    if (await mutate(signal => editing && editing !== 'new' ? aiApi.updateProvider(editing.id, payload, signal) : aiApi.createProvider(payload, signal), t('providerSaved'))) {
+    if (await mutate(signal => editing && editing !== 'new' ? aiApi.updateProvider(editing.id, { ...payload, expected_updated_at: editing.updated_at }, signal) : aiApi.createProvider(payload, signal), t('providerSaved'))) {
       if (mounted.current) { form.resetFields(); setEditing(null); }
     }
   };
@@ -154,6 +156,8 @@ export default function AI() {
   const [providerId, setProviderId] = useState('');
   const [prompt, setPrompt] = useState('');
   const [settings, setSettings] = useState(false);
+  const compact = useMediaQuery('(max-width: 700px)');
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [extensionsOpen, setExtensionsOpen] = useState(false);
   const [skills, setSkills] = useState<AISkill[]>([]);
   const [plugins, setPlugins] = useState<AIPlugin[]>([]);
@@ -248,8 +252,8 @@ export default function AI() {
   usePolling(async () => { await Promise.all([readTask(), readHistory()]); }, 2000, { leading: false, enabled: (!!taskId && detailError !== 'selectedMissing' && (!currentTask || activeStatuses.includes(currentTask.status))) || rows.some(task => activeStatuses.includes(task.status)) });
   const refreshRef = useRef({ readTask, readHistory });
   useEffect(() => { refreshRef.current = { readTask, readHistory }; }, [readTask, readHistory]);
-  const selectTask = (id: string) => { if (!submitting) setParams({ task: id }); };
-  const freshTask = () => { if (submitting) return; setPrompt(''); setApprovalMode('standard'); setSkillIds([]); setPluginIds([]); const target = currentTask?.server_id || serverId; setParams(target ? { server: target } : {}); };
+  const selectTask = (id: string) => { if (!submitting) { setParams({ task: id }); setHistoryOpen(false); } };
+  const freshTask = () => { if (submitting) return; setHistoryOpen(false); setPrompt(''); setApprovalMode('standard'); setSkillIds([]); setPluginIds([]); const target = currentTask?.server_id || serverId; setParams(target ? { server: target } : {}); };
   const clearUncertain = (key: string) => setUncertainSubmissions(previous => {
     const next = { ...previous }; delete next[key]; return next;
   });
@@ -278,8 +282,12 @@ export default function AI() {
     } catch (error) {
       if (!mounted.current || controller.signal.aborted) return;
       const status = (error as { response?: { status?: number } }).response?.status;
-      if (status == null || status >= 500) {
+      // A retry can be rejected by a proxy or rate limiter before the server
+      // checks the original idempotency key. That does not settle its outcome.
+      const retryDeferred = !!retry && (status === 408 || status === 429);
+      if (status == null || status >= 500 || retryDeferred) {
         const pending = value; setUncertainSubmissions(previous => ({ ...previous, [pending.workspace]: pending }));
+        if (retryDeferred) message.error(errorText(error, t('operationFailed')), 8);
       } else { clearUncertain(value.workspace); message.error(errorText(error, t('operationFailed')), 8); }
     } finally {
       if (mutation.current === controller) mutation.current = null;
@@ -322,19 +330,27 @@ export default function AI() {
     for (const action of current.actions) if (!rendered.has(action.id)) items.push({ key: `action-${action.id}`, time: action.created_at, action });
     return items.sort((a, b) => Date.parse(a.time) - Date.parse(b.time));
   }, [current]);
+  const historyPanel = <aside className="ai-sidebar" aria-label={t('history')}><header><span><HistoryOutlined />{t('history')}</span><Button type="text" size="small" icon={<PlusOutlined />} aria-label={t('newTask')} disabled={submitting} onClick={freshTask} /></header>
+        {historyError && <Alert type="warning" title={t('loadFailed')} action={<Button size="small" onClick={() => { void readHistory(); }}>{t('retry')}</Button>} />}
+        <div className="ai-history-list">{rows.map(task => <button key={task.id} type="button" className={`ai-history-item${task.id === taskId ? ' selected' : ''}`} aria-current={task.id === taskId ? 'page' : undefined} disabled={submitting} onClick={() => selectTask(task.id)}><strong>{task.prompt}</strong><span>{task.server_name}</span><footer><Tag color={statusColors[task.status]}>{t(task.status)}</Tag><time>{new Date(task.created_at).toLocaleDateString(i18n.language)}</time></footer></button>)}{!rows.length && <div className="ai-history-empty"><HistoryOutlined /><span>{t('noHistory')}</span></div>}</div>
+        <div className="ai-history-paging"><Button size="small" disabled={!page.previous.length} onClick={() => setPage(value => ({ cursor: value.previous[value.previous.length - 1], previous: value.previous.slice(0, -1) }))}>{t('previous')}</Button><Button size="small" disabled={history?.page !== page || !history.next} onClick={() => { if (history?.next) setPage({ cursor: history.next, previous: [...page.previous, page.cursor] }); }}>{t('next')}</Button></div>
+      </aside>;
   return <div className="ai-page">
     <div className="page-heading ai-page-heading"><span className="ai-page-icon" aria-hidden="true"><RobotOutlined /></span><div><Typography.Text className="eyebrow">{t('eyebrow')}</Typography.Text><Typography.Title level={2}>{t('title')}</Typography.Title><Typography.Text type="secondary">{t('description')}</Typography.Text></div><Space className="ai-heading-actions" wrap><Button aria-label={t('extensions')} icon={<ApiOutlined />} onClick={() => setExtensionsOpen(true)}>{t('extensions')}</Button><Button aria-label={t('providers')} icon={<SettingOutlined />} onClick={() => setSettings(true)}>{t('providers')}</Button></Space></div>
     {loadError && <Alert type="error" showIcon title={t('loadFailed')} action={<Button size="small" onClick={() => { void readMetadata(); }}>{t('retry')}</Button>} />}
     <div className="ai-workspace">
-      <aside className="ai-sidebar" aria-label={t('history')}><header><span><HistoryOutlined />{t('history')}</span><Button type="text" size="small" icon={<PlusOutlined />} aria-label={t('newTask')} disabled={submitting} onClick={freshTask} /></header>
-        {historyError && <Alert type="warning" title={t('loadFailed')} action={<Button size="small" onClick={() => { void readHistory(); }}>{t('retry')}</Button>} />}
-        <div className="ai-history-list">{rows.map(task => <button key={task.id} type="button" className={`ai-history-item${task.id === taskId ? ' selected' : ''}`} aria-current={task.id === taskId ? 'page' : undefined} disabled={submitting} onClick={() => selectTask(task.id)}><strong>{task.prompt}</strong><span>{task.server_name}</span><footer><Tag color={statusColors[task.status]}>{t(task.status)}</Tag><time>{new Date(task.created_at).toLocaleDateString(i18n.language)}</time></footer></button>)}{!rows.length && <div className="ai-history-empty"><HistoryOutlined /><span>{t('noHistory')}</span></div>}</div>
-        <div className="ai-history-paging"><Button size="small" disabled={!page.previous.length} onClick={() => setPage(value => ({ cursor: value.previous[value.previous.length - 1], previous: value.previous.slice(0, -1) }))}>{t('previous')}</Button><Button size="small" disabled={history?.page !== page || !history.next} onClick={() => { if (history?.next) setPage({ cursor: history.next, previous: [...page.previous, page.cursor] }); }}>{t('next')}</Button></div>
-      </aside>
+      {compact ? <><div className="ai-mobile-toolbar"><Button type="text" icon={<HistoryOutlined />} aria-label={t('history')} onClick={() => setHistoryOpen(true)}>{t('history')}</Button><Button type="text" icon={<PlusOutlined />} aria-label={t('newTask')} disabled={submitting} onClick={freshTask}>{t('newTask')}</Button></div><Drawer open={historyOpen} title={t('history')} placement="left" width="min(320px, calc(100vw - 32px))" className="ai-history-drawer" onClose={() => setHistoryOpen(false)}>{historyPanel}</Drawer></> : historyPanel}
       <section className="ai-conversation" aria-label={t('title')}>
         {currentTask ? <header className="ai-task-header"><div><span className="ai-task-server"><CloudServerOutlined />{currentTask.server_name}<Tag>{currentTask.server_type}</Tag></span><small>{currentTask.provider_name} · {currentTask.model}</small><div className="ai-task-capabilities"><Tag className={`ai-mode-tag ai-mode-${currentTask.approval_mode || 'standard'}`} icon={<SafetyCertificateOutlined />}>{t(`mode_${currentTask.approval_mode || 'standard'}`)}</Tag>{currentTask.skills?.map(skill => <Tag key={skill.id}>Skill · {skill.name}</Tag>)}{currentTask.plugins?.map(plugin => <Tag key={plugin.id}>MCP · {plugin.name}</Tag>)}</div></div><Space wrap><Tag color={statusColors[currentTask.status]}>{t(currentTask.status)}</Tag><Button type="text" icon={<ReloadOutlined />} aria-label={t('refresh')} onClick={() => { void readTask(); }} />{canCancel && <Button danger icon={<StopOutlined />} aria-label={t('cancelTask')} disabled={actionBusy || submitting} onClick={() => { void act(currentTask.id, signal => aiApi.cancel(currentTask.id, signal), t('cancelRequested')); }}>{t('cancelTask')}</Button>}</Space></header> : null}
-        <div className="ai-conversation-body">
+        <div className="ai-conversation-body" role="region" aria-label={t('conversation')} tabIndex={0}>
           {!taskId && <div className="ai-welcome"><span className="ai-welcome-icon"><RobotOutlined /></span><Typography.Title level={3}>{t('welcomeTitle')}</Typography.Title><p>{t('welcomeHint')}</p><div className="ai-prompt-examples">{['exampleInspect', 'exampleInstall', 'exampleLogs'].map(key => <button type="button" key={key} disabled={submitting || !!uncertain} onClick={() => setPrompt(t(key))}><CodeOutlined />{t(key)}</button>)}</div></div>}
+          {!taskId && <div className="ai-draft-settings">
+          {!taskId && <div className="ai-composer-targets"><label><span>{t('server')}</span><Select aria-label={t('server')} showSearch optionFilterProp="label" placeholder={t('selectServer')} value={chosenServer?.id} onChange={id => setParams({ server: id }, { replace: true })} disabled={submitting || !!uncertain} loading={metadataLoading} options={servers.map(server => ({ value: server.id, label: server.name }))} /></label><label><span>{t('provider')}</span><Select aria-label={t('provider')} placeholder={t('selectProvider')} value={chosenProvider?.enabled && chosenProvider.has_api_key ? selectedProviderId : undefined} onChange={setProviderId} disabled={submitting || !!uncertain} loading={metadataLoading} options={enabledProviders.map(provider => ({ value: provider.id, label: `${provider.name} · ${provider.model}` }))} /></label></div>}
+          {!taskId && <><div className="ai-permission-selector" role="radiogroup" aria-label={t('approvalMode')}>{(['readonly', 'standard', 'automatic'] as AIApprovalMode[]).map(mode => <button key={mode} type="button" role="radio" aria-checked={selectedMode === mode} className={`ai-permission-option ${selectedMode === mode ? 'selected' : ''} ai-permission-${mode}`} disabled={submitting || !!uncertain} onClick={() => setApprovalMode(mode)}><span><SafetyCertificateOutlined />{t(`mode_${mode}`)}</span><small>{t(`modeBrief_${mode}`)}</small></button>)}</div><p className={`ai-mode-explanation ${selectedMode === 'automatic' ? 'automatic' : ''}`}>{t(`modeHint_${selectedMode}`)}</p><details className="ai-task-extension-picker"><summary><ApiOutlined />{t('taskExtensions')}<span>{selectedSkills.length + selectedPlugins.length ? t('extensionsSelected', { count: selectedSkills.length + selectedPlugins.length }) : t('optional')}</span></summary><div className="ai-composer-targets"><label><span>Skills</span><Select mode="multiple" aria-label="Skills" placeholder={t('selectSkills')} value={selectedSkills} maxCount={8} maxTagCount="responsive" onChange={setSkillIds} disabled={submitting || !!uncertain} options={skills.map(skill => ({ value: skill.id, label: skill.name }))} /></label><label><span>{t('plugins')}</span><Select mode="multiple" aria-label={t('plugins')} placeholder={t('selectPlugins')} value={selectedPlugins} maxCount={4} maxTagCount="responsive" onChange={setPluginIds} disabled={submitting || !!uncertain} options={plugins.filter(plugin => plugin.enabled).map(plugin => ({ value: plugin.id, label: plugin.name }))} /></label></div>{selectedMode === 'readonly' && selectedPlugins.length > 0 && <p>{t('readonlyPlugins')}</p>}<Button size="small" type="link" onClick={() => setExtensionsOpen(true)}>{t('manageExtensions')}</Button></details></>}
+          {!taskId && (extensionsError || extensionsUnavailable) && <Alert type="warning" title={t(extensionsError ? 'extensionsLoadFailed' : 'extensionsUnavailable')} action={extensionsError ? <Button size="small" onClick={() => { void readMetadata(); }}>{t('retry')}</Button> : undefined} />}
+          {!taskId && selectedProviderId && (!chosenProvider?.enabled || !chosenProvider.has_api_key) && enabledProviders.length > 0 && <Alert type="warning" title={t('providerUnavailable')} />}
+          {!taskId && !metadataLoading && !enabledProviders.length && <Alert type="info" title={t('noProvider')} action={<Button onClick={() => setSettings(true)}>{t('addProvider')}</Button>} />}
+          </div>}
           {taskId && !current && !detailError && <div className="ai-task-loading"><Spin /></div>}
           {detailError && <Alert type="warning" showIcon title={t(detailError)} action={<Button onClick={() => { void readTask(); }}>{t('retry')}</Button>} />}
           {currentTask?.error && <Alert type="error" showIcon title={currentTask.error} />}
@@ -344,12 +360,7 @@ export default function AI() {
         {currentTask && <div className="ai-task-usage"><span>{t('tokens')}: {t('inputTokens')} {currentTask.prompt_tokens.toLocaleString()} · {t('outputTokens')} {currentTask.completion_tokens.toLocaleString()}</span><span>{t('updated', { time: new Date(currentTask.updated_at).toLocaleTimeString(i18n.language) })}</span></div>}
         <div className="ai-composer">
           {uncertain && <Alert type="warning" showIcon title={t('submitUncertain')} action={<Button disabled={submitting} loading={submitting} aria-label={t('retrySubmission')} onClick={() => { void send(uncertain); }}>{t('retrySubmission')}</Button>} />}
-          {!taskId && <div className="ai-composer-targets"><label><span>{t('server')}</span><Select aria-label={t('server')} showSearch optionFilterProp="label" placeholder={t('selectServer')} value={chosenServer?.id} onChange={id => setParams({ server: id }, { replace: true })} disabled={submitting || !!uncertain} loading={metadataLoading} options={servers.map(server => ({ value: server.id, label: server.name }))} /></label><label><span>{t('provider')}</span><Select aria-label={t('provider')} placeholder={t('selectProvider')} value={chosenProvider?.enabled && chosenProvider.has_api_key ? selectedProviderId : undefined} onChange={setProviderId} disabled={submitting || !!uncertain} loading={metadataLoading} options={enabledProviders.map(provider => ({ value: provider.id, label: `${provider.name} · ${provider.model}` }))} /></label></div>}
-          {!taskId && <><div className="ai-permission-selector" role="radiogroup" aria-label={t('approvalMode')}>{(['readonly', 'standard', 'automatic'] as AIApprovalMode[]).map(mode => <button key={mode} type="button" role="radio" aria-checked={selectedMode === mode} className={`ai-permission-option ${selectedMode === mode ? 'selected' : ''} ai-permission-${mode}`} disabled={submitting || !!uncertain} onClick={() => setApprovalMode(mode)}><span><SafetyCertificateOutlined />{t(`mode_${mode}`)}</span><small>{t(`modeBrief_${mode}`)}</small></button>)}</div><p className={`ai-mode-explanation ${selectedMode === 'automatic' ? 'automatic' : ''}`}>{t(`modeHint_${selectedMode}`)}</p><details className="ai-task-extension-picker"><summary><ApiOutlined />{t('taskExtensions')}<span>{selectedSkills.length + selectedPlugins.length ? t('extensionsSelected', { count: selectedSkills.length + selectedPlugins.length }) : t('optional')}</span></summary><div className="ai-composer-targets"><label><span>Skills</span><Select mode="multiple" aria-label="Skills" placeholder={t('selectSkills')} value={selectedSkills} maxCount={8} maxTagCount="responsive" onChange={setSkillIds} disabled={submitting || !!uncertain} options={skills.map(skill => ({ value: skill.id, label: skill.name }))} /></label><label><span>{t('plugins')}</span><Select mode="multiple" aria-label={t('plugins')} placeholder={t('selectPlugins')} value={selectedPlugins} maxCount={4} maxTagCount="responsive" onChange={setPluginIds} disabled={submitting || !!uncertain} options={plugins.filter(plugin => plugin.enabled).map(plugin => ({ value: plugin.id, label: plugin.name }))} /></label></div>{selectedMode === 'readonly' && selectedPlugins.length > 0 && <p>{t('readonlyPlugins')}</p>}<Button size="small" type="link" onClick={() => setExtensionsOpen(true)}>{t('manageExtensions')}</Button></details></>}
-          {!taskId && (extensionsError || extensionsUnavailable) && <Alert type="warning" title={t(extensionsError ? 'extensionsLoadFailed' : 'extensionsUnavailable')} action={extensionsError ? <Button size="small" onClick={() => { void readMetadata(); }}>{t('retry')}</Button> : undefined} />}
-          {!taskId && selectedProviderId && (!chosenProvider?.enabled || !chosenProvider.has_api_key) && enabledProviders.length > 0 && <Alert type="warning" title={t('providerUnavailable')} />}
-          {!taskId && !metadataLoading && !enabledProviders.length && <Alert type="info" title={t('noProvider')} action={<Button onClick={() => setSettings(true)}>{t('addProvider')}</Button>} />}
-          {(!taskId || canFollowup) ? <><Input.TextArea aria-label={t('taskPrompt')} value={uncertain?.prompt ?? prompt} onChange={event => setPrompt(event.target.value)} placeholder={t(taskId ? 'followupPlaceholder' : 'placeholder')} autoSize={{ minRows: 3, maxRows: 8 }} maxLength={16000} disabled={submitting || !!uncertain} /><div className="ai-composer-footer"><p><SafetyCertificateOutlined />{currentTask ? t('shareSelected', { server: currentTask.server_name, provider: currentTask.provider_name }) : chosenServer && chosenProvider ? t('shareSelected', { server: chosenServer.name, provider: chosenProvider.name }) : t('shareHint')}</p><Button type="primary" icon={<SendOutlined />} aria-label={t(taskId ? 'followup' : 'submit')} aria-busy={submitting} loading={submitting} disabled={submitting || actionBusy || !!uncertain || !prompt.trim() || (!taskId && (!chosenServer || !chosenProvider?.enabled || !chosenProvider.has_api_key || extensionsUnavailable))} onClick={() => { void send(); }}>{t(taskId ? 'followup' : 'submit')}</Button></div></> : currentTask ? <p className="ai-composer-state">{t(activeStatuses.includes(currentTask.status) ? currentTask.status === 'awaiting_input' ? 'waiting' : 'working' : 'readOnly')}</p> : null}
+          {(!taskId || canFollowup) ? <><Input.TextArea aria-label={t('taskPrompt')} value={uncertain?.prompt ?? prompt} onChange={event => setPrompt(event.target.value)} placeholder={t(taskId ? 'followupPlaceholder' : 'placeholder')} autoSize={{ minRows: 2, maxRows: 3 }} maxLength={16000} disabled={submitting || !!uncertain} /><div className="ai-composer-footer"><p><SafetyCertificateOutlined />{currentTask ? t('shareSelected', { server: currentTask.server_name, provider: currentTask.provider_name }) : chosenServer && chosenProvider ? t('shareSelected', { server: chosenServer.name, provider: chosenProvider.name }) : t('shareHint')}</p><Button type="primary" icon={<SendOutlined />} aria-label={t(taskId ? 'followup' : 'submit')} aria-busy={submitting} loading={submitting} disabled={submitting || actionBusy || !!uncertain || !prompt.trim() || (!taskId && (!chosenServer || !chosenProvider?.enabled || !chosenProvider.has_api_key || extensionsUnavailable))} onClick={() => { void send(); }}>{t(taskId ? 'followup' : 'submit')}</Button></div></> : currentTask ? <p className="ai-composer-state">{t(activeStatuses.includes(currentTask.status) ? currentTask.status === 'awaiting_input' ? 'waiting' : 'working' : 'readOnly')}</p> : null}
           <small className="ai-background-note">{t('leaveHint')}{currentTask && canCancel ? ` ${t('cancelHint')}` : ''}</small>
         </div>
       </section>

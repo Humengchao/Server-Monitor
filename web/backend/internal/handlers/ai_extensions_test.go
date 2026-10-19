@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"server-monitor/internal/models"
@@ -60,7 +61,11 @@ func TestAIExtensionsHTTPCRUDOwnershipCredentialsAndDiscovery(t *testing.T) {
 	router.DELETE("/plugins/:id", h.DeletePlugin)
 	router.POST("/plugins/:id/test", h.TestPlugin)
 	router.GET("/plugins/:id/tools", h.PluginTools)
+	versions := map[string]time.Time{}
 	request := func(method, path, body string, foreign bool) *httptest.ResponseRecorder {
+		if method == "PUT" {
+			body = aiVersionedTestBody(t, body, versions[path])
+		}
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		if foreign {
@@ -68,6 +73,19 @@ func TestAIExtensionsHTTPCRUDOwnershipCredentialsAndDiscovery(t *testing.T) {
 		}
 		response := httptest.NewRecorder()
 		router.ServeHTTP(response, req)
+		if response.Code == 200 || response.Code == 201 {
+			var saved struct {
+				ID        string    `json:"id"`
+				UpdatedAt time.Time `json:"updated_at"`
+			}
+			if json.Unmarshal(response.Body.Bytes(), &saved) == nil && !saved.UpdatedAt.IsZero() {
+				prefix := "/skills/"
+				if strings.HasPrefix(path, "/plugins") {
+					prefix = "/plugins/"
+				}
+				versions[prefix+saved.ID] = saved.UpdatedAt
+			}
+		}
 		return response
 	}
 	response := request("POST", "/skills", `{"name":"Operations","description":"notes","content":"# First inspect\nThen configure."}`, false)
@@ -158,5 +176,83 @@ func TestAIExtensionsHTTPCRUDOwnershipCredentialsAndDiscovery(t *testing.T) {
 		if got := request("DELETE", path, "", false); got.Code != 204 {
 			t.Fatal(got.Code, got.Body.String())
 		}
+	}
+}
+
+func TestAIConfigurationHTTPStaleFormCannotOverwriteNewerSettings(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, fixture := range []struct {
+		kind, create, fresh, stale string
+	}{
+		{"providers", `{"name":"original","kind":"deepseek","api_key":"private-key"}`, `{"name":"fresh","enabled":false}`, `{"name":"stale","enabled":true}`},
+		{"plugins", `{"name":"original","url":"https://example.com/mcp","bearer_token":"private-token"}`, `{"name":"fresh","enabled":false}`, `{"name":"stale","enabled":true}`},
+		{"skills", `{"name":"original","content":"original instructions"}`, `{"name":"fresh","content":"fresh instructions"}`, `{"name":"stale","content":"old instructions"}`},
+	} {
+		t.Run(fixture.kind, func(t *testing.T) {
+			raw := testdb.Open(t)
+			user, _, _ := testdb.Seed(t, raw)
+			db := &models.DB{Raw: raw, EncryptionKey: "0123456789abcdef0123456789abcdef"}
+			providerClient, extensionClient := &fakeAIProviderClient{}, &aiExtensionFixtureClient{}
+			provider := &AIProviderHandler{client: providerClient}
+			extension := &AIExtensionHandler{client: extensionClient}
+			router := gin.New()
+			router.Use(func(c *gin.Context) { c.Set("db", db); c.Set("user_id", user) })
+			router.POST("/providers", provider.Create)
+			router.PUT("/providers/:id", provider.Update)
+			router.GET("/providers", provider.List)
+			router.POST("/plugins", extension.CreatePlugin)
+			router.PUT("/plugins/:id", extension.UpdatePlugin)
+			router.GET("/plugins", extension.ListPlugins)
+			router.POST("/skills", extension.CreateSkill)
+			router.PUT("/skills/:id", extension.UpdateSkill)
+			router.GET("/skills", extension.ListSkills)
+			request := func(method, path, body string) *httptest.ResponseRecorder {
+				req := httptest.NewRequest(method, path, strings.NewReader(body))
+				req.Header.Set("Content-Type", "application/json")
+				response := httptest.NewRecorder()
+				router.ServeHTTP(response, req)
+				return response
+			}
+			path := "/" + fixture.kind
+			created := request("POST", path, fixture.create)
+			var original struct {
+				ID        string    `json:"id"`
+				UpdatedAt time.Time `json:"updated_at"`
+			}
+			if created.Code != 201 || json.Unmarshal(created.Body.Bytes(), &original) != nil {
+				t.Fatal(created.Code, created.Body.String())
+			}
+			updated := request("PUT", path+"/"+original.ID, aiVersionedTestBody(t, fixture.fresh, original.UpdatedAt))
+			if updated.Code != 200 {
+				t.Fatal(updated.Code, updated.Body.String())
+			}
+			validations := providerClient.validations + extensionClient.validations
+			// A second tab still has the original version. It must not silently
+			// overwrite instructions or re-enable a disabled provider/plugin.
+			for _, body := range []string{fixture.stale, `{"name":"stale","expected_updated_at":null}`, aiVersionedTestBody(t, fixture.stale, original.UpdatedAt)} {
+				rejected := request("PUT", path+"/"+original.ID, body)
+				if rejected.Code != 409 {
+					t.Fatalf("stale/missing form version accepted: %d %s", rejected.Code, rejected.Body.String())
+				}
+			}
+			if validations != providerClient.validations+extensionClient.validations {
+				t.Fatal("rejected stale update reached endpoint validation")
+			}
+			listed := request("GET", path, "")
+			var records []json.RawMessage
+			if listed.Code != 200 || json.Unmarshal(listed.Body.Bytes(), &records) != nil || len(records) != 1 || string(records[0]) != updated.Body.String() {
+				t.Fatalf("stale form modified persisted settings: %s", listed.Body.String())
+			}
+			// Reloading and submitting that current version remains supported.
+			var latest struct {
+				UpdatedAt time.Time `json:"updated_at"`
+			}
+			if json.Unmarshal(updated.Body.Bytes(), &latest) != nil {
+				t.Fatal("invalid response version")
+			}
+			if got := request("PUT", path+"/"+original.ID, aiVersionedTestBody(t, `{"name":"reloaded"}`, latest.UpdatedAt)); got.Code != 200 {
+				t.Fatal("current form was rejected", got.Code, got.Body.String())
+			}
+		})
 	}
 }

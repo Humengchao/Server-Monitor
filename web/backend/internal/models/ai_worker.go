@@ -17,6 +17,9 @@ func ExpireAILeases(ctx context.Context, db *sql.DB) error {
  ), stopped AS (
  UPDATE ai_actions SET status='interrupted',unknown=TRUE,error='Worker disconnected; remote completion is unknown.',completed_at=NOW()
  WHERE task_id IN (SELECT id FROM expired) AND status='running'
+ ), unstarted AS (
+ UPDATE ai_actions SET status='rejected',error='Task ended before this operation started.',completed_at=NOW()
+ WHERE task_id IN (SELECT id FROM expired) AND status IN ('approved','pending')
  ) INSERT INTO ai_events(task_id,kind,content) SELECT id,'system','Worker disconnected. Commands were not replayed automatically.' FROM expired`)
 	return err
 }
@@ -33,6 +36,20 @@ func HeartbeatAITask(ctx context.Context, db *sql.DB, id uuid.UUID, worker strin
 func lockAIWorker(ctx context.Context, tx *sql.Tx, id uuid.UUID, worker string) error {
 	var owned uuid.UUID
 	return tx.QueryRowContext(ctx, `SELECT id FROM ai_tasks WHERE id=$1 AND worker_id=$2 AND status='running' AND lease_until>NOW() FOR UPDATE`, id, worker).Scan(&owned)
+}
+
+// A remote initialization can outlive a cancellation or lease change. This is
+// a final read before a recorded action issues its first mutating request.
+func CheckAIActionAuthority(ctx context.Context, db *sql.DB, task, action uuid.UUID, worker string) error {
+	var owned uuid.UUID
+	return db.QueryRowContext(ctx, `SELECT a.id FROM ai_actions a JOIN ai_tasks t ON t.id=a.task_id
+ WHERE t.id=$1 AND t.worker_id=$2 AND t.status='running' AND t.lease_until>NOW()
+ AND a.id=$3 AND a.status='running'`, task, worker, action).Scan(&owned)
+}
+
+func CheckAITaskAuthority(ctx context.Context, db *sql.DB, task uuid.UUID, worker string) error {
+	var owned uuid.UUID
+	return db.QueryRowContext(ctx, `SELECT id FROM ai_tasks WHERE id=$1 AND worker_id=$2 AND status='running' AND lease_until>NOW()`, task, worker).Scan(&owned)
 }
 func SaveAIConversation(ctx context.Context, db *sql.DB, id uuid.UUID, worker string, messages json.RawMessage, content string, promptTokens, completionTokens int64) error {
 	return saveAIConversation(ctx, db, id, worker, messages, content, promptTokens, completionTokens, 1)
@@ -160,6 +177,9 @@ func FinishAITask(ctx context.Context, db *sql.DB, id uuid.UUID, worker, status,
 		return err
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE ai_actions SET status='interrupted',unknown=TRUE,error='Execution stopped; remote completion is unknown.',completed_at=NOW() WHERE task_id=$1 AND status='running'`, id); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE ai_actions SET status='rejected',error='Task ended before this operation started.',completed_at=NOW() WHERE task_id=$1 AND status IN ('approved','pending')`, id); err != nil {
 		return err
 	}
 	if detail != "" {

@@ -40,7 +40,8 @@ export default function AIExtensions({ skills, plugins, onChanged, onClose }: { 
   const remove = (value: AISkill | AIPlugin, type: 'skills' | 'plugins') => {
     confirmation.current = modal.confirm({ title: t('deleteExtension'), content: t('deleteExtensionHint', { name: value.name }), okButtonProps: { danger: true }, onOk: async () => {
       if (!await mutate(signal => type === 'skills' ? aiApi.deleteSkill(value.id, signal) : aiApi.deletePlugin(value.id, signal), t('extensionRemoved'))) throw new Error('delete failed');
-      if (type === 'skills') setSkill(null); else setPlugin(null);
+      if (type === 'skills' && skill && skill !== 'new' && skill.id === value.id) { importGeneration.current++; setSkill(null); skillForm.resetFields(); }
+      if (type === 'plugins' && plugin && plugin !== 'new' && plugin.id === value.id) { setPlugin(null); pluginForm.resetFields(); }
     } });
   };
   const importMarkdown = async (file?: File) => {
@@ -64,7 +65,7 @@ export default function AIExtensions({ skills, plugins, onChanged, onClose }: { 
         {!skill ? <Button icon={<PlusOutlined />} aria-label={t('addSkill')} disabled={busy} onClick={() => editSkill('new')}>{t('addSkill')}</Button> : <Form form={skillForm} layout="vertical" disabled={busy} className="ai-extension-form" onFinish={async values => {
           importGeneration.current++;
           const payload = { ...values, name: values.name.trim(), description: values.description?.trim() || '' };
-          if (await mutate(signal => skill === 'new' ? aiApi.createSkill(payload, signal) : aiApi.updateSkill(skill.id, payload, signal), t('skillSaved'))) { setSkill(null); skillForm.resetFields(); }
+          if (await mutate(signal => skill === 'new' ? aiApi.createSkill(payload, signal) : aiApi.updateSkill(skill.id, { ...payload, expected_updated_at: skill.updated_at }, signal), t('skillSaved'))) { setSkill(null); skillForm.resetFields(); }
         }}>
           <Form.Item name="name" label={t('skillName')} rules={[{ required: true, whitespace: true, message: t('required') }]}><Input maxLength={128} /></Form.Item>
           <Form.Item name="description" label={t('skillDescription')}><Input maxLength={512} /></Form.Item>
@@ -72,7 +73,7 @@ export default function AIExtensions({ skills, plugins, onChanged, onClose }: { 
           <input className="ai-file-input" type="file" ref={upload} accept=".md,.markdown,.txt,text/markdown,text/plain" aria-label={t('importMarkdown')} onChange={event => { void importMarkdown(event.target.files?.[0]); event.target.value = ''; }} />
           <Form.Item name="content" label={t('skillContent')} rules={[{ required: true, whitespace: true, message: t('required') }, { validator: (_, value) => new TextEncoder().encode(value || '').length <= 32768 ? Promise.resolve() : Promise.reject(new Error(t('skillTooLarge'))) }]} hidden={preview}><Input.TextArea rows={12} placeholder={t('skillPlaceholder')} className="ai-skill-editor" onChange={() => { importGeneration.current++; }} /></Form.Item>
           {preview && <div className="ai-skill-preview"><AIMarkdown>{content || t('emptyPreview')}</AIMarkdown></div>}
-          <Space><Button type="primary" htmlType="submit" loading={busy}>{t('saveSkill')}</Button><Button onClick={() => { importGeneration.current++; setSkill(null); skillForm.resetFields(); }}>{t('cancel')}</Button></Space>
+          <Space><Button type="primary" htmlType="submit" loading={busy} aria-label={t('saveSkill')} aria-busy={busy}>{t('saveSkill')}</Button><Button onClick={() => { importGeneration.current++; setSkill(null); skillForm.resetFields(); }}>{t('cancel')}</Button></Space>
         </Form>}
       </> },
       { key: 'plugins', label: <Space><ApiOutlined />{t('plugins')}</Space>, children: <>
@@ -81,7 +82,7 @@ export default function AIExtensions({ skills, plugins, onChanged, onClose }: { 
         {!plugins.length && !plugin && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('noPlugins')} />}
         {!plugin ? <Button icon={<PlusOutlined />} aria-label={t('addPlugin')} disabled={busy} onClick={() => editPlugin('new')}>{t('addPlugin')}</Button> : <Form form={pluginForm} layout="vertical" disabled={busy} className="ai-extension-form" onFinish={async values => {
           const payload = { ...values, name: values.name.trim(), url: values.url.trim(), bearer_token: values.clear_token ? '' : values.bearer_token || '', clear_token: !!values.clear_token };
-          if (await mutate(signal => plugin === 'new' ? aiApi.createPlugin(payload, signal) : aiApi.updatePlugin(plugin.id, payload, signal), t('pluginSaved'))) { setPlugin(null); pluginForm.resetFields(); }
+          if (await mutate(signal => plugin === 'new' ? aiApi.createPlugin(payload, signal) : aiApi.updatePlugin(plugin.id, { ...payload, expected_updated_at: plugin.updated_at }, signal), t('pluginSaved'))) { setPlugin(null); pluginForm.resetFields(); }
         }}>
           <Form.Item name="name" label={t('pluginName')} rules={[{ required: true, whitespace: true, message: t('required') }]}><Input maxLength={128} /></Form.Item>
           <Form.Item name="url" label={t('pluginURL')} rules={[{ required: true, message: t('required') }, { validator: (_, value) => { try { const url = new URL(value); return url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash ? Promise.resolve() : Promise.reject(new Error(t('invalidURL'))); } catch { return Promise.reject(new Error(t('invalidURL'))); } } }]}><Input placeholder="https://mcp.example.com/mcp" autoComplete="off" maxLength={2048} /></Form.Item>
@@ -89,7 +90,7 @@ export default function AIExtensions({ skills, plugins, onChanged, onClose }: { 
           {plugin !== 'new' && plugin.has_bearer_token && <Form.Item name="clear_token" label={t('clearToken')} valuePropName="checked" htmlFor=""><Switch aria-label={t('clearToken')} onChange={() => pluginForm.setFieldValue('bearer_token', '')} /></Form.Item>}
           <Form.Item name="enabled" label={t('enabled')} valuePropName="checked" htmlFor=""><Switch aria-label={t('enabled')} /></Form.Item>
           <Alert showIcon type="info" title={t('pluginScopeHint')} />
-          <Space><Button type="primary" htmlType="submit" loading={busy}>{t('savePlugin')}</Button><Button onClick={() => { setPlugin(null); pluginForm.resetFields(); }}>{t('cancel')}</Button></Space>
+          <Space><Button type="primary" htmlType="submit" loading={busy} aria-label={t('savePlugin')} aria-busy={busy}>{t('savePlugin')}</Button><Button onClick={() => { setPlugin(null); pluginForm.resetFields(); }}>{t('cancel')}</Button></Space>
         </Form>}
       </> },
     ]} />

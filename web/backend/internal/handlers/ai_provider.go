@@ -43,12 +43,13 @@ func RegisterAIProviderRoutes(secured *gin.RouterGroup, client *services.AIClien
 }
 
 type aiProviderRequest struct {
-	Name    *string `json:"name"`
-	Kind    *string `json:"kind"`
-	BaseURL *string `json:"base_url"`
-	Model   *string `json:"model"`
-	APIKey  string  `json:"api_key"`
-	Enabled *bool   `json:"enabled"`
+	Name              *string    `json:"name"`
+	Kind              *string    `json:"kind"`
+	BaseURL           *string    `json:"base_url"`
+	Model             *string    `json:"model"`
+	APIKey            string     `json:"api_key"`
+	Enabled           *bool      `json:"enabled"`
+	ExpectedUpdatedAt *time.Time `json:"expected_updated_at"`
 }
 
 func readAIProviderRequest(c *gin.Context) (aiProviderRequest, bool) {
@@ -129,6 +130,10 @@ func (h *AIProviderHandler) save(c *gin.Context, create bool) {
 		provider, err = models.GetAIProvider(ctx, db, id, userID)
 		if err != nil {
 			aiProviderStorageError(c, err)
+			return
+		}
+		if req.ExpectedUpdatedAt == nil || !req.ExpectedUpdatedAt.Equal(provider.UpdatedAt) {
+			aiProviderStorageError(c, models.ErrAIProviderConflict)
 			return
 		}
 		oldURL = provider.BaseURL

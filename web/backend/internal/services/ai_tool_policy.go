@@ -211,7 +211,15 @@ func aiSensitiveService(name string) bool {
 			return true
 		}
 	}
-	return strings.HasSuffix(name, ".target") || strings.HasSuffix(name, ".socket") || strings.HasSuffix(name, ".mount")
+	// Non-service units can arm timers/path triggers, alter mounts or swap,
+	// and manage process groups. Treat them as system control, not an ordinary
+	// application restart. State inspection remains available in every mode.
+	for _, suffix := range []string{".target", ".socket", ".mount", ".timer", ".path", ".automount", ".swap", ".scope", ".slice", ".device"} {
+		if strings.HasSuffix(name, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 // This is an allowlist grammar, not an attempt to prove arbitrary shell text
@@ -236,7 +244,18 @@ func aiAutomaticCommand(server *models.Server, command string) (AIAction, bool) 
 		readonly = map[string]bool{"whoami": true, "hostname": true, "Get-Date": true, "Get-Service": true, "Get-Process": true, "Get-ComputerInfo": true, "Get-PSDrive -PSProvider FileSystem": true, "docker ps": true, "docker ps -a": true, "docker version": true, "docker stats --no-stream": true, "docker images": true}
 	}
 	if readonly[plain] {
-		return AIAction{Command: plain, Summary: "Inspect server: " + plain}, true
+		command := plain
+		switch plain {
+		case "docker ps", "docker ps -a":
+			// Docker's default table includes process arguments, which commonly
+			// contain application credentials unknown to the panel's redactor.
+			command += ` --format 'table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'`
+		case "docker compose ps":
+			command += ` --format 'table {{.Name}}\t{{.Service}}\t{{.State}}\t{{.Ports}}'`
+		}
+		// nginx -t opens configured log files and can create missing ones. It
+		// remains a routine operation, but must not run in a read-only task.
+		return AIAction{Command: command, Summary: "Inspect server: " + plain, Mutating: plain == "nginx -t"}, true
 	}
 	prepare := func(name string, args any) (AIAction, bool) {
 		raw, _ := json.Marshal(args)
@@ -343,7 +362,7 @@ func aiSecretPath(filename string) bool {
 	}
 	// Credential-store backups are as sensitive as the original. In
 	// particular shadow- is created by the normal account-management tools.
-	for _, sensitive := range []string{"shadow", "gshadow", "opasswd", "sam", "security", "ntds.dit", ".netrc", ".pgpass", ".my.cnf", ".git-credentials", ".npmrc", ".dockercfg", "credentials", "credentials.json", "kubeconfig", "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa"} {
+	for _, sensitive := range []string{"shadow", "gshadow", "opasswd", "sam", "security", "ntds.dit", "htpasswd", ".htpasswd", "htdigest", ".htdigest", ".netrc", ".pgpass", ".my.cnf", ".git-credentials", ".npmrc", ".dockercfg", "credentials", "credentials.json", "kubeconfig", "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa"} {
 		if base == sensitive || strings.HasPrefix(base, sensitive+".") || strings.HasPrefix(base, sensitive+"-") || strings.HasPrefix(base, sensitive+"~") {
 			return true
 		}
@@ -395,7 +414,14 @@ func aiSecurityOrStartupPath(filename string) bool {
 
 var aiSecretContent = regexp.MustCompile(`(?im)(-----BEGIN [A-Z ]*PRIVATE KEY-----|(?:password|passwd|api[_-]?key|access[_-]?token|secret(?:[_-]?access)?[_-]?key|client[_-]?secret|bot[_-]?token|authorization|secret|token)["']?\s*[:=]\s*["']?[^\s"';},]{1,}|["']auth["']\s*:\s*["'][A-Za-z0-9+/=_-]{4,}["']|\bAKIA[A-Z0-9]{16}\b|\bgh[pousr]_[A-Za-z0-9_]{20,}|https?://[^/\s:@]+:[^/\s@]+@|\b(?:Bearer|Basic)\s+[A-Za-z0-9+/=_-]{8,})`)
 
-func aiContainsSecrets(content string) bool { return aiSecretContent.MatchString(content) }
+// Password files can be named arbitrarily. Recognize standard crypt/bcrypt
+// and Apache password hashes even without a password= label, so renaming a
+// credential store cannot make its contents eligible for model context.
+var aiPasswordHashContent = regexp.MustCompile(`(?:^|[\s:"'=])(?:\$(?:2[aby]\$[0-9]{2}\$[./A-Za-z0-9]{53}|(?:apr1|1|5|6)\$(?:rounds=[0-9]+\$)?[./A-Za-z0-9]{1,16}\$[./A-Za-z0-9]{22,86}|y\$[./A-Za-z0-9]+\$[./A-Za-z0-9]+\$[./A-Za-z0-9]+)|\{SHA\}[A-Za-z0-9+/]{27}=)`)
+
+func aiContainsSecrets(content string) bool {
+	return aiSecretContent.MatchString(content) || aiPasswordHashContent.MatchString(content)
+}
 
 // Automatic writes are limited to recognized declarative Nginx config. Unknown
 // application formats can execute hooks/plugins and therefore require review.

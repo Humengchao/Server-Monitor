@@ -157,6 +157,97 @@ func TestAIConfigPolicyDistinguishesDeclarativeConfigurationFromExecution(t *tes
 	}
 }
 
+func TestAIHTTPPasswordStoresNeverEnterFileContext(t *testing.T) {
+	for _, filename := range []string{"/etc/nginx/htpasswd", "/etc/apache2/.htpasswd", "/etc/nginx/.htpasswd-users", "/etc/apache2/htdigest.bak", "C:/Apache/conf/.htdigest"} {
+		platform := "linux"
+		if strings.HasPrefix(filename, "C:") {
+			platform = "windows"
+		}
+		if _, err := PrepareAIAction(&models.Server{ServerType: platform}, AIToolCall{Function: AIFunctionCall{Name: "read_file", Arguments: stringMustJSON(aiReadFile{Path: filename})}}); err == nil {
+			t.Errorf("allowed HTTP password store %s", filename)
+		}
+	}
+	server := aiSFTPServer(t)
+	filename := filepath.ToSlash(filepath.Join(t.TempDir(), "access-list.txt"))
+	for _, hashed := range []string{
+		"alice:$2y$12$" + strings.Repeat("a", 53),
+		"alice:$apr1$saltsalt$" + strings.Repeat("a", 22),
+		"alice:$6$rounds=5000$saltsalt$" + strings.Repeat("a", 86),
+		"alice:{SHA}" + strings.Repeat("a", 27) + "=",
+	} {
+		if err := os.WriteFile(filename, []byte(hashed+"\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		action := prepareAITest(t, runtime.GOOS, "read_file", aiReadFile{Path: filename})
+		action.ApprovalMode = "readonly"
+		if result, err := ExecuteAIAction(context.Background(), server, action); err == nil || result.Output != "" {
+			t.Errorf("HTTP password hash reached model context: %+v %v", result, err)
+		}
+	}
+}
+
+func TestAINginxConfigurationValidationHonorsReadOnlyMode(t *testing.T) {
+	action := prepareAITest(t, "linux", "run_command", aiCommand{Command: "nginx -t"})
+	if _, err := aiActionApproval("readonly", action); err == nil {
+		t.Error("configuration validation can open/create log files and is not read-only")
+	}
+	for _, mode := range []string{"standard", "automatic"} {
+		if approval, err := aiActionApproval(mode, action); err != nil || approval {
+			t.Errorf("routine configuration validation gained an approval: %s %v %v", mode, approval, err)
+		}
+	}
+	version := prepareAITest(t, "linux", "run_command", aiCommand{Command: "nginx -v"})
+	if _, err := aiActionApproval("readonly", version); err != nil {
+		t.Fatal("version inspection stopped being read-only", err)
+	}
+}
+
+func TestAIContainerDiagnosticsOmitStartupArguments(t *testing.T) {
+	for _, platform := range []string{"linux", "windows"} {
+		commands := []string{"docker ps", "docker ps -a"}
+		if platform == "linux" {
+			commands = append(commands, "docker compose ps")
+		}
+		for _, command := range commands {
+			action := prepareAITest(t, platform, "run_command", aiCommand{Command: command})
+			if !strings.Contains(action.Command, "--format ") || strings.Contains(action.Command, ".Command") || strings.Contains(action.Command, "{{json") {
+				t.Errorf("%s container diagnostics expose startup arguments: %s", platform, action.Command)
+			}
+			if _, err := aiActionApproval("readonly", action); err != nil {
+				t.Errorf("container state inspection became unavailable in read-only mode: %v", err)
+			}
+		}
+	}
+	// Caller-controlled formats must not be mistaken for the fixed diagnostic.
+	action := prepareAITest(t, "linux", "run_command", aiCommand{Command: "docker ps --format '{{.Command}}'"})
+	if !action.RequiresApproval {
+		t.Fatal("a caller-controlled format bypassed exact approval")
+	}
+}
+
+func TestAISystemdTriggerUnitsRequireStandardApproval(t *testing.T) {
+	for _, suffix := range []string{"timer", "path", "automount", "swap", "scope", "slice", "device"} {
+		name := "fixture." + suffix
+		for _, tool := range []string{"manage_service", "run_command"} {
+			var args any = aiService{Name: name, Action: "start"}
+			if tool == "run_command" {
+				args = aiCommand{Command: "systemctl start " + name}
+			}
+			action := prepareAITest(t, "linux", tool, args)
+			if approval, err := aiActionApproval("standard", action); err != nil || !approval {
+				t.Errorf("%s %s was treated as routine service management: %+v %v", tool, name, action, err)
+			}
+			if approval, err := aiActionApproval("automatic", action); err != nil || approval {
+				t.Errorf("fully automatic task lost its authorization: %+v %v", action, err)
+			}
+		}
+		status := prepareAITest(t, "linux", "manage_service", aiService{Name: name, Action: "status"})
+		if _, err := aiActionApproval("readonly", status); err != nil {
+			t.Errorf("unit state inspection was blocked: %s %v", name, err)
+		}
+	}
+}
+
 func TestAIAptPackageNamesCannotBecomeImplicitRegexes(t *testing.T) {
 	action := prepareAITest(t, "linux", "install_packages", aiPackages{Manager: "apt", Packages: []string{"python3.11", "libstdc++6:amd64"}})
 	if !strings.Contains(action.Command, "--no-remove -o APT::Cmd::Pattern-Only=true -- 'python3.11' 'libstdc++6:amd64'") {
@@ -526,6 +617,94 @@ type aiFailAfterRename struct {
 	sftp.FileCmder
 	target string
 	calls  atomic.Int32
+}
+
+type aiExecutableInfo struct{ os.FileInfo }
+
+func (info aiExecutableInfo) Mode() os.FileMode { return info.FileInfo.Mode() | 0111 }
+
+type aiExecutableLister struct{ sftp.ListerAt }
+
+func (list aiExecutableLister) ListAt(entries []os.FileInfo, offset int64) (int, error) {
+	n, err := list.ListerAt.ListAt(entries, offset)
+	for i := 0; i < n; i++ {
+		entries[i] = aiExecutableInfo{entries[i]}
+	}
+	return n, err
+}
+
+type aiExecutableFileList struct {
+	sftp.FileLister
+	filename string
+}
+
+type aiInMemoryMetadata struct {
+	sftp.FileCmder
+	sftp.PosixRenameFileCmder
+}
+
+func (handler aiInMemoryMetadata) Filecmd(request *sftp.Request) error {
+	// InMemHandler does not implement mode changes on directories. This
+	// fixture supplies executable metadata through aiExecutableFileList.
+	if request.Method == "Setstat" && !request.AttrFlags().Size {
+		return nil
+	}
+	return handler.FileCmder.Filecmd(request)
+}
+
+func (list aiExecutableFileList) Filelist(request *sftp.Request) (sftp.ListerAt, error) {
+	result, err := list.FileLister.Filelist(request)
+	if err == nil && request.Filepath == list.filename {
+		return aiExecutableLister{result}, nil
+	}
+	return result, err
+}
+
+func TestAIExecutableTextAllowsReadsAndFullyAutomaticWrites(t *testing.T) {
+	const filename = "/etc/nginx/conf.d/app.conf"
+	handlers := sftp.InMemHandler()
+	handlers.FileList = aiExecutableFileList{FileLister: handlers.FileList, filename: filename}
+	handlers.FileCmd = aiInMemoryMetadata{FileCmder: handlers.FileCmd, PosixRenameFileCmder: handlers.FileCmd.(sftp.PosixRenameFileCmder)}
+	server := aiSFTPServer(t, func(channel ssh.Channel) {
+		remote := sftp.NewRequestServer(channel, handlers)
+		defer remote.Close()
+		_ = remote.Serve()
+	})
+	server.ServerType = "linux"
+	client, _, err := DialServer(context.Background(), server)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	remote, err := NewSFTPFiles(context.Background(), client, "linux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer remote.Close()
+	store := remote.(*sftpFiles)
+	for _, directory := range []string{"/etc", "/etc/nginx", "/etc/nginx/conf.d"} {
+		if err := store.Mkdir(directory, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const original = "server { listen 8080; root /var/www/html; }\n"
+	if err := store.Write(filename, strings.NewReader(original), int64(len(original)), false); err != nil {
+		t.Fatal(err)
+	}
+	read := prepareAITest(t, "linux", "read_file", aiReadFile{Path: filename})
+	read.ApprovalMode = "readonly"
+	if result, err := ExecuteAIAction(context.Background(), server, read); err != nil || !strings.Contains(result.Output, "listen 8080") {
+		t.Errorf("reading executable text was mistaken for executing it: %+v %v", result, err)
+	}
+	write := prepareAITest(t, "linux", "write_file", aiWriteFile{Path: filename, Content: strings.Replace(original, "8080", "8081", 1), ExpectedRevision: FileRevision([]byte(original))})
+	write.ApprovalMode = "standard"
+	if result, err := ExecuteAIAction(context.Background(), server, write); err == nil || result.BackupPath != "" {
+		t.Fatalf("standard task changed an executable file without review: %+v %v", result, err)
+	}
+	write.ApprovalMode = "automatic"
+	if result, err := ExecuteAIAction(context.Background(), server, write); err != nil || result.BackupPath == "" {
+		t.Errorf("fully automatic task could not perform its authorized file action: %+v %v", result, err)
+	}
 }
 
 func (handler *aiFailAfterRename) Filecmd(request *sftp.Request) error {

@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/uuid"
@@ -120,6 +122,120 @@ func TestAIWorkerRejectsCredentialInToolCallIdentity(t *testing.T) {
 	got, _, actions, err := models.AITaskDetails(context.Background(), w.db.Raw, task.ID, task.UserID)
 	if err != nil || got.Status != "failed" || len(actions) != 0 || strings.Contains(string(got.Messages), "secret-fixture-key") || strings.Contains(got.Error, "secret-fixture-key") {
 		t.Fatal("credential-bearing identity was retained", got.Status, len(actions), err)
+	}
+}
+
+func TestAITaskPluginRevocationDuringCatalogReadPreventsExecution(t *testing.T) {
+	w, first := aiWorkerFixture(t)
+	ctx := context.Background()
+	plugin := models.AIPlugin{UserID: first.UserID, Name: "revoked fixture", URL: "https://mcp.example.invalid/mcp", BearerToken: "plugin-fixture-key", Enabled: true}
+	if err := models.SaveAIPlugin(ctx, w.db, &plugin, true, false); err != nil {
+		t.Fatal(err)
+	}
+	task := selectedAITask(t, w, first, models.AITaskSelection{ApprovalMode: "automatic", PluginIDs: []uuid.UUID{plugin.ID}})
+	lists, calls, executions := 0, 0, 0
+	w.mcpList = func(context.Context, models.AIPlugin) ([]AIMCPTool, error) {
+		lists++
+		if lists == 2 {
+			plugin.Enabled = false
+			if err := models.SaveAIPlugin(ctx, w.db, &plugin, false, false); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return []AIMCPTool{{Name: "service.update", InputSchema: json.RawMessage(`{"type":"object"}`)}}, nil
+	}
+	w.complete = func(context.Context, models.AIProvider, []AIMessage, []AIToolDefinition) (AICompletion, error) {
+		calls++
+		if calls == 1 {
+			return toolCompletion("one", aiPluginToolName(plugin.ID, "service.update"), `{}`), nil
+		}
+		return AICompletion{Message: AIMessage{Role: "assistant", Content: "Done"}}, nil
+	}
+	w.mcpCall = func(context.Context, models.AIPlugin, string, json.RawMessage, bool, bool) (AIActionResult, error) {
+		executions++
+		return AIActionResult{Output: "changed"}, nil
+	}
+	claimAndRunAI(t, w)
+	got, _, actions, err := models.AITaskDetails(ctx, w.db.Raw, task.ID, task.UserID)
+	if err != nil || got.Status != "failed" || executions != 0 {
+		t.Fatalf("revoked plugin executed=%d status=%s actions=%d err=%v", executions, got.Status, len(actions), err)
+	}
+	if len(actions) != 1 || actions[0].Status != "rejected" || actions[0].Unknown {
+		t.Fatal("unstarted action was not closed accurately", actions)
+	}
+}
+
+func TestAIWorkerMCPInitializationCannotOutliveTaskAuthority(t *testing.T) {
+	for _, change := range []string{"plugin", "server", "cancel"} {
+		t.Run(change, func(t *testing.T) {
+			w, first := aiWorkerFixture(t)
+			ctx := context.Background()
+			plugin := aiMCPTestPlugin()
+			plugin.UserID = first.UserID
+			if err := models.SaveAIPlugin(ctx, w.db, &plugin, true, false); err != nil {
+				t.Fatal(err)
+			}
+			task := selectedAITask(t, w, first, models.AITaskSelection{ApprovalMode: "automatic", PluginIDs: []uuid.UUID{plugin.ID}})
+			var initialized, executed atomic.Int32
+			transport, _ := localAIClient(t, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				req := aiMCPReadRequest(t, request)
+				if req.Method == "initialize" && initialized.Add(1) == 3 {
+					var err error
+					switch change {
+					case "plugin":
+						disabled := plugin
+						disabled.Enabled = false
+						err = models.SaveAIPlugin(ctx, w.db, &disabled, false, false)
+					case "server":
+						_, err = w.db.Raw.Exec(`UPDATE servers SET host='192.0.2.88' WHERE id=$1`, task.ServerID)
+					case "cancel":
+						_, err = models.CancelAITask(ctx, w.db.Raw, task.ID, task.UserID)
+					}
+					if err != nil {
+						t.Error(err)
+						writer.WriteHeader(500)
+						return
+					}
+				}
+				if aiMCPInitialize(t, writer, request, req) {
+					return
+				}
+				switch req.Method {
+				case "tools/list":
+					aiMCPReply(writer, req.ID, map[string]any{"tools": []any{map[string]any{"name": "service.update", "inputSchema": map[string]any{"type": "object"}}}})
+				case "tools/call":
+					executed.Add(1)
+					aiMCPReply(writer, req.ID, map[string]any{"content": []any{map[string]string{"type": "text", "text": "executed"}}})
+				default:
+					t.Error("unexpected MCP method")
+				}
+			}))
+			mcp := NewAIMCPClient(transport)
+			w.mcpList = mcp.ListTools
+			w.mcpCall = mcp.CallTool
+			modelCalls := 0
+			w.complete = func(context.Context, models.AIProvider, []AIMessage, []AIToolDefinition) (AICompletion, error) {
+				modelCalls++
+				if modelCalls == 1 {
+					return toolCompletion("one", aiPluginToolName(plugin.ID, "service.update"), `{}`), nil
+				}
+				return AICompletion{Message: AIMessage{Role: "assistant", Content: "Stopped"}}, nil
+			}
+			claimAndRunAI(t, w)
+			got, _, actions, err := models.AITaskDetails(ctx, w.db.Raw, task.ID, task.UserID)
+			if err != nil || executed.Load() != 0 || initialized.Load() != 3 || len(actions) != 1 {
+				t.Fatalf("init=%d exec=%d actions=%d err=%v", initialized.Load(), executed.Load(), len(actions), err)
+			}
+			if actions[0].Unknown || actions[0].Status == "succeeded" {
+				t.Error("rejected pre-call operation reported unknown/success")
+			}
+			if change == "cancel" && got.Status != "canceled" {
+				t.Fatal(got.Status)
+			}
+			if modelCalls != 1 {
+				t.Fatalf("a new model request started after authority was revoked: %d", modelCalls)
+			}
+		})
 	}
 }
 

@@ -158,7 +158,7 @@ func (w *AITaskWorker) finish(t models.AITask, status, detail string) {
 }
 
 func (w *AITaskWorker) loadBound(ctx context.Context, t models.AITask) (*models.Server, models.AIProvider, error) {
-	s, err := models.GetServerByIDAndUser(w.db, t.ServerID, t.UserID)
+	s, err := models.GetServerByIDAndUserContext(ctx, w.db, t.ServerID, t.UserID)
 	if err != nil {
 		return nil, models.AIProvider{}, errors.New("The selected server is no longer accessible.")
 	}
@@ -271,7 +271,7 @@ func marshalAIConversation(messages []AIMessage) (json.RawMessage, error) {
 		return nil, errors.New("Could not encode the AI conversation.")
 	}
 	if len(raw) > aiConversationLimit {
-		return nil, errors.New("Conversation size limit reached; start a new task with the remaining work.")
+		return nil, models.ErrAIConversationLimit
 	}
 	return raw, nil
 }
@@ -308,6 +308,9 @@ func (w *AITaskWorker) process(ctx context.Context, t *models.AITask) error {
 		}
 		if _, err = w.boundPlugins(ctx, *t); err != nil {
 			return err
+		}
+		if err = models.CheckAITaskAuthority(ctx, w.db.Raw, t.ID, t.WorkerID); err != nil {
+			return errors.New("Task canceled or execution lease lost; no new model request was started.")
 		}
 		completion, err := w.complete(ctx, provider, messages, tools)
 		if err != nil {
@@ -391,7 +394,7 @@ func (w *AITaskWorker) process(ctx context.Context, t *models.AITask) error {
 			return err
 		}
 	}
-	return errors.New("Task reached its 24-step limit. Review the results and start a new task for remaining work.")
+	return models.ErrAITaskStepLimit
 }
 
 func (w *AITaskWorker) executeAction(ctx context.Context, t models.AITask, server *models.Server, p models.AIProvider, a *models.AIAction, messages *[]AIMessage) error {
@@ -422,6 +425,13 @@ func (w *AITaskWorker) executeAction(ctx context.Context, t models.AITask, serve
 	if prepared.Command != a.Command || requiresApproval != a.RequiresApproval || prepared.ToolName != a.ToolName {
 		return errors.New("The operation policy changed. Review a new task before executing.")
 	}
+	// MCP schema lookup may have taken seconds. Re-read the server and model
+	// binding after it, before reserving any execution.
+	if a.ToolName == "mcp_tool" {
+		if _, _, err := w.loadBound(ctx, t); err != nil {
+			return err
+		}
+	}
 	if err = models.StartAIAction(ctx, w.db.Raw, t.ID, a.ID, t.WorkerID); err != nil {
 		return errors.New("The operation was canceled or could not be recorded; it was not started.")
 	}
@@ -429,6 +439,17 @@ func (w *AITaskWorker) executeAction(ctx context.Context, t models.AITask, serve
 	var result AIActionResult
 	var runErr error
 	if a.ToolName == "mcp_tool" {
+		ctx = WithAIMCPAuthorization(ctx, func(check context.Context) error {
+			check, cancel := context.WithTimeout(check, 5*time.Second)
+			defer cancel()
+			if _, _, err := w.loadBound(check, t); err != nil {
+				return err
+			}
+			if _, err := w.boundPlugins(check, t); err != nil {
+				return err
+			}
+			return models.CheckAIActionAuthority(check, w.db.Raw, t.ID, a.ID, t.WorkerID)
+		})
 		result, runErr = w.mcpCall(ctx, plugin, pluginCall.ToolName, pluginCall.Arguments, true, t.ApprovalMode == "readonly")
 	} else {
 		result, runErr = w.execute(ctx, server, prepared)
@@ -452,7 +473,6 @@ func (w *AITaskWorker) executeAction(ctx context.Context, t models.AITask, serve
 	}
 	if a.Unknown || ctx.Err() != nil {
 		a.Status = "interrupted"
-		a.Unknown = true
 	}
 	toolResult, _ := json.Marshal(map[string]any{"status": a.Status, "output": boundedAIText(a.Output, 24*1024), "error": a.Error, "exit_code": a.ExitCode, "truncated": a.Truncated || len(a.Output) > 24*1024, "unknown": a.Unknown, "backup_path": a.BackupPath})
 	*messages = append(*messages, AIMessage{Role: "tool", ToolCallID: a.CallID, Content: string(toolResult)})
@@ -494,7 +514,7 @@ func (w *AITaskWorker) Create(ctx context.Context, user, serverID, providerID, r
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return models.AITask{}, err
 	}
-	server, err := models.GetServerByIDAndUser(w.db, serverID, user)
+	server, err := models.GetServerByIDAndUserContext(ctx, w.db, serverID, user)
 	if err != nil {
 		return models.AITask{}, err
 	}

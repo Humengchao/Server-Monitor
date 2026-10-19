@@ -5,14 +5,14 @@ export type AIApprovalMode = 'readonly' | 'standard' | 'automatic';
 export interface AIModel { id: string; owned_by?: string }
 export interface AIModelCatalog { models: AIModel[]; fetched_at: string; source: 'provider' }
 export interface AISkill { id: string; name: string; description: string; content: string; created_at: string; updated_at: string }
-export type AISkillInput = Pick<AISkill, 'name' | 'description' | 'content'>;
+export type AISkillInput = Pick<AISkill, 'name' | 'description' | 'content'> & { expected_updated_at?: string };
 export interface AIPlugin { id: string; name: string; url: string; enabled: boolean; has_bearer_token: boolean; created_at: string; updated_at: string }
-export interface AIPluginInput { name: string; url: string; enabled: boolean; bearer_token: string; clear_token?: boolean }
+export interface AIPluginInput { name: string; url: string; enabled: boolean; bearer_token: string; clear_token?: boolean; expected_updated_at?: string }
 export interface AIProvider {
   id: string; name: string; kind: AIProviderKind; base_url: string; model: string;
   has_api_key: boolean; enabled: boolean; created_at: string; updated_at: string;
 }
-export interface AIProviderInput { name: string; kind: AIProviderKind; base_url: string; model: string; api_key: string; enabled: boolean }
+export interface AIProviderInput { name: string; kind: AIProviderKind; base_url: string; model: string; api_key: string; enabled: boolean; expected_updated_at?: string }
 export type AITaskStatus = 'queued' | 'running' | 'awaiting_approval' | 'awaiting_input' | 'completed' | 'failed' | 'cancel_requested' | 'canceled' | 'interrupted';
 export interface AITask {
   id: string; server_id: string; server_name: string; server_type: string; provider_id: string; provider_name: string; model: string;

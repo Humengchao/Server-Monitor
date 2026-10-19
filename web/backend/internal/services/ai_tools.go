@@ -362,7 +362,10 @@ func executeAIFile(ctx context.Context, client *ssh.Client, server *models.Serve
 		_ = json.Unmarshal(action.Arguments, &read)
 		filename = read.Path
 	}
-	if err := aiVerifyFilePath(store, filename, action.ToolName == "write_file" && write.ExpectedRevision == "missing", action.RequiresApproval); err != nil {
+	// Reading an executable text file does not execute it. Executable writes
+	// still need an approved action unless the user selected fully automatic.
+	allowExecutable := action.ToolName == "read_file" || action.RequiresApproval || action.ApprovalMode == "automatic"
+	if err := aiVerifyFilePath(store, filename, action.ToolName == "write_file" && write.ExpectedRevision == "missing", allowExecutable); err != nil {
 		return result, err
 	}
 	if action.ToolName == "read_file" {
@@ -480,7 +483,7 @@ func validAIText(text string) bool {
 	return utf8.ValidString(text) && !strings.ContainsFunc(text, func(r rune) bool { return unicode.IsControl(r) && r != '\n' && r != '\r' && r != '\t' })
 }
 
-func aiVerifyFilePath(store *sftpFiles, filename string, allowMissing, approved bool) error {
+func aiVerifyFilePath(store *sftpFiles, filename string, allowMissing, allowExecutable bool) error {
 	// Canonicalization alone does not protect a harmless pathname pointing at
 	// a private key. Refuse symlink components rather than following them.
 	parts := strings.Split(strings.TrimPrefix(filename, "/"), "/")
@@ -508,7 +511,7 @@ func aiVerifyFilePath(store *sftpFiles, filename string, allowMissing, approved 
 			if !info.Mode().IsRegular() {
 				return ErrFileNotRegular
 			}
-			if !approved && info.Mode().Perm()&0111 != 0 {
+			if !allowExecutable && info.Mode().Perm()&0111 != 0 {
 				return errors.New("file is executable; prepare an explicitly approved action before changing it")
 			}
 		}

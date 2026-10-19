@@ -39,6 +39,8 @@ func (e *AIMCPError) Error() string {
 		return "MCP plugin is disabled"
 	case "approval_required":
 		return "MCP tool execution requires approval"
+	case "authorization_revoked":
+		return "MCP tool authorization changed before execution; no tool call was sent"
 	case "readonly":
 		return "MCP tool execution is unavailable in read-only mode"
 	case "invalid_request":
@@ -113,6 +115,15 @@ func aiMCPError(err error) error {
 // restrictions, redirect refusal and cancellation transport as model requests.
 // No executable or stdio transport is supported.
 type AIMCPClient struct{ transport *AIClient }
+
+type aiMCPAuthorizationKey struct{}
+
+// WithAIMCPAuthorization rechecks the worker's saved authority after the
+// potentially slow handshake and DNS resolution, immediately before sending
+// tools/call. A failed check never exposes its internal error to the plugin.
+func WithAIMCPAuthorization(ctx context.Context, authorize func(context.Context) error) context.Context {
+	return context.WithValue(ctx, aiMCPAuthorizationKey{}, authorize)
+}
 
 func NewAIMCPClient(transport *AIClient) *AIMCPClient { return &AIMCPClient{transport: transport} }
 func (c *AIMCPClient) ValidateEndpoint(ctx context.Context, url string) error {
@@ -189,7 +200,7 @@ func (c *AIMCPClient) ListTools(ctx context.Context, p models.AIPlugin) ([]AIMCP
 		if err != nil {
 			return nil, err
 		}
-		if aiMCPContainsToken(raw, p.BearerToken) {
+		if aiContainsEncodedToken(raw, p.BearerToken) {
 			return nil, &AIMCPError{Code: "credential_response"}
 		}
 		var list struct {
@@ -241,7 +252,7 @@ func (c *AIMCPClient) CallTool(ctx context.Context, p models.AIPlugin, name stri
 	if !approved {
 		return result, &AIMCPError{Code: "approval_required"}
 	}
-	if !aiMCPName.MatchString(name) || len(args) > AIArgumentsLimit || validateAIJSON(args) != nil || validateAIMCPJSON(args) != nil || aiMCPContainsToken(args, p.BearerToken) {
+	if !aiMCPName.MatchString(name) || len(args) > AIArgumentsLimit || validateAIJSON(args) != nil || validateAIMCPJSON(args) != nil || aiContainsEncodedToken(args, p.BearerToken) {
 		return result, &AIMCPError{Code: "invalid_request"}
 	}
 	ctx, cancel := context.WithTimeout(ctx, AIMCPTimeout)
@@ -259,42 +270,46 @@ func (c *AIMCPClient) CallTool(ctx context.Context, p models.AIPlugin, name stri
 	var called struct {
 		Content           []json.RawMessage `json:"content"`
 		StructuredContent json.RawMessage   `json:"structuredContent"`
-		IsError           bool              `json:"isError"`
+		IsError           json.RawMessage   `json:"isError"`
 	}
-	if json.Unmarshal(raw, &called) != nil || called.Content == nil || len(called.Content) > 128 {
+	if json.Unmarshal(raw, &called) != nil || called.Content == nil || len(called.Content) > 128 ||
+		len(called.IsError) != 0 && string(called.IsError) != "true" && string(called.IsError) != "false" ||
+		len(called.StructuredContent) != 0 && called.StructuredContent[0] != '{' {
 		result.Unknown = true
 		return result, &AIMCPError{Code: "invalid_response"}
 	}
-	if aiMCPContainsToken(raw, p.BearerToken) || aiContainsSecrets(string(raw)) {
+	// Validate the fields we consume before recording a success. encoding/json
+	// otherwise turns null or missing text into a successful empty tool result.
+	var output strings.Builder
+	for _, block := range called.Content {
+		var content struct {
+			Type string  `json:"type"`
+			Text *string `json:"text"`
+		}
+		if json.Unmarshal(block, &content) != nil || content.Type == "" || content.Type == "text" && content.Text == nil {
+			result.Unknown = true
+			return result, &AIMCPError{Code: "invalid_response"}
+		}
+		if content.Type == "text" {
+			output.WriteString(*content.Text)
+			output.WriteByte('\n')
+		} else {
+			output.WriteString("[non-text MCP content omitted]\n")
+		}
+	}
+	if len(called.StructuredContent) > 0 {
+		output.Write(called.StructuredContent)
+	}
+	if aiContainsEncodedToken(raw, p.BearerToken) || aiContainsSecrets(string(raw)) {
 		result.Output = "[MCP output withheld: credential-like material]"
 	} else {
-		var output strings.Builder
-		for _, block := range called.Content {
-			var content struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			}
-			if json.Unmarshal(block, &content) != nil {
-				result.Unknown = true
-				return result, &AIMCPError{Code: "invalid_response"}
-			}
-			if content.Type == "text" {
-				output.WriteString(content.Text)
-				output.WriteByte('\n')
-			} else {
-				output.WriteString("[non-text MCP content omitted]\n")
-			}
-		}
-		if len(called.StructuredContent) > 0 {
-			output.Write(called.StructuredContent)
-		}
 		if aiContainsSecrets(output.String()) {
 			result.Output = "[MCP output withheld: credential-like material]"
 		} else {
 			result.Output, result.Truncated = boundAIOutput(output.String(), false)
 		}
 	}
-	if called.IsError {
+	if string(called.IsError) == "true" {
 		result.Error = "MCP tool reported an execution error"
 	}
 	return result, nil
@@ -319,6 +334,13 @@ func (s *aiMCPSession) post(ctx context.Context, method string, params any, noti
 		return nil, false, err
 	}
 	request.Header.Set("Content-Type", "application/json")
+	if method == "tools/call" {
+		if authorize, ok := ctx.Value(aiMCPAuthorizationKey{}).(func(context.Context) error); ok && authorize != nil {
+			if authorize(ctx) != nil {
+				return nil, false, &AIMCPError{Code: "authorization_revoked"}
+			}
+		}
+	}
 	response, err := s.client.transport.client.Do(request)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -526,49 +548,4 @@ func validateAIMCPJSON(raw []byte) error {
 		return errors.New("invalid JSON object")
 	}
 	return nil
-}
-func aiMCPContainsToken(raw []byte, token string) bool {
-	if token == "" {
-		return false
-	}
-	remaining := 8 * len(raw)
-	var walk func(string, int) bool
-	walk = func(value string, depth int) bool {
-		if strings.Contains(value, token) {
-			return true
-		}
-		value = strings.TrimSpace(value)
-		if value == "" || !strings.ContainsRune(`{["`, rune(value[0])) {
-			return false
-		}
-		if depth >= 8 || len(value) > remaining {
-			return true
-		}
-		remaining -= len(value)
-		decoder := json.NewDecoder(strings.NewReader(value))
-		decoder.UseNumber()
-		nesting := 0
-		for {
-			item, err := decoder.Token()
-			if err != nil {
-				return false
-			}
-			switch item := item.(type) {
-			case string:
-				if walk(item, depth+1) {
-					return true
-				}
-			case json.Delim:
-				if item == '{' || item == '[' {
-					nesting++
-					if nesting > 32 {
-						return true
-					}
-				} else {
-					nesting--
-				}
-			}
-		}
-	}
-	return walk(string(raw), 0)
 }

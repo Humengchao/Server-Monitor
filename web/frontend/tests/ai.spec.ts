@@ -563,3 +563,190 @@ test('a delayed Markdown import cannot overwrite another Skill editor', async ({
   await expect(dialog.getByLabel('Skill name', { exact: true })).toHaveValue('Existing playbook');
   expect(state.errors).toEqual([]);
 });
+
+test('changing an API key invalidates its model directory and cancels older discovery responses', async ({ page }) => {
+  const state = await setup(page);
+  await page.goto('/ai');
+  await page.getByRole('button', { name: 'Providers', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'Edit: My DeepSeek', exact: true }).click();
+  await expect(dialog.locator('.ai-model-catalog')).toContainText('2 models');
+  const key = dialog.getByLabel('API key', { exact: true });
+  await key.fill('new-account-key');
+  await expect(dialog.locator('.ai-model-catalog')).not.toContainText('2 models');
+  // Typing a new credential must not silently send it on every keystroke.
+  expect(state.writes.filter(item => item.path.endsWith('/models'))).toHaveLength(0);
+  let held: Route | undefined;
+  await page.route('**/api/ai/providers/models', route => { held = route; });
+  await dialog.getByRole('button', { name: 'Sync models', exact: true }).click();
+  await expect.poll(() => !!held).toBe(true);
+  await key.fill('another-account-key');
+  await held!.fulfill({ json: { models: [{ id: 'stale-account-model' }], fetched_at: new Date(observedAt).toISOString(), source: 'provider' } });
+  await expect(dialog.getByRole('button', { name: 'Sync models', exact: true })).toBeEnabled();
+  await dialog.getByLabel('Model', { exact: true }).fill('stale');
+  await expect(page.getByTitle('stale-account-model', { exact: true })).toHaveCount(0);
+  // Clearing the draft key returns discovery to the saved credential.
+  await key.fill('');
+  await expect.poll(() => state.modelReads.length).toBe(2);
+  await expect(dialog.locator('.ai-model-catalog')).toContainText('2 models');
+  expect(state.errors).toEqual([]);
+});
+
+for (const type of ['Skill', 'plugin'] as const) {
+  test(`deleting an unrelated ${type} keeps the current unsaved editor`, async ({ page }) => {
+    const state = await setup(page);
+    for (const id of ['editing', 'remove']) {
+      const common = { id, name: id, created_at: new Date(observedAt).toISOString(), updated_at: new Date(observedAt).toISOString() };
+      if (type === 'Skill') state.skills.push({ ...common, description: '', content: '# Existing instructions' });
+      else state.plugins.push({ ...common, url: 'https://mcp.example.test/mcp', enabled: true, has_bearer_token: false });
+    }
+    await page.goto('/ai');
+    await page.getByRole('button', { name: 'Skills & plugins', exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    if (type === 'plugin') await dialog.getByRole('tab', { name: 'MCP plugins' }).click();
+    await dialog.getByRole('button', { name: 'Edit: editing', exact: true }).click();
+    const name = dialog.getByLabel(type === 'Skill' ? 'Skill name' : 'Plugin name', { exact: true });
+    await name.fill('Unsaved draft');
+    await dialog.getByRole('button', { name: 'Delete: remove', exact: true }).click();
+    await page.getByRole('dialog').last().getByRole('button', { name: 'OK', exact: true }).click();
+    await expect(dialog.getByRole('button', { name: 'Delete: remove', exact: true })).toHaveCount(0);
+    await expect(name).toHaveValue('Unsaved draft');
+    expect(state.errors).toEqual([]);
+  });
+}
+
+for (const type of ['provider', 'Skill', 'plugin'] as const) {
+  test(`a stale ${type} update sends the editor version and keeps its draft after a conflict`, async ({ page }) => {
+    const state = await setup(page);
+    const snapshot = new Date(observedAt).toISOString();
+    state.skills.push({ id: 'skill-editing', name: 'Config', description: '', content: '# Original instructions', created_at: snapshot, updated_at: snapshot });
+    state.plugins.push({ id: 'plugin-editing', name: 'Config', url: 'https://mcp.example.test/mcp', enabled: true, has_bearer_token: false, created_at: snapshot, updated_at: snapshot });
+    const updates: Record<string, unknown>[] = [];
+    const endpoint = type === 'provider' ? 'providers/provider-one' : type === 'Skill' ? 'skills/skill-editing' : 'plugins/plugin-editing';
+    await page.route(`**/api/ai/${endpoint}`, route => {
+      if (route.request().method() !== 'PUT') return route.fallback();
+      updates.push(route.request().postDataJSON());
+      return route.fulfill({ status: 409, json: { error: 'Settings changed; reload before saving' } });
+    });
+    await page.goto('/ai');
+    await page.getByRole('button', { name: type === 'provider' ? 'Providers' : 'Skills & plugins', exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    if (type === 'plugin') await dialog.getByRole('tab', { name: 'MCP plugins' }).click();
+    await dialog.getByRole('button', { name: `Edit: ${type === 'provider' ? 'My DeepSeek' : 'Config'}`, exact: true }).click();
+    const name = dialog.getByLabel(type === 'provider' ? 'Display name' : type === 'Skill' ? 'Skill name' : 'Plugin name', { exact: true });
+    await name.fill('My unsaved changes');
+    const save = dialog.getByRole('button', { name: type === 'provider' ? 'Save provider' : type === 'Skill' ? 'Save Skill' : 'Save plugin', exact: true });
+    await save.click();
+    await expect(page.getByText('Settings changed; reload before saving', { exact: true })).toBeVisible();
+    await expect(name).toHaveValue('My unsaved changes');
+    expect(updates[0].expected_updated_at).toBe(snapshot);
+    await save.click();
+    await expect.poll(() => updates.length).toBe(2);
+    expect(updates[1].expected_updated_at).toBe(snapshot);
+    expect(state.errors).toEqual([]);
+  });
+}
+
+for (const [followup, status] of [[false, 429], [true, 408]] as const) {
+  test(`recovering a lost ${followup ? 'follow-up' : 'creation'} response preserves its request ID after HTTP ${status}`, async ({ page }) => {
+    const state = await setup(page);
+    const endpoint = followup ? '/api/ai/tasks/history-one/messages' : '/api/ai/tasks';
+    const ids: string[] = [];
+    await page.route(`**${endpoint}`, route => {
+      if (route.request().method() !== 'POST') return route.fallback();
+      ids.push(route.request().postDataJSON().request_id);
+      if (ids.length === 1) return route.abort('failed');
+      if (ids.length === 2) return route.fulfill({ status, json: { error: 'Please retry this submission later' } });
+      return route.fulfill({ status: 202, json: task('history-one') });
+    });
+    await page.goto(followup ? '/ai?task=history-one' : '/ai?server=server-one');
+    await page.getByRole('textbox', { name: 'Task instructions' }).fill('Inspect the current service');
+    await page.getByRole('button', { name: followup ? 'Send follow-up' : 'Start task', exact: true }).click();
+    const retry = page.getByRole('button', { name: 'Retry same submission', exact: true });
+    await retry.click();
+    await expect.poll(() => ids.length).toBe(2);
+    await expect(retry).toBeVisible();
+    await expect(page.getByRole('textbox', { name: 'Task instructions' })).toBeDisabled();
+    await expect(page.getByText('Please retry this submission later', { exact: true })).toBeVisible();
+    await retry.click();
+    await expect.poll(() => ids.length).toBe(3);
+    expect(new Set(ids).size).toBe(1);
+    await expect(page.getByText('The requested service is configured.', { exact: true })).toBeVisible();
+    expect(state.errors).toEqual([]);
+  });
+}
+
+for (const [followup, status] of [[false, 400], [true, 409]] as const) {
+  test(`a definite HTTP ${status} rejection leaves ${followup ? 'follow-up' : 'task'} instructions editable`, async ({ page }) => {
+    const state = await setup(page);
+    const endpoint = followup ? '/api/ai/tasks/history-one/messages' : '/api/ai/tasks';
+    await page.route(`**${endpoint}`, route => route.request().method() === 'POST' ? route.fulfill({ status, json: { error: 'Capacity reached; start a new task with fewer instructions' } }) : route.fallback());
+    await page.goto(followup ? '/ai?task=history-one' : '/ai?server=server-one');
+    const prompt = page.getByRole('textbox', { name: 'Task instructions' });
+    await prompt.fill('Inspect the current service');
+    await page.getByRole('button', { name: followup ? 'Send follow-up' : 'Start task', exact: true }).click();
+    await expect(page.getByText('Capacity reached; start a new task with fewer instructions', { exact: true })).toBeVisible();
+    await expect(prompt).toBeEnabled();
+    await expect(prompt).toHaveValue('Inspect the current service');
+    await expect(page.getByRole('button', { name: 'Retry same submission', exact: true })).toHaveCount(0);
+    expect(state.errors).toEqual([]);
+  });
+}
+
+for (const viewport of [{ width: 1440, height: 900 }, { width: 1366, height: 768 }, { width: 390, height: 844 }]) {
+  test(`the AI workspace keeps its controls on one screen at ${viewport.width}x${viewport.height}`, async ({ page }, testInfo) => {
+    const state = await setup(page);
+    await page.addInitScript(() => localStorage.setItem('lang', 'zh'));
+    await page.setViewportSize(viewport);
+    const selected = { ...task('layout'), server_name: '移动云昆明', prompt: '查看服务器当前运行的服务' };
+    const introduction = '## 服务器运行状态\n\n当前有 **36 个服务** 正常运行，未发现异常。\n\n| 服务 | 状态 | 说明 |\n| --- | --- | --- |\n| `nginx.service` | 运行中 | 网站服务 |\n| `docker.service` | 运行中 | 容器服务 |\n| `ssh.service` | 运行中 | 远程连接 |\n\n';
+    state.tasks = [selected, ...Array.from({ length: 29 }, (_, index) => ({ ...task(`other-${index}`), prompt: `历史任务 ${index + 1} · 检查服务器状态` }))];
+    state.details.set('layout', { task: selected, events: [
+      { id: 1, kind: 'user', content: selected.prompt, created_at: selected.created_at },
+      { id: 2, kind: 'assistant', content: introduction + Array.from({ length: 20 }, (_, index) => `### 检查项 ${index + 1}\n\n服务启动正常，资源使用稳定。可以继续查看日志或检查监听端口。\n\n`).join(''), created_at: selected.created_at },
+    ], actions: [action({ status: 'succeeded', requires_approval: false, command: 'systemctl list-units --type=service --state=running', output: Array.from({ length: 100 }, (_, index) => `service-${index}.service loaded active running`).join('\n'), exit_code: 0 })] });
+    await page.goto('/ai?task=layout');
+    const conversation = page.getByRole('region', { name: '任务对话', exact: true });
+    const prompt = page.getByRole('textbox', { name: '任务说明', exact: true });
+    const assertViewport = async () => {
+      expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight + 1 && document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+      await expect(prompt).toBeInViewport({ ratio: 1 });
+      await expect(page.getByRole('button', { name: '发送补充说明', exact: true })).toBeInViewport({ ratio: 1 });
+      expect(await conversation.evaluate(element => element.clientHeight)).toBeGreaterThan(90);
+      expect(await conversation.evaluate(element => getComputedStyle(element).scrollbarWidth)).toBe('none');
+    };
+    await expect(page.getByRole('heading', { name: '服务器运行状态', exact: true })).toBeVisible();
+    await assertViewport();
+    await conversation.focus();
+    await page.keyboard.press('End');
+    await expect.poll(() => conversation.evaluate(element => element.scrollTop)).toBeGreaterThan(100);
+    await expect(page.locator('.ai-action-output pre')).not.toBeVisible();
+    await page.locator('.ai-action-output summary').click();
+    await expect(page.locator('.ai-action-output pre')).toBeVisible();
+    expect(await page.locator('.ai-action-output pre').evaluate(element => element.clientHeight)).toBeLessThanOrEqual(180);
+    await assertViewport();
+    await conversation.focus();
+    await page.keyboard.press('Home');
+    await expect.poll(() => conversation.evaluate(element => element.scrollTop)).toBe(0);
+    await conversation.hover();
+    await page.mouse.wheel(0, 400);
+    await expect.poll(() => conversation.evaluate(element => element.scrollTop)).toBeGreaterThan(100);
+    await conversation.evaluate(element => element.scrollTo(0, 0));
+    await prompt.fill('继续查看 Nginx 最近一小时的错误日志');
+    await page.screenshot({ path: testInfo.outputPath(`ai-one-screen-${viewport.width}x${viewport.height}-zh.png`), fullPage: true, animations: 'disabled' });
+    if (viewport.width < 701) {
+      await expect(page.locator('.app-sidebar .brand-lockup')).not.toBeVisible();
+      await page.getByRole('button', { name: '任务历史', exact: true }).click();
+      await expect(page.getByRole('dialog').getByText('历史任务 1 · 检查服务器状态', { exact: true })).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await page.setViewportSize({ width: viewport.width, height: 600 });
+      await assertViewport();
+      await page.getByRole('button', { name: '新建任务', exact: true }).click();
+      await expect(page.getByRole('combobox', { name: '目标服务器', exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: '开始任务', exact: true })).toBeInViewport({ ratio: 1 });
+      expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight + 1)).toBe(true);
+    }
+    expect(state.errors).toEqual([]);
+  });
+}

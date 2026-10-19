@@ -235,11 +235,15 @@ func ServerOwnedByUserContext(ctx context.Context, db *sql.DB, id, userID uuid.U
 }
 
 func GetServerByIDAndUser(db *DB, id, userID uuid.UUID) (*Server, error) {
+	return GetServerByIDAndUserContext(context.Background(), db, id, userID)
+}
+
+func GetServerByIDAndUserContext(ctx context.Context, db *DB, id, userID uuid.UUID) (*Server, error) {
 	s := &Server{}
 	var encPassword, encKey string
 	var credID sql.NullString
 	var expiresAt sql.NullTime
-	err := db.Raw.QueryRow(
+	err := db.Raw.QueryRowContext(ctx,
 		`SELECT id, user_id, name, host, port, ssh_username, ssh_password, ssh_key, COALESCE(ssh_host_key, ''),
 		 credential_id, created_at, COALESCE(server_type, 'linux'), expires_at, COALESCE(notes, ''),
 		 COALESCE(billing_price, 0), COALESCE(billing_currency, 'CNY'), COALESCE(billing_cycle, 'year'), COALESCE(traffic_limit_bytes, 0), COALESCE(public_location, ''),
@@ -273,7 +277,7 @@ func GetServerByIDAndUser(db *DB, id, userID uuid.UUID) (*Server, error) {
 		return nil, err
 	}
 	// Override with the linked credential, scoped to the same owner.
-	if err := s.ResolveCredentials(db); err != nil {
+	if err := s.ResolveCredentialsContext(ctx, db); err != nil {
 		return nil, fmt.Errorf("resolve credentials for server %s: %w", s.Name, err)
 	}
 	return s, nil
@@ -379,10 +383,14 @@ func UpdateDockerInfo(db *sql.DB, id uuid.UUID, hasDocker bool, version string) 
 // ResolveCredentials overwrites SSHUsername/SSHPassword/SSHKey from the linked credential
 // when CredentialID is set. Call after fetching a server that needs decrypted SSH creds.
 func (s *Server) ResolveCredentials(db *DB) error {
+	return s.ResolveCredentialsContext(context.Background(), db)
+}
+
+func (s *Server) ResolveCredentialsContext(ctx context.Context, db *DB) error {
 	if s.ConnectionMode == "agent" || s.CredentialID == nil {
 		return nil
 	}
-	cred, err := GetCredentialByID(db, *s.CredentialID, s.UserID)
+	cred, err := GetCredentialByIDContext(ctx, db, *s.CredentialID, s.UserID)
 	if err != nil {
 		return err
 	}

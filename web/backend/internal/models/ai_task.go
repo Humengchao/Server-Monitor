@@ -17,6 +17,8 @@ import (
 var ErrAITaskConflict = errors.New("task state changed; refresh before continuing")
 var ErrAITaskLimit = errors.New("finish or cancel the active task on this server first; at most two active tasks per account")
 var ErrAIRequestConflict = errors.New("this request ID was already used with different content; use a new request ID")
+var ErrAITaskStepLimit = errors.New("Task reached its 24-step limit. Review the results and start a new task for remaining work.")
+var ErrAIConversationLimit = errors.New("Conversation size limit reached; start a new task with the remaining work.")
 
 type AITask struct {
 	ID                  uuid.UUID            `json:"id"`
@@ -377,7 +379,7 @@ func ContinueAITask(ctx context.Context, db *sql.DB, id, user, request uuid.UUID
 		return t, ErrAITaskConflict
 	}
 	if t.Steps >= 24 {
-		return t, errors.New("task step limit reached; start a new task")
+		return t, ErrAITaskStepLimit
 	}
 	var active int
 	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM ai_tasks WHERE id<>$1 AND user_id=$2 AND status IN ('queued','running','awaiting_approval','awaiting_input','cancel_requested')`, id, user).Scan(&active); err != nil {
@@ -395,7 +397,7 @@ func ContinueAITask(ctx context.Context, db *sql.DB, id, user, request uuid.UUID
 	}
 	msg, _ := json.Marshal(map[string]string{"role": "user", "content": message})
 	if len(t.Messages)+len(msg) > 256*1024 {
-		return t, errors.New("conversation limit reached; start a new task")
+		return t, ErrAIConversationLimit
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE ai_tasks SET messages=messages||jsonb_build_array($2::jsonb),status='queued',error='',updated_at=NOW() WHERE id=$1`, id, string(msg)); err != nil {
 		return t, err

@@ -1,6 +1,7 @@
 package models
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 
@@ -63,9 +64,13 @@ func GetCredentialsByUserID(db *sql.DB, userID uuid.UUID) ([]Credential, error) 
 }
 
 func GetCredentialByID(db *DB, id, userID uuid.UUID) (*Credential, error) {
+	return GetCredentialByIDContext(context.Background(), db, id, userID)
+}
+
+func GetCredentialByIDContext(ctx context.Context, db *DB, id, userID uuid.UUID) (*Credential, error) {
 	c := &Credential{}
 	var encPassword, encKey string
-	err := db.Raw.QueryRow(
+	err := db.Raw.QueryRowContext(ctx,
 		`SELECT id, user_id, name, ssh_username, ssh_password, ssh_key, COALESCE(credential_type, 'linux'), created_at
 		 FROM credentials WHERE id=$1 AND user_id=$2`, id, userID,
 	).Scan(&c.ID, &c.UserID, &c.Name, &c.SSHUsername, &encPassword, &encKey, &c.CredType, &c.CreatedAt)

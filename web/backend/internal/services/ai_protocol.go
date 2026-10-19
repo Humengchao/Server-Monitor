@@ -88,6 +88,54 @@ func validAIProtocolObject(raw []byte, limit int) bool {
 	return err == io.EOF
 }
 
+// Provider and MCP metadata may embed JSON as strings. Check every decoded
+// layer before exposing a saved credential, with bounded parsing work.
+func aiContainsEncodedToken(raw []byte, token string) bool {
+	if token == "" {
+		return false
+	}
+	remaining := 8 * len(raw)
+	var walk func(string, int) bool
+	walk = func(value string, depth int) bool {
+		if strings.Contains(value, token) {
+			return true
+		}
+		value = strings.TrimSpace(value)
+		if value == "" || !strings.ContainsRune(`{["`, rune(value[0])) {
+			return false
+		}
+		if depth >= 8 || len(value) > remaining {
+			return true
+		}
+		remaining -= len(value)
+		decoder := json.NewDecoder(strings.NewReader(value))
+		decoder.UseNumber()
+		nesting := 0
+		for {
+			item, err := decoder.Token()
+			if err != nil {
+				return false
+			}
+			switch item := item.(type) {
+			case string:
+				if walk(item, depth+1) {
+					return true
+				}
+			case json.Delim:
+				if item == '{' || item == '[' {
+					nesting++
+					if nesting > 32 {
+						return true
+					}
+				} else {
+					nesting--
+				}
+			}
+		}
+	}
+	return walk(string(raw), 0)
+}
+
 // Chat-completions tool calling is shared by the provider adapter and task
 // worker. Model-provided arguments remain untrusted until PrepareAIAction.
 type AIMessage struct {

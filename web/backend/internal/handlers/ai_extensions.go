@@ -104,9 +104,10 @@ func (h *AIExtensionHandler) GetSkill(c *gin.Context) {
 }
 
 type aiSkillRequest struct {
-	Name        *string `json:"name"`
-	Description *string `json:"description"`
-	Content     *string `json:"content"`
+	Name              *string    `json:"name"`
+	Description       *string    `json:"description"`
+	Content           *string    `json:"content"`
+	ExpectedUpdatedAt *time.Time `json:"expected_updated_at"`
 }
 
 func (h *AIExtensionHandler) CreateSkill(c *gin.Context) { h.saveSkill(c, true) }
@@ -128,6 +129,10 @@ func (h *AIExtensionHandler) saveSkill(c *gin.Context, create bool) {
 		s, err = models.GetAISkill(ctx, db, id, user)
 		if err != nil {
 			aiExtensionStorageError(c, err)
+			return
+		}
+		if req.ExpectedUpdatedAt == nil || !req.ExpectedUpdatedAt.Equal(s.UpdatedAt) {
+			aiExtensionStorageError(c, models.ErrAIExtensionConflict)
 			return
 		}
 	}
@@ -183,11 +188,12 @@ func (h *AIExtensionHandler) ListPlugins(c *gin.Context) {
 }
 
 type aiPluginRequest struct {
-	Name        *string `json:"name"`
-	URL         *string `json:"url"`
-	BearerToken string  `json:"bearer_token"`
-	ClearToken  bool    `json:"clear_token"`
-	Enabled     *bool   `json:"enabled"`
+	Name              *string    `json:"name"`
+	URL               *string    `json:"url"`
+	BearerToken       string     `json:"bearer_token"`
+	ClearToken        bool       `json:"clear_token"`
+	Enabled           *bool      `json:"enabled"`
+	ExpectedUpdatedAt *time.Time `json:"expected_updated_at"`
 }
 
 func (h *AIExtensionHandler) CreatePlugin(c *gin.Context) { h.savePlugin(c, true) }
@@ -215,6 +221,10 @@ func (h *AIExtensionHandler) savePlugin(c *gin.Context, create bool) {
 		p, err = models.GetAIPlugin(ctx, db, id, user)
 		if err != nil {
 			aiExtensionStorageError(c, err)
+			return
+		}
+		if req.ExpectedUpdatedAt == nil || !req.ExpectedUpdatedAt.Equal(p.UpdatedAt) {
+			aiExtensionStorageError(c, models.ErrAIExtensionConflict)
 			return
 		}
 		oldURL = p.URL

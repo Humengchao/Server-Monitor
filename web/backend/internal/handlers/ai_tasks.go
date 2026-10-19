@@ -47,7 +47,7 @@ func aiTaskError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		c.JSON(404, gin.H{"error": "task, server or provider not found"})
-	case errors.Is(err, models.ErrAITaskConflict), errors.Is(err, models.ErrAITaskLimit), errors.Is(err, models.ErrAIRequestConflict):
+	case errors.Is(err, models.ErrAITaskConflict), errors.Is(err, models.ErrAITaskLimit), errors.Is(err, models.ErrAIRequestConflict), errors.Is(err, models.ErrAITaskStepLimit), errors.Is(err, models.ErrAIConversationLimit):
 		c.JSON(409, gin.H{"error": err.Error()})
 	case errors.Is(err, models.ErrAIProviderDisabled), errors.Is(err, models.ErrAIPluginDisabled), errors.Is(err, models.ErrAITaskOptions), errors.Is(err, services.ErrAISecretInput), errors.Is(err, services.ErrAIAgentNotEnrolled):
 		c.JSON(400, gin.H{"error": err.Error()})

@@ -42,6 +42,20 @@ func (f *fakeAIProviderClient) Test(_ context.Context, p models.AIProvider) erro
 	return f.err
 }
 
+func aiVersionedTestBody(t *testing.T, body string, version time.Time) string {
+	t.Helper()
+	var fields map[string]any
+	if err := json.Unmarshal([]byte(body), &fields); err != nil {
+		t.Fatal(err)
+	}
+	fields["expected_updated_at"] = version
+	raw, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
 func TestAIProviderHTTPKeyRetentionOwnershipAndSafeUpstreamErrors(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	raw := testdb.Open(t)
@@ -65,7 +79,11 @@ func TestAIProviderHTTPKeyRetentionOwnershipAndSafeUpstreamErrors(t *testing.T) 
 	router.DELETE("/providers/:id", h.Delete)
 	router.POST("/providers/:id/test", h.Test)
 	router.GET("/providers/:id/models", h.Models)
+	versions := map[string]time.Time{}
 	request := func(method, path, body string, foreign bool) *httptest.ResponseRecorder {
+		if method == "PUT" {
+			body = aiVersionedTestBody(t, body, versions[strings.TrimPrefix(path, "/providers/")])
+		}
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		if foreign {
@@ -73,6 +91,12 @@ func TestAIProviderHTTPKeyRetentionOwnershipAndSafeUpstreamErrors(t *testing.T) 
 		}
 		response := httptest.NewRecorder()
 		router.ServeHTTP(response, req)
+		if response.Code == 200 || response.Code == 201 {
+			var saved models.PublicAIProvider
+			if json.Unmarshal(response.Body.Bytes(), &saved) == nil && !saved.UpdatedAt.IsZero() {
+				versions[saved.ID.String()] = saved.UpdatedAt
+			}
+		}
 		return response
 	}
 	response := request("POST", "/providers", `{"name":"DeepSeek","kind":"deepseek","api_key":"private-original"}`, false)
@@ -243,7 +267,7 @@ func TestAIProviderHTTPConcurrentDisableWinsOverDelayedUpdate(t *testing.T) {
 	router.Use(func(c *gin.Context) { c.Set("db", db); c.Set("user_id", user) })
 	router.PUT("/providers/:id", h.Update)
 	request := func(body string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest("PUT", "/providers/"+provider.ID.String(), strings.NewReader(body))
+		req := httptest.NewRequest("PUT", "/providers/"+provider.ID.String(), strings.NewReader(aiVersionedTestBody(t, body, provider.UpdatedAt)))
 		req.Header.Set("Content-Type", "application/json")
 		response := httptest.NewRecorder()
 		router.ServeHTTP(response, req)

@@ -141,6 +141,11 @@ func (w *AITaskWorker) prepareStoredPluginAction(ctx context.Context, task model
 	if !ok || entry.SchemaHash != call.SchemaHash {
 		return AIAction{}, models.AIPlugin{}, call, nil, errors.New("MCP tool definition changed; review a new task before executing")
 	}
+	// Listing can wait on a remote server. Do not use a pre-list snapshot if
+	// its credentials or enabled state changed while that request was pending.
+	if _, err := w.boundPlugins(ctx, task); err != nil {
+		return AIAction{}, models.AIPlugin{}, call, nil, err
+	}
 	if aiKnownSecret(string(call.Arguments), server, provider, secrets...) {
 		return AIAction{}, models.AIPlugin{}, call, nil, ErrAISecretInput
 	}

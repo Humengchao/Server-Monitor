@@ -85,6 +85,23 @@ func TestAITaskHTTPScopesOwnerAndRejectsDecisionOverrides(t *testing.T) {
 	if response.Code != 200 || !strings.Contains(response.Body.String(), `"status":"canceled"`) {
 		t.Fatal("cancel", response.Code, response.Body)
 	}
+	// An exhausted completed conversation is a definite rejection, never an
+	// ambiguous 500 that would leave clients retrying the same key forever.
+	for _, exhausted := range []string{"steps", "context"} {
+		steps, messages := 0, `[]`
+		if exhausted == "steps" {
+			steps = 24
+		} else {
+			messages = `[{"role":"assistant","content":"` + strings.Repeat("x", 256*1024) + `"}]`
+		}
+		if _, err := db.Raw.Exec(`UPDATE ai_tasks SET status='completed',steps=$2,messages=$3 WHERE id=$1`, task.ID, steps, messages); err != nil {
+			t.Fatal(err)
+		}
+		response = request(owner, "POST", path+"/messages", map[string]any{"request_id": uuid.New(), "message": "continue"})
+		if response.Code != 409 || !strings.Contains(response.Body.String(), "start a new task") {
+			t.Fatalf("%s limit: %d %s", exhausted, response.Code, response.Body)
+		}
+	}
 }
 
 func TestAITaskRequestRejectsInvalidPayloadBeforeDatabase(t *testing.T) {
