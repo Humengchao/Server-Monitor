@@ -2,6 +2,13 @@
 # and native credential-free fixture binaries. Never touches a real service.
 param([Parameter(Mandatory=$true)][string]$FixtureRoot)
 $ErrorActionPreference = 'Stop'
+# A PowerShell 7 CI parent can leave Windows PowerShell 5.1 with incompatible
+# module discovery. Import this interpreter's real modules before changing
+# ProgramFiles or defining mocks; in particular retain the real SHA-256 check.
+foreach ($module in @('Microsoft.PowerShell.Utility', 'Microsoft.PowerShell.Management')) {
+    $manifest = [IO.Path]::Combine($PSHOME, 'Modules', $module, ($module + '.psd1'))
+    Import-Module -Name $manifest -ErrorAction Stop
+}
 $source = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'install.ps1') -Raw
 $adminGuard = "if (-not `$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Run PowerShell as Administrator.' }"
 if (-not $source.Contains($adminGuard)) { throw 'Installer privilege guard changed; update the isolated test explicitly.' }
@@ -63,6 +70,10 @@ function Set-Acl { param($LiteralPath, $AclObject) }
 function Get-Acl { param($LiteralPath) return [Security.AccessControl.FileSecurity]::new() }
 
 foreach ($failure in @('check', 'start', 'reject', 'none')) {
+    foreach ($mock in @('Invoke-WebRequest', 'Get-Service', 'Stop-Service', 'Start-Service', 'Get-CimInstance', 'Set-Acl', 'Get-Acl')) {
+        $resolved = Get-Command -Name $mock -ErrorAction Stop
+        if ($resolved.CommandType -ne 'Function' -or $resolved.ModuleName) { throw "Isolated test mock was replaced: $mock" }
+    }
     $case = Join-Path $FixtureRoot $failure
     $env:AGENT_FIXTURE_CASE = $case
     $env:AGENT_FIXTURE_FAILURE = $failure
