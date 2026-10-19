@@ -67,8 +67,15 @@ jobs:
         shell: pwsh
         working-directory: web/backend
         run: |
-          go test ./internal/agenttransport -count=1 -timeout=120s
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $testLog = Join-Path $env:RUNNER_TEMP 'windows-agent-protocol-tests.log'
+          go test ./internal/agenttransport -count=1 -timeout=120s 2>&1 | Tee-Object -FilePath $testLog
+          $testExit = $LASTEXITCODE
+          if ($testExit -ne 0) {
+            $failureText = (Get-Content -LiteralPath $testLog -Tail 80) -join "`n"
+            $annotation = $failureText.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error::$annotation"
+            exit $testExit
+          }
           go vet ./cmd/agent ./internal/agenttransport
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $parseErrors = $null
@@ -80,8 +87,15 @@ jobs:
         run: |
           # Includes the native installer fixture: temporary paths and mock
           # downloads/services only; no administrator privileges are needed.
-          go test ./cmd/agent -count=1 -timeout=120s
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $testLog = Join-Path $env:RUNNER_TEMP 'windows-agent-service-install-tests.log'
+          go test ./cmd/agent -count=1 -timeout=120s 2>&1 | Tee-Object -FilePath $testLog
+          $testExit = $LASTEXITCODE
+          if ($testExit -ne 0) {
+            $failureText = (Get-Content -LiteralPath $testLog -Tail 80) -join "`n"
+            $annotation = $failureText.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error::$annotation"
+            exit $testExit
+          }
   build-and-push:
     needs: [verify, verify-windows-agent]
     runs-on: ubuntu-latest

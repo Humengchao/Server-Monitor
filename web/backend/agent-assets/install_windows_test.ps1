@@ -87,9 +87,9 @@ foreach ($failure in @('check', 'start', 'reject', 'none')) {
     $AgentFixtureWarnings = @()
     try { & $fixtureInstaller -Action reenroll -ServerUrl 'https://panel.invalid' -Ticket $ticket -WarningVariable AgentFixtureWarnings }
     catch { $failed = $true; $failureMessage = $_.Exception.Message }
-    if ($failed -ne ($failure -ne 'none')) { throw "Unexpected installer result for $failure." }
+    if ($failed -ne ($failure -ne 'none')) { throw "Unexpected installer result for $failure. Installer error: $failureMessage" }
     $retainedWarning = @($AgentFixtureWarnings | Where-Object { [string]$_ -like '*newly enrolled configuration was retained*' }).Count -gt 0
-    if ($retainedWarning -ne ($failure -in @('check', 'start'))) { throw "Missing or misleading identity recovery warning for $failure." }
+    if ($retainedWarning -ne ($failure -in @('check', 'start'))) { throw "Missing or misleading identity recovery warning for $failure. Installer error: $failureMessage" }
     $expected = if ($failure -eq 'reject') { 'previous-fixture' } else { 'replacement-fixture' }
     if ([IO.File]::ReadAllText($config) -ne $expected) { throw "Valid enrollment was lost in $failure. Installer error: $failureMessage" }
     if ([IO.File]::ReadAllText($config) -ne [IO.File]::ReadAllText((Join-Path $case 'registered.identity'))) { throw 'Local configuration disagrees with registration.' }
