@@ -148,3 +148,26 @@ func TestAIProviderAccountLimitSerializesConcurrentCreates(t *testing.T) {
 		t.Fatal("wrong provider count", len(list), err)
 	}
 }
+
+func TestAIProviderStaleUpdateCannotReenableOrRevertRotatedKey(t *testing.T) {
+	db, user := aiProviderFixture(t)
+	ctx := context.Background()
+	provider := AIProvider{UserID: user, Name: "original", Kind: "deepseek", APIKey: "original-secret", Enabled: true}
+	if err := SaveAIProvider(ctx, db, &provider, true); err != nil {
+		t.Fatal(err)
+	}
+	stale := provider
+	provider.Enabled = false
+	provider.APIKey = "rotated-secret"
+	if err := SaveAIProvider(ctx, db, &provider, false); err != nil {
+		t.Fatal(err)
+	}
+	stale.Name = "slow stale edit"
+	if err := SaveAIProvider(ctx, db, &stale, false); err == nil {
+		t.Fatal("stale save reenabled a disabled provider and reverted its key")
+	}
+	stored, err := GetAIProvider(ctx, db, provider.ID, user)
+	if err != nil || stored.Enabled || stored.APIKey != "rotated-secret" || stored.Name != "original" {
+		t.Fatal("concurrent configuration lost", stored.Public(), err)
+	}
+}

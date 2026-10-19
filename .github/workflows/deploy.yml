@@ -63,17 +63,25 @@ jobs:
         with:
           go-version-file: web/backend/go.mod
           cache-dependency-path: web/backend/go.sum
-      - name: Test Windows Agent
+      - name: Test Windows Agent protocol
         shell: pwsh
         working-directory: web/backend
         run: |
-          go test ./cmd/agent ./internal/agenttransport -count=1 -timeout=120s
+          go test ./internal/agenttransport -count=1 -timeout=120s
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go vet ./cmd/agent ./internal/agenttransport
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $parseErrors = $null
           [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'agent-assets/install.ps1'), [ref]$null, [ref]$parseErrors) | Out-Null
           if ($parseErrors.Count) { $parseErrors | Write-Error; exit 1 }
+      - name: Test Windows service and isolated installation lifecycle
+        shell: pwsh
+        working-directory: web/backend
+        run: |
+          # Includes the native installer fixture: temporary paths and mock
+          # downloads/services only; no administrator privileges are needed.
+          go test ./cmd/agent -count=1 -timeout=120s
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   build-and-push:
     needs: [verify, verify-windows-agent]
     runs-on: ubuntu-latest

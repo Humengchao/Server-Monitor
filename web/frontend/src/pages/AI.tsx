@@ -102,15 +102,16 @@ function ActionCard({ action, task, canDecide, busy, onDecision }: { action: AIA
   </article>;
 }
 
-type Submission = { request_id: string; prompt: string; server_id: string; provider_id: string; taskId?: string };
+type Submission = { request_id: string; prompt: string; server_id: string; provider_id: string; taskId?: string; workspace: string };
 export default function AI() {
   const { t, i18n } = useTranslation('ai');
   const { message, modal } = App.useApp();
   const [params, setParams] = useSearchParams();
   const taskId = params.get('task') || '';
+  const serverId = params.get('server') || '';
+  const workspace = taskId ? `task:${taskId}` : `server:${serverId}`;
   const [providers, setProviders] = useState<AIProvider[]>([]);
   const [servers, setServers] = useState<Server[]>([]);
-  const [serverId, setServerId] = useState(params.get('server') || '');
   const [providerId, setProviderId] = useState('');
   const [prompt, setPrompt] = useState('');
   const [settings, setSettings] = useState(false);
@@ -123,19 +124,22 @@ export default function AI() {
   const [detailError, setDetailError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
-  const [uncertain, setUncertain] = useState<Submission | null>(null);
+  const [uncertainSubmissions, setUncertainSubmissions] = useState<Record<string, Submission>>({});
+  const uncertain = uncertainSubmissions[workspace];
   const mounted = useRef(false);
   const metadataRequest = useRef<AbortController | null>(null);
   const historyRequest = useRef<AbortController | null>(null);
   const detailRequest = useRef<AbortController | null>(null);
   const mutation = useRef<AbortController | null>(null);
   const selectedTask = useRef(taskId);
+  const selectedWorkspace = useRef(workspace);
   const decisionModal = useRef<ReturnType<typeof modal.confirm> | null>(null);
   const current = detail?.task.id === taskId ? detail : null;
   const currentTask = current?.task;
   const rows = history?.page === page ? history.tasks : [];
   const enabledProviders = providers.filter(provider => provider.enabled && provider.has_api_key);
-  const chosenProvider = providers.find(provider => provider.id === providerId);
+  const selectedProviderId = uncertain?.provider_id ?? providerId;
+  const chosenProvider = providers.find(provider => provider.id === selectedProviderId);
   const chosenServer = servers.find(server => server.id === serverId);
   const canFollowup = currentTask && ['awaiting_input', 'completed'].includes(currentTask.status);
   const canCancel = currentTask && activeStatuses.includes(currentTask.status) && currentTask.status !== 'cancel_requested';
@@ -146,7 +150,9 @@ export default function AI() {
       const [providerResponse, serverResponse] = await Promise.all([aiApi.providers(controller.signal), serversApi.list(controller.signal)]);
       if (!mounted.current || controller.signal.aborted) return;
       setProviders(providerResponse.data || []); setServers(serverResponse.data || []); setLoadError(false);
-      setProviderId(id => providerResponse.data.some(provider => provider.id === id && provider.enabled && provider.has_api_key) ? id : providerResponse.data.find(provider => provider.enabled && provider.has_api_key)?.id || '');
+      // A saved selection becoming unavailable must not redirect an existing
+      // draft to a different provider without the user's choice.
+      setProviderId(id => id || providerResponse.data.find(provider => provider.enabled && provider.has_api_key)?.id || '');
     } catch { if (!controller.signal.aborted && mounted.current) setLoadError(true); }
     finally { if (metadataRequest.current === controller) { metadataRequest.current = null; if (mounted.current) setMetadataLoading(false); } }
   }, []);
@@ -180,6 +186,9 @@ export default function AI() {
     return () => { window.clearTimeout(timer); historyRequest.current?.abort(); historyRequest.current = null; };
   }, [readHistory]);
   useEffect(() => {
+    selectedWorkspace.current = workspace;
+  }, [workspace]);
+  useEffect(() => {
     selectedTask.current = taskId;
     const timer = window.setTimeout(() => { setDetailError(null); setPrompt(''); void readTask(); }, 0);
     return () => { window.clearTimeout(timer); detailRequest.current?.abort(); detailRequest.current = null; decisionModal.current?.destroy(); decisionModal.current = null; };
@@ -187,34 +196,48 @@ export default function AI() {
   usePolling(async () => { await Promise.all([readTask(), readHistory()]); }, 2000, { leading: false, enabled: (!!taskId && detailError !== 'selectedMissing' && (!currentTask || activeStatuses.includes(currentTask.status))) || rows.some(task => activeStatuses.includes(task.status)) });
   const refreshRef = useRef({ readTask, readHistory });
   useEffect(() => { refreshRef.current = { readTask, readHistory }; }, [readTask, readHistory]);
-  const selectTask = (id: string) => { if (!submitting) { setUncertain(null); setParams({ task: id }); } };
-  const freshTask = () => { if (submitting) return; setPrompt(''); setUncertain(null); setParams(serverId ? { server: serverId } : {}); };
+  const selectTask = (id: string) => { if (!submitting) setParams({ task: id }); };
+  const freshTask = () => { if (submitting) return; setPrompt(''); const target = currentTask?.server_id || serverId; setParams(target ? { server: target } : {}); };
+  const clearUncertain = (key: string) => setUncertainSubmissions(previous => {
+    const next = { ...previous }; delete next[key]; return next;
+  });
   const send = async (retry?: Submission) => {
-    if (mutation.current || !mounted.current) return;
+    if (mutation.current || !mounted.current || (!retry && uncertain)) return;
     let value = retry;
     if (!value) {
       const text = prompt.trim(); if (!text) return;
       if (new TextEncoder().encode(text).length > 16000 || text.includes('\0')) { message.error(t('promptTooLong')); return; }
       if (taskId) { if (!currentTask || !canFollowup) return; }
       else if (!chosenServer || !chosenProvider?.enabled || !chosenProvider.has_api_key) return;
-      value = { request_id: crypto.randomUUID(), prompt: text, server_id: currentTask?.server_id || serverId, provider_id: currentTask?.provider_id || providerId, taskId: taskId || undefined };
+      value = { request_id: crypto.randomUUID(), prompt: text, server_id: currentTask?.server_id || serverId, provider_id: currentTask?.provider_id || providerId, taskId: taskId || undefined, workspace };
     }
     setSubmitting(true);
     const controller = new AbortController(); mutation.current = controller;
+    // A read started before the submission must not restore a completed task
+    // over the newer queued/running response.
+    detailRequest.current?.abort(); detailRequest.current = null;
     try {
       const response = value.taskId ? await aiApi.message(value.taskId, { message: value.prompt, request_id: value.request_id }, controller.signal)
         : await aiApi.createTask({ server_id: value.server_id, provider_id: value.provider_id, prompt: value.prompt, request_id: value.request_id } satisfies AITaskInput, controller.signal);
       if (!mounted.current || controller.signal.aborted) return;
-      setUncertain(null); setPrompt(''); setPage({ cursor: '', previous: [] });
+      clearUncertain(value.workspace); setPage({ cursor: '', previous: [] });
       setDetail(previous => previous?.task.id === response.data.id ? { ...previous, task: response.data } : previous);
-      if (selectedTask.current === (value.taskId || '')) setParams({ task: response.data.id });
-      if (response.data.id === selectedTask.current) { detailRequest.current?.abort(); detailRequest.current = null; await refreshRef.current.readTask(); }
+      if (selectedWorkspace.current === value.workspace) { setPrompt(''); setParams({ task: response.data.id }); }
     } catch (error) {
       if (!mounted.current || controller.signal.aborted) return;
       const status = (error as { response?: { status?: number } }).response?.status;
-      if (status == null || status >= 500) setUncertain(value);
-      else { setUncertain(null); message.error(errorText(error, t('operationFailed')), 8); }
-    } finally { if (mutation.current === controller) mutation.current = null; if (mounted.current) setSubmitting(false); }
+      if (status == null || status >= 500) {
+        const pending = value; setUncertainSubmissions(previous => ({ ...previous, [pending.workspace]: pending }));
+      } else { clearUncertain(value.workspace); message.error(errorText(error, t('operationFailed')), 8); }
+    } finally {
+      if (mutation.current === controller) mutation.current = null;
+      if (mounted.current) {
+        setSubmitting(false);
+        // Release the mutation lock first: even an idempotent response that
+        // already completed needs its events loaded, without active polling.
+        await Promise.all([refreshRef.current.readTask(), refreshRef.current.readHistory()]);
+      }
+    }
   };
   const act = async (task: string, operation: (signal: AbortSignal) => Promise<unknown>, success?: string) => {
     if (mutation.current || selectedTask.current !== task) return false;
@@ -269,9 +292,10 @@ export default function AI() {
         {currentTask && <div className="ai-task-usage"><span>{t('tokens')}: {t('inputTokens')} {currentTask.prompt_tokens.toLocaleString()} · {t('outputTokens')} {currentTask.completion_tokens.toLocaleString()}</span><span>{t('updated', { time: new Date(currentTask.updated_at).toLocaleTimeString(i18n.language) })}</span></div>}
         <div className="ai-composer">
           {uncertain && <Alert type="warning" showIcon title={t('submitUncertain')} action={<Button disabled={submitting} loading={submitting} aria-label={t('retrySubmission')} onClick={() => { void send(uncertain); }}>{t('retrySubmission')}</Button>} />}
-          {!taskId && <div className="ai-composer-targets"><label><span>{t('server')}</span><Select aria-label={t('server')} showSearch optionFilterProp="label" placeholder={t('selectServer')} value={chosenServer?.id} onChange={setServerId} disabled={submitting || !!uncertain} loading={metadataLoading} options={servers.map(server => ({ value: server.id, label: server.name }))} /></label><label><span>{t('provider')}</span><Select aria-label={t('provider')} placeholder={t('selectProvider')} value={chosenProvider?.enabled && chosenProvider.has_api_key ? providerId : undefined} onChange={setProviderId} disabled={submitting || !!uncertain} loading={metadataLoading} options={enabledProviders.map(provider => ({ value: provider.id, label: `${provider.name} · ${provider.model}` }))} /></label></div>}
+          {!taskId && <div className="ai-composer-targets"><label><span>{t('server')}</span><Select aria-label={t('server')} showSearch optionFilterProp="label" placeholder={t('selectServer')} value={chosenServer?.id} onChange={id => setParams({ server: id }, { replace: true })} disabled={submitting || !!uncertain} loading={metadataLoading} options={servers.map(server => ({ value: server.id, label: server.name }))} /></label><label><span>{t('provider')}</span><Select aria-label={t('provider')} placeholder={t('selectProvider')} value={chosenProvider?.enabled && chosenProvider.has_api_key ? selectedProviderId : undefined} onChange={setProviderId} disabled={submitting || !!uncertain} loading={metadataLoading} options={enabledProviders.map(provider => ({ value: provider.id, label: `${provider.name} · ${provider.model}` }))} /></label></div>}
+          {!taskId && selectedProviderId && (!chosenProvider?.enabled || !chosenProvider.has_api_key) && enabledProviders.length > 0 && <Alert type="warning" title={t('providerUnavailable')} />}
           {!taskId && !metadataLoading && !enabledProviders.length && <Alert type="info" title={t('noProvider')} action={<Button onClick={() => setSettings(true)}>{t('addProvider')}</Button>} />}
-          {(!taskId || canFollowup) ? <><Input.TextArea aria-label={t('taskPrompt')} value={prompt} onChange={event => setPrompt(event.target.value)} placeholder={t(taskId ? 'followupPlaceholder' : 'placeholder')} autoSize={{ minRows: 3, maxRows: 8 }} maxLength={16000} disabled={submitting || !!uncertain} /><div className="ai-composer-footer"><p><SafetyCertificateOutlined />{currentTask ? t('shareSelected', { server: currentTask.server_name, provider: currentTask.provider_name }) : chosenServer && chosenProvider ? t('shareSelected', { server: chosenServer.name, provider: chosenProvider.name }) : t('shareHint')}</p><Button type="primary" icon={<SendOutlined />} aria-label={t(taskId ? 'followup' : 'submit')} aria-busy={submitting} loading={submitting} disabled={submitting || actionBusy || !!uncertain || !prompt.trim() || (!taskId && (!chosenServer || !chosenProvider?.enabled || !chosenProvider.has_api_key))} onClick={() => { void send(); }}>{t(taskId ? 'followup' : 'submit')}</Button></div></> : currentTask ? <p className="ai-composer-state">{t(activeStatuses.includes(currentTask.status) ? currentTask.status === 'awaiting_input' ? 'waiting' : 'working' : 'readOnly')}</p> : null}
+          {(!taskId || canFollowup) ? <><Input.TextArea aria-label={t('taskPrompt')} value={uncertain?.prompt ?? prompt} onChange={event => setPrompt(event.target.value)} placeholder={t(taskId ? 'followupPlaceholder' : 'placeholder')} autoSize={{ minRows: 3, maxRows: 8 }} maxLength={16000} disabled={submitting || !!uncertain} /><div className="ai-composer-footer"><p><SafetyCertificateOutlined />{currentTask ? t('shareSelected', { server: currentTask.server_name, provider: currentTask.provider_name }) : chosenServer && chosenProvider ? t('shareSelected', { server: chosenServer.name, provider: chosenProvider.name }) : t('shareHint')}</p><Button type="primary" icon={<SendOutlined />} aria-label={t(taskId ? 'followup' : 'submit')} aria-busy={submitting} loading={submitting} disabled={submitting || actionBusy || !!uncertain || !prompt.trim() || (!taskId && (!chosenServer || !chosenProvider?.enabled || !chosenProvider.has_api_key))} onClick={() => { void send(); }}>{t(taskId ? 'followup' : 'submit')}</Button></div></> : currentTask ? <p className="ai-composer-state">{t(activeStatuses.includes(currentTask.status) ? currentTask.status === 'awaiting_input' ? 'waiting' : 'working' : 'readOnly')}</p> : null}
           <small className="ai-background-note">{t('leaveHint')}{currentTask && canCancel ? ` ${t('cancelHint')}` : ''}</small>
         </div>
       </section>

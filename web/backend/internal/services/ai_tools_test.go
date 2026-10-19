@@ -11,6 +11,7 @@ import (
 	"errors"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -121,13 +122,15 @@ func TestAIArgumentsRejectCrossServerSelectorsAndInjectedPackages(t *testing.T) 
 func TestAIReadPolicyBlocksSecretsAndPathAliases(t *testing.T) {
 	for _, tc := range []struct{ platform, path string }{
 		{"linux", "/etc/shadow"}, {"linux", "/home/user/.ssh/id_ed25519"}, {"linux", "/srv/app/.env.production"}, {"linux", "/tmp/../etc/shadow"}, {"linux", "/home/u/.aws/credentials"}, {"linux", "/etc/server-monitor-agent/config.json"}, {"linux", "/home/u/.bash_history"},
+		{"linux", "/etc/shadow-"}, {"linux", "/etc/gshadow.bak"}, {"linux", "/etc/security/opasswd"}, {"linux", "/home/u/.docker/config.json"}, {"linux", "/home/u/.dockercfg"}, {"linux", "/home/u/.git-credentials"}, {"linux", "/home/u/.npmrc"}, {"linux", "/tmp/id_ed25519.old"},
 		{"windows", `C:\Windows\System32\config\SAM`}, {"windows", `C:\Users\u\.ssh\id_rsa`}, {"windows", `C:\ProgramData\ServerMonitorAgent\config.json`}, {"windows", `C:\config.txt:secret`}, {"windows", `\\server\share\config.txt`}, {"windows", `C:\config\CON.txt`}, {"windows", `C:\config\secret. `},
+		{"windows", `C:\Users\u\.docker\config.json`}, {"windows", `C:\backup\SAM.LOG1`},
 	} {
 		if _, err := PrepareAIAction(&models.Server{ServerType: tc.platform}, AIToolCall{Function: AIFunctionCall{Name: "read_file", Arguments: stringMustJSON(aiReadFile{Path: tc.path})}}); err == nil {
 			t.Errorf("secret/path alias accepted %s", tc.path)
 		}
 	}
-	for _, content := range []string{"-----BEGIN OPENSSH PRIVATE KEY-----\nsecret", "DB_PASSWORD=very-secret", "{\"token\":\"abcdefghijk\"}", "https://name:secret@example.invalid", "AWS_SECRET_ACCESS_KEY=abcdefghijk", "Authorization: Bearer abcdefghijk"} {
+	for _, content := range []string{"-----BEGIN OPENSSH PRIVATE KEY-----\nsecret", "DB_PASSWORD=very-secret", "DB_PASSWORD=x", "{\"token\":\"abcdefghijk\"}", `{"auths":{"registry.invalid":{"auth":"dTpw"}}}`, "https://name:secret@example.invalid", "AWS_SECRET_ACCESS_KEY=abcdefghijk", "Authorization: Bearer abcdefghijk"} {
 		if !aiContainsSecrets(content) {
 			t.Errorf("secret not identified %q", content)
 		}
@@ -140,7 +143,7 @@ func TestAIConfigPolicyDistinguishesDeclarativeConfigurationFromExecution(t *tes
 	if action.RequiresApproval {
 		t.Fatal("normal declarative configuration requires approval")
 	}
-	for _, content := range []string{"load_module /tmp/evil.so;", "http { server { content_by_lua_block { os.execute('rm -rf /') } } }", "access_log /etc/crontab;", "pid /etc/shadow;", "server { root /; }", "include /tmp/unsafe.conf;", "perl_require /tmp/unsafe.pl;", "server { access_log /var/log/nginx/../../etc/shadow; }"} {
+	for _, content := range []string{"load_module /tmp/evil.so;", "http { server { content_by_lua_block { os.execute('rm -rf /') } } }", "access_log /etc/crontab;", "pid /etc/shadow;", "server { root /; }", "include /tmp/unsafe.conf;", "perl_require /tmp/unsafe.pl;", "server { access_log /var/log/nginx/../../etc/shadow; }", "server { root /var/www/..; }", "server { root /var/www/$arg_path; }", "access_log /var/log/nginx/$arg_path;", "server { listen unix:/etc/app/socket; }", "server { listen 8080;", "server { listen 8080; }}", "root /var/www/html {}", "# remove the existing site\n"} {
 		action := prepareAITest(t, "linux", "write_file", aiWriteFile{Path: "/etc/nginx/conf.d/app.conf", Content: content, ExpectedRevision: "missing"})
 		if !action.RequiresApproval {
 			t.Errorf("unsafe config auto-approved %q", content)
@@ -150,6 +153,68 @@ func TestAIConfigPolicyDistinguishesDeclarativeConfigurationFromExecution(t *tes
 		action := prepareAITest(t, "linux", "write_file", aiWriteFile{Path: filename, Content: "test\n", ExpectedRevision: "missing"})
 		if !action.RequiresApproval {
 			t.Errorf("unsafe config path auto-approved %s", filename)
+		}
+	}
+}
+
+func TestAIAptPackageNamesCannotBecomeImplicitRegexes(t *testing.T) {
+	action := prepareAITest(t, "linux", "install_packages", aiPackages{Manager: "apt", Packages: []string{"python3.11", "libstdc++6:amd64"}})
+	if !strings.Contains(action.Command, "--no-remove -o APT::Cmd::Pattern-Only=true -- 'python3.11' 'libstdc++6:amd64'") {
+		t.Fatalf("APT would allow an unanchored regex fallback: %s", action.Command)
+	}
+	for _, name := range []string{"^python", "python$", "?name(python)", "~npython"} {
+		if _, err := PrepareAIAction(&models.Server{ServerType: "linux"}, AIToolCall{Function: AIFunctionCall{Name: "install_packages", Arguments: stringMustJSON(aiPackages{Manager: "apt", Packages: []string{name}})}}); err == nil {
+			t.Fatalf("accepted explicit package pattern %q", name)
+		}
+	}
+}
+
+func TestAIChocolateySuccessRequiringRebootIsNotFailure(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("executes the actual PowerShell wrapper using an isolated .cmd fixture")
+	}
+	directory := t.TempDir()
+	// Never run the developer machine's package manager. Only this local stub
+	// is resolved by the child process; it installs nothing and accesses no host.
+	stub := "@echo off\r\nif \"%~2\"==\"fixture-reboot\" exit /b 3010\r\nif \"%~2\"==\"fixture-fail\" exit /b 42\r\necho fixture-installed\r\nexit /b 0\r\n"
+	if err := os.WriteFile(filepath.Join(directory, "choco.cmd"), []byte(stub), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		packages []string
+		wantCode int
+		reboot   bool
+	}{
+		{[]string{"fixture-reboot"}, 0, true},
+		{[]string{"fixture-reboot", "fixture-ok"}, 0, true},
+		{[]string{"fixture-fail", "fixture-ok"}, 42, false},
+	} {
+		action := prepareAITest(t, "windows", "install_packages", aiPackages{Manager: "choco", Packages: tc.packages})
+		encoded := strings.TrimPrefix(aiWindowsCommand(action.Command), "powershell -NoProfile -NonInteractive -EncodedCommand ")
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded)
+		cmd.Env = os.Environ()
+		for i, entry := range cmd.Env {
+			key, value, _ := strings.Cut(entry, "=")
+			if strings.EqualFold(key, "PATH") {
+				cmd.Env[i] = key + "=" + directory + string(os.PathListSeparator) + value
+			}
+		}
+		output, err := cmd.CombinedOutput()
+		cancel()
+		code := 0
+		if err != nil {
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) {
+				t.Fatal(err)
+			}
+			code = exit.ExitCode()
+		}
+		if code != tc.wantCode || strings.Contains(string(output), "a reboot is required") != tc.reboot {
+			t.Fatalf("packages=%v code=%d output=%s", tc.packages, code, output)
+		}
+		if tc.wantCode != 0 && strings.Contains(string(output), "fixture-installed") {
+			t.Fatal("installation continued after a definite failure")
 		}
 	}
 }
@@ -406,9 +471,99 @@ func TestAIFileReadsWritesBackupsRevisionsAndSymlinksOverActualSSH(t *testing.T)
 	}
 }
 
-// The real SSH/SFTP server only accesses t.TempDir fixtures. It executes no
+func TestAIAutomaticConfigReplacementCannotRemoveUnreviewedSecurityControls(t *testing.T) {
+	handlers := sftp.InMemHandler()
+	server := aiSFTPServer(t, func(channel ssh.Channel) {
+		remote := sftp.NewRequestServer(channel, handlers)
+		defer remote.Close()
+		_ = remote.Serve()
+	})
+	server.ServerType = "linux"
+	client, _, err := DialServer(context.Background(), server)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	remote, err := NewSFTPFiles(context.Background(), client, "linux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer remote.Close()
+	store := remote.(*sftpFiles)
+	for _, directory := range []string{"/etc", "/etc/nginx", "/etc/nginx/conf.d"} {
+		if err := store.Mkdir(directory, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	filename := "/etc/nginx/conf.d/app.conf"
+	secured := "server { listen 8080; auth_basic restricted; auth_basic_user_file /etc/nginx/htpasswd; }\n"
+	if err := store.Write(filename, strings.NewReader(secured), int64(len(secured)), false); err != nil {
+		t.Fatal(err)
+	}
+	action := prepareAITest(t, "linux", "write_file", aiWriteFile{Path: filename, Content: "server { listen 8080; root /var/www/html; }\n", ExpectedRevision: FileRevision([]byte(secured))})
+	if action.RequiresApproval {
+		t.Fatal("fixture must exercise a new configuration that appears harmless in isolation")
+	}
+	if result, err := ExecuteAIAction(context.Background(), server, action); err == nil || result.Unknown || result.BackupPath != "" {
+		t.Fatalf("removed original access controls without approval: %+v %v", result, err)
+	}
+	content, err := readAIFile(store, filename)
+	if err != nil || string(content) != secured {
+		t.Fatalf("original security configuration changed: %q %v", content, err)
+	}
+	if _, err := store.client.Lstat("/etc/nginx/conf.d/.server-monitor-backups"); !os.IsNotExist(err) {
+		t.Fatalf("rejected operation changed the backup directory: %v", err)
+	}
+	// Keeping the original access controls makes the new configuration itself
+	// require approval, so the exact reviewed edit remains available.
+	action = prepareAITest(t, "linux", "write_file", aiWriteFile{Path: filename, Content: strings.Replace(secured, "8080", "8081", 1), ExpectedRevision: FileRevision([]byte(secured))})
+	if !action.RequiresApproval {
+		t.Fatal("security-sensitive replacement was not sent for approval")
+	}
+}
+
+type aiFailAfterRename struct {
+	sftp.FileCmder
+	target string
+	calls  atomic.Int32
+}
+
+func (handler *aiFailAfterRename) Filecmd(request *sftp.Request) error {
+	if err := handler.FileCmder.Filecmd(request); err != nil {
+		return err
+	}
+	if request.Method == "Rename" && request.Target == handler.target {
+		handler.calls.Add(1)
+		return sftp.ErrSSHFxFailure
+	}
+	return nil
+}
+
+func TestAIFileMutationWithAmbiguousReplyIsUnknownAndNeverRetried(t *testing.T) {
+	handlers := sftp.InMemHandler()
+	failure := &aiFailAfterRename{FileCmder: handlers.FileCmd, target: "/new.conf"}
+	handlers.FileCmd = failure
+	server := aiSFTPServer(t, func(channel ssh.Channel) {
+		remote := sftp.NewRequestServer(channel, handlers)
+		defer remote.Close()
+		_ = remote.Serve()
+	})
+	server.ServerType = "linux"
+	action := prepareAITest(t, "linux", "write_file", aiWriteFile{Path: "/new.conf", Content: "port=8080\n", ExpectedRevision: "missing"})
+	result, err := ExecuteAIAction(context.Background(), server, action)
+	if err == nil || !result.Unknown || failure.calls.Load() != 1 {
+		t.Fatalf("ambiguous write retried or reported definite: %+v %v calls=%d", result, err, failure.calls.Load())
+	}
+	read := prepareAITest(t, "linux", "read_file", aiReadFile{Path: "/new.conf"})
+	result, err = ExecuteAIAction(context.Background(), server, read)
+	if err != nil || !strings.Contains(result.Output, "port=8080") {
+		t.Fatalf("fixture did not actually commit before the failed reply: %+v %v", result, err)
+	}
+}
+
+// The real SSH/SFTP server only accesses t.TempDir or in-memory fixtures. It executes no
 // local commands, installs nothing and never reaches an external address.
-func aiSFTPServer(t *testing.T) *models.Server {
+func aiSFTPServer(t *testing.T, serve ...func(ssh.Channel)) *models.Server {
 	t.Helper()
 	_, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -464,6 +619,10 @@ func aiSFTPServer(t *testing.T) *models.Server {
 								continue
 							}
 							_ = request.Reply(true, nil)
+							if len(serve) > 0 {
+								serve[0](channel)
+								return
+							}
 							options := []sftp.ServerOption{}
 							if runtime.GOOS == "windows" {
 								options = append(options, sftp.WindowsRootEnumeratesDrives())

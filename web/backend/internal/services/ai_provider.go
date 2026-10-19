@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 	"unicode"
-	"unicode/utf8"
 
 	"server-monitor/internal/models"
 )
@@ -86,6 +85,9 @@ type aiPinnedEndpoint struct {
 	Host string
 	Port string
 	IPs  []net.IP
+	// net/http deliberately detaches DialContext from Request cancellation.
+	// This one-shot client retains the caller context to stop every stage.
+	requestContext context.Context
 }
 type aiPinnedEndpointKey struct{}
 type AIClient struct {
@@ -157,6 +159,9 @@ func aiPublicIP(ip net.IP) bool {
 	return true
 }
 func (c *AIClient) resolveEndpoint(ctx context.Context, endpoint string) (aiPinnedEndpoint, error) {
+	if err := ctx.Err(); err != nil {
+		return aiPinnedEndpoint{}, err
+	}
 	parsed, err := models.ParseAIBaseURL(endpoint)
 	if err != nil {
 		return aiPinnedEndpoint{}, &AIProviderError{Code: "invalid_configuration"}
@@ -188,7 +193,10 @@ func (c *AIClient) resolveEndpoint(ctx context.Context, endpoint string) (aiPinn
 	if port == "" {
 		port = "443"
 	}
-	return aiPinnedEndpoint{Host: host, Port: port, IPs: copied}, nil
+	if err := ctx.Err(); err != nil {
+		return aiPinnedEndpoint{}, err
+	}
+	return aiPinnedEndpoint{Host: host, Port: port, IPs: copied, requestContext: ctx}, nil
 }
 func (c *AIClient) ValidateEndpoint(ctx context.Context, baseURL string) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -202,16 +210,41 @@ func (c *AIClient) dialPinned(ctx context.Context, network, address string) (net
 	if !ok || err != nil || !strings.EqualFold(host, pin.Host) || port != pin.Port || len(pin.IPs) == 0 {
 		return nil, &AIProviderError{Code: "endpoint_restricted"}
 	}
+	if pin.requestContext == nil {
+		return nil, &AIProviderError{Code: "endpoint_restricted"}
+	}
+	if err := pin.requestContext.Err(); err != nil {
+		return nil, err
+	}
+	dialCtx, cancel := context.WithCancel(ctx)
+	stopCancellation := context.AfterFunc(pin.requestContext, cancel)
+	defer func() { stopCancellation(); cancel() }()
 	for _, ip := range pin.IPs {
-		conn, err := c.dialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+		conn, err := c.dialContext(dialCtx, network, net.JoinHostPort(ip.String(), port))
 		if err == nil {
-			return conn, nil
+			// Keep cancellation attached after dialing too: net/http's TLS
+			// handshake otherwise uses the same detached transport context.
+			stop := context.AfterFunc(pin.requestContext, func() { _ = conn.Close() })
+			return &aiRequestConn{Conn: conn, stopCancellation: stop}, nil
 		}
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
+		if pin.requestContext.Err() != nil {
+			return nil, pin.requestContext.Err()
+		}
+		if dialCtx.Err() != nil {
+			return nil, dialCtx.Err()
 		}
 	}
 	return nil, &AIProviderError{Code: "connection_failed"}
+}
+
+type aiRequestConn struct {
+	net.Conn
+	stopCancellation func() bool
+}
+
+func (c *aiRequestConn) Close() error {
+	c.stopCancellation()
+	return c.Conn.Close()
 }
 
 func validateAIInput(messages []AIMessage, tools []AIToolDefinition) (map[string]bool, error) {
@@ -363,7 +396,7 @@ func parseAICompletion(raw []byte, allowed map[string]bool) (AICompletion, error
 			CompletionTokens int64 `json:"completion_tokens"`
 		} `json:"usage"`
 	}
-	if !utf8.Valid(raw) || json.Unmarshal(raw, &response) != nil || len(response.Choices) != 1 || (len(response.Error) > 0 && string(response.Error) != "null") {
+	if !validAIProtocolObject(raw, AIProviderBodyLimit) || json.Unmarshal(raw, &response) != nil || len(response.Choices) != 1 || (len(response.Error) > 0 && string(response.Error) != "null") {
 		return empty, bad
 	}
 	choice := response.Choices[0]
@@ -391,7 +424,7 @@ func parseAICompletion(raw []byte, allowed map[string]bool) (AICompletion, error
 			if call.ID == "" || len(call.ID) > 128 || strings.ContainsFunc(call.ID, func(r rune) bool { return unicode.IsControl(r) || unicode.IsSpace(r) }) || ids[call.ID] || call.Type != "function" || !allowed[call.Function.Name] || !aiFunctionName.MatchString(call.Function.Name) {
 				return empty, bad
 			}
-			if len(call.Function.Arguments) > 65536 {
+			if !validAIProtocolObject([]byte(call.Function.Arguments), 65536) {
 				return empty, bad
 			}
 			var arguments map[string]json.RawMessage

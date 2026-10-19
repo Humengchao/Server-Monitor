@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path"
 	"reflect"
@@ -17,6 +16,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 	"server-monitor/internal/models"
 )
@@ -386,7 +386,10 @@ func executeAIFile(ctx context.Context, client *ssh.Client, server *models.Serve
 			return result, err
 		}
 		if err := store.Write(filename, strings.NewReader(write.Content), int64(len(write.Content)), false); err != nil {
-			result.Unknown = aiUncertainFileError(ctx, err)
+			// The common file store translates a failed rename into Exists when
+			// the target is now present. It could be our committed write whose
+			// reply failed, so this late Exists cannot prove nothing happened.
+			result.Unknown = errors.Is(err, ErrFileExists) || aiUncertainFileError(ctx, err)
 			return result, err
 		}
 	} else {
@@ -399,6 +402,9 @@ func executeAIFile(ctx context.Context, client *ssh.Client, server *models.Serve
 		}
 		if aiContainsSecrets(string(current)) {
 			return result, errors.New("existing file contains credentials; refusing an AI rewrite")
+		}
+		if !action.RequiresApproval && !aiSafeConfiguration(filename, string(current), server.ServerType) {
+			return result, errors.New("existing configuration contains unverified or security directives; preserve them so the replacement receives approval, or use an explicitly reviewed command")
 		}
 		if err := ctx.Err(); err != nil {
 			return result, err
@@ -430,11 +436,28 @@ func readAIFile(store RemoteFiles, filename string) ([]byte, error) {
 }
 
 func aiUncertainFileError(ctx context.Context, err error) bool {
+	if err == nil {
+		return false
+	}
 	if ctx.Err() != nil {
 		return true
 	}
-	// Transport loss can hide a completed rename; never auto-retry it.
-	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || strings.Contains(strings.ToLower(err.Error()), "connection")
+	for _, definite := range []error{ErrFileChanged, ErrFileExists, ErrFileNotRegular, ErrFileTooLarge, ErrFileNotText, ErrFilePath, os.ErrNotExist, os.ErrPermission, os.ErrExist} {
+		if errors.Is(err, definite) {
+			return false
+		}
+	}
+	var status *sftp.StatusError
+	if errors.As(err, &status) {
+		switch status.FxCode() {
+		case sftp.ErrSSHFxNoSuchFile, sftp.ErrSSHFxPermissionDenied, sftp.ErrSSHFxOpUnsupported:
+			return false
+		}
+	}
+	// An unrecognized failure can hide a completed rename, including a generic
+	// SFTP failure from a backend that committed before its reply failed. Only
+	// definite rejections above allow the worker to plan another operation.
+	return true
 }
 
 func boundAIOutput(output string, truncated bool) (string, bool) {

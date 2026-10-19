@@ -79,7 +79,7 @@ func aiProviderStorageError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		c.JSON(404, gin.H{"error": "AI provider not found"})
-	case errors.Is(err, models.ErrAIProviderLimit):
+	case errors.Is(err, models.ErrAIProviderLimit), errors.Is(err, models.ErrAIProviderConflict):
 		c.JSON(409, gin.H{"error": err.Error()})
 	case errors.Is(err, models.ErrAIProviderEndpointKey), errors.Is(err, models.ErrAIProviderKey), errors.Is(err, models.ErrAIProviderDisabled):
 		c.JSON(400, gin.H{"error": err.Error()})

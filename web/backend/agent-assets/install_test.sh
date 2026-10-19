@@ -30,6 +30,8 @@ case "$action" in
   [ "$ticket" != invalid ] || exit 1
   [ ! -f "$config" ] || $force
   printf '%s\n' "$ticket" > "$config"
+  # Model the panel's irreversible token rotation as part of registration.
+  printf '%s\n' "$ticket" > "$AGENT_TEST_ROOT/registered.identity"
   chmod 600 "$config"
   ;;
  *) exit 2;;
@@ -69,6 +71,7 @@ case "$1" in
     rm -f "$AGENT_TEST_ROOT/active"
     exit 1
   fi
+  cmp -s /etc/server-monitor-agent/config.json "$AGENT_TEST_ROOT/registered.identity" || exit 1
   touch "$AGENT_TEST_ROOT/active"
   ;;
 esac
@@ -97,7 +100,12 @@ for action in upgrade reenroll; do
   if bash "$installer" "$action" --server-url https://panel.invalid --ticket retry; then echo 'expected restart failure' >&2; exit 1; fi
   cmp /usr/local/bin/server-monitor-agent "$test_dir/expected.binary"
   cmp /etc/systemd/system/server-monitor-agent.service "$test_dir/expected.unit"
-  cmp /etc/server-monitor-agent/config.json "$test_dir/expected.config"
+  if [[ $action == reenroll ]]; then
+    test "$(cat /etc/server-monitor-agent/config.json)" = retry
+  else
+    cmp /etc/server-monitor-agent/config.json "$test_dir/expected.config"
+  fi
+  cmp /etc/server-monitor-agent/config.json "$test_dir/registered.identity"
   test -f "$test_dir/active"
   test -f "$test_dir/enabled"
   test "$(tail -n 1 "$test_dir/systemctl.log")" = 'restart-version version-one'
@@ -110,8 +118,11 @@ test ! -e /etc/server-monitor-agent/config.json
 if bash "$installer" install --server-url https://panel.invalid --ticket first-failure; then echo 'expected first-install failure' >&2; exit 1; fi
 test ! -e /usr/local/bin/server-monitor-agent
 test ! -e /etc/systemd/system/server-monitor-agent.service
-test ! -e /etc/server-monitor-agent/config.json
+test "$(cat /etc/server-monitor-agent/config.json)" = first-failure
+cmp /etc/server-monitor-agent/config.json "$test_dir/registered.identity"
 test ! -e "$test_dir/active"
 test ! -e "$test_dir/enabled"
 test ! -e /usr/local/bin/server-monitor-agent.new
-echo 'install, upgrade/reenroll binary+unit+config rollback, first-install cleanup, uninstall retention and purge passed'
+bash "$installer" uninstall --purge-config
+test ! -e /etc/server-monitor-agent/config.json
+echo 'install, upgrade rollback, reenrollment identity retention, first-install cleanup, uninstall retention and purge passed'

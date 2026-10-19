@@ -23,6 +23,7 @@ var ErrAIProviderLimit = errors.New("at most 10 AI providers per account")
 var ErrAIProviderEndpointKey = errors.New("changing the provider base URL requires a newly supplied API key")
 var ErrAIProviderKey = errors.New("an API key is required")
 var ErrAIProviderDisabled = errors.New("AI provider is disabled")
+var ErrAIProviderConflict = errors.New("AI provider configuration changed; reload before saving")
 
 type AIProvider struct {
 	ID        uuid.UUID `json:"id"`
@@ -202,11 +203,17 @@ func SaveAIProvider(ctx context.Context, db *DB, p *AIProvider, create bool) err
 		p.ID = uuid.New()
 	} else {
 		var oldURL string
-		if err = tx.QueryRowContext(ctx, `SELECT base_url,api_key_encrypted FROM ai_providers WHERE id=$1 AND user_id=$2 FOR UPDATE`, p.ID, p.UserID).Scan(&oldURL, &encrypted); err != nil {
+		var previousUpdatedAt time.Time
+		if err = tx.QueryRowContext(ctx, `SELECT base_url,api_key_encrypted,updated_at FROM ai_providers WHERE id=$1 AND user_id=$2 FOR UPDATE`, p.ID, p.UserID).Scan(&oldURL, &encrypted, &previousUpdatedAt); err != nil {
 			return err
 		}
 		if p.BaseURL != oldURL && p.APIKey == "" {
 			return ErrAIProviderEndpointKey
+		}
+		// The handler may have waited for DNS after reading this configuration.
+		// Do not overwrite a concurrent disable, key rotation, or metadata edit.
+		if !p.UpdatedAt.Equal(previousUpdatedAt) {
+			return ErrAIProviderConflict
 		}
 	}
 	if p.APIKey != "" {
@@ -222,7 +229,8 @@ func SaveAIProvider(ctx context.Context, db *DB, p *AIProvider, create bool) err
 		err = tx.QueryRowContext(ctx, `INSERT INTO ai_providers(id,user_id,name,kind,base_url,model,api_key_encrypted,enabled)
             VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING created_at,updated_at`, p.ID, p.UserID, p.Name, p.Kind, p.BaseURL, p.Model, encrypted, p.Enabled).Scan(&p.CreatedAt, &p.UpdatedAt)
 	} else {
-		err = tx.QueryRowContext(ctx, `UPDATE ai_providers SET name=$3,kind=$4,base_url=$5,model=$6,api_key_encrypted=$7,enabled=$8,updated_at=NOW()
+		err = tx.QueryRowContext(ctx, `UPDATE ai_providers SET name=$3,kind=$4,base_url=$5,model=$6,api_key_encrypted=$7,enabled=$8,
+            updated_at=GREATEST(clock_timestamp(),updated_at+INTERVAL '1 microsecond')
             WHERE id=$1 AND user_id=$2 RETURNING created_at,updated_at`, p.ID, p.UserID, p.Name, p.Kind, p.BaseURL, p.Model, encrypted, p.Enabled).Scan(&p.CreatedAt, &p.UpdatedAt)
 	}
 	if err != nil {

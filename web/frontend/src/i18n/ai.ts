@@ -22,7 +22,7 @@ const en = {
   user: 'You', assistant: 'Assistant', system: 'Task update', tool: 'Tool result', actions: 'Actions', action: 'Action', command: 'Command', arguments: 'Arguments', output: 'Output', noOutput: 'No output returned', truncated: 'Output was truncated by the server.', unknown: 'Execution outcome is unknown. Check the server before retrying.', duration: '{{duration}} ms', exitCode: 'Exit {{code}}',
   pending: 'Pending', approved: 'Approved', succeeded: 'Succeeded', rejected: 'Rejected', approvalTitle: 'Review this high-risk action', approve: 'Approve action', reject: 'Reject and stop', riskReason: 'Why approval is required',
   confirmTitle: 'Run this exact action?', confirmHint: 'This approval applies only to the saved action shown below on {{server}}.', rejectTitle: 'Reject this action and stop the task?', decisionSaved: 'Decision recorded',
-  tokens: 'Tokens', inputTokens: 'Input', outputTokens: 'Output', taskTarget: 'Task target', modelLabel: 'Model', updated: 'Updated {{time}}', noEvents: 'Waiting for the first task update…', providerUnavailable: 'The saved provider is no longer available. Add or enable a provider before starting a new task.',
+  tokens: 'Tokens', inputTokens: 'Input', outputTokens: 'Output', taskTarget: 'Task target', modelLabel: 'Model', updated: 'Updated {{time}}', noEvents: 'Waiting for the first task update…', providerUnavailable: 'The selected provider is unavailable. Choose another provider, or add or enable one before starting a new task.',
 };
 const zh: typeof en = {
   title: 'AI 助手', eyebrow: '服务器运维', description: '描述目标，查看它在服务器上执行的每一步。',
@@ -46,7 +46,7 @@ const zh: typeof en = {
   user: '你', assistant: '助手', system: '任务更新', tool: '工具结果', actions: '执行操作', action: '操作', command: '命令', arguments: '参数', output: '输出', noOutput: '没有返回输出', truncated: '服务端已截断过长输出。', unknown: '执行结果不确定，请检查服务器状态后再决定是否重试。', duration: '{{duration}} 毫秒', exitCode: '退出码 {{code}}',
   pending: '待执行', approved: '已批准', succeeded: '成功', rejected: '已拒绝', approvalTitle: '请核对这项高风险操作', approve: '批准操作', reject: '拒绝并停止', riskReason: '需要批准的原因',
   confirmTitle: '在该服务器执行以下操作？', confirmHint: '本次批准仅对应 {{server}} 上以下已保存的操作。', rejectTitle: '拒绝此操作并停止任务？', decisionSaved: '已记录你的决定',
-  tokens: 'Token 用量', inputTokens: '输入', outputTokens: '输出', taskTarget: '任务目标', modelLabel: '模型', updated: '{{time}} 更新', noEvents: '正在等待第一条任务更新…', providerUnavailable: '原提供商已不可用，请添加或启用提供商后创建新任务。',
+  tokens: 'Token 用量', inputTokens: '输入', outputTokens: '输出', taskTarget: '任务目标', modelLabel: '模型', updated: '{{time}} 更新', noEvents: '正在等待第一条任务更新…', providerUnavailable: '所选提供商已不可用，请重新选择其他提供商，或添加、启用提供商后创建新任务。',
 };
 i18n.addResourceBundle('en', 'ai', en, true, true);
 i18n.addResourceBundle('zh', 'ai', zh, true, true);

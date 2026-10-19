@@ -53,6 +53,70 @@ test('network creation only offers assigned servers and sends bounded packet cou
   expect(errors).toEqual([]);
 });
 
+test('changing a network target cancels old history and selects only checks for the new server', async ({ page }) => {
+  const errors = await setup(page);
+  let held: Route | undefined;
+  await page.route('**/api/network/checks', route => route.fulfill({ json: [check, { ...check, id: 'check-two', name: 'Source target check', target_server_id: 'source' }] }));
+  await page.route('**/api/network/checks/*/history?**', route => {
+    if (route.request().url().includes('/check-one/')) { held = route; return; }
+    return route.fulfill({ json: { samples: [{ ...sample, avg_ms: 22 }], summary: { avg_ms: 22 }, truncated: false } });
+  });
+  await page.goto('/network?server=target');
+  await expect.poll(() => !!held).toBe(true);
+  const aborted = page.waitForEvent('requestfailed', request => request.url().includes('/check-one/history'));
+  await page.evaluate(() => {
+    window.history.pushState({}, '', '/network?server=source');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  await aborted;
+  const selection = page.locator('.ant-select').filter({ has: page.getByRole('combobox', { name: 'Select up to four checks' }) });
+  await expect(selection).toContainText('Source target check');
+  await expect(selection).not.toContainText('Local to target');
+  await held!.fulfill({ json: { samples: [{ ...sample, avg_ms: 999 }], summary: { avg_ms: 999 }, truncated: false } });
+  await expect(page.getByText('22.00 ms').first()).toBeVisible();
+  await expect(page.getByText('999.00 ms')).toHaveCount(0);
+  // An explicit empty comparison stays empty when the list refreshes.
+  await selection.locator('.ant-select-selection-item-remove').click();
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(selection).not.toContainText('Source target check');
+  expect(errors).toEqual([]);
+});
+
+test('browser navigation switches log sources, discards old cursors, and stops following the previous server', async ({ page }) => {
+  const errors = await setup(page);
+  const requests: URL[] = [];
+  let held: Route | undefined;
+  await page.route('**/api/servers/*/logs?**', route => {
+    const url = new URL(route.request().url()); requests.push(url);
+    if (url.searchParams.has('cursor')) { held = route; return; }
+    const source = url.pathname.includes('/source/');
+    return route.fulfill({ json: { entries: [{ id: source ? 'source-log' : 'target-log', time: new Date(observedAt).toISOString(), message: source ? 'New source log' : 'Original target log', stream: 'journal' }], next_cursor: source ? '' : 'old-cursor', partial: false, truncated: false, scanned: 1 } });
+  });
+  await page.goto('/logs?server=target');
+  await expect(page.getByText('Original target log', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Follow new entries', exact: true }).click();
+  await page.getByRole('button', { name: 'Read next page', exact: true }).click();
+  await expect.poll(() => !!held).toBe(true);
+  const aborted = page.waitForEvent('requestfailed', request => request.url().includes('cursor=old-cursor'));
+  await page.evaluate(() => {
+    window.history.pushState({}, '', '/logs?server=source&unit=nginx.service&keyword=literal&priority=3');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  await aborted;
+  await expect(page.getByText('New source log', { exact: true })).toBeVisible();
+  await expect(page.getByText('Original target log', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Follow new entries', exact: true })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Service unit (optional)' })).toHaveValue('nginx.service');
+  await expect(page.getByRole('textbox', { name: 'Literal, case-sensitive text' })).toHaveValue('literal');
+  const switched = requests.find(url => url.pathname.includes('/source/'))!;
+  expect(switched.searchParams.get('cursor')).toBeNull();
+  expect(switched.searchParams.get('unit')).toBe('nginx.service');
+  expect(switched.searchParams.get('priority')).toBe('3');
+  await held!.fulfill({ json: { entries: [{ id: 'late', time: new Date(observedAt).toISOString(), message: 'Late old source log', stream: 'journal' }], scanned: 1 } });
+  await expect(page.getByText('Late old source log', { exact: true })).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
 test('journal follow sends the cursor, preserves literal filters, shows partial access, and cancels on navigation', async ({ page }) => {
   const errors = await setup(page);
   await page.clock.install();

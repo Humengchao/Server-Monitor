@@ -81,6 +81,28 @@ func TestAgentEnrollmentOneUseRevocationAndOwnership(t *testing.T) {
 	if stored == token || host != "agent" {
 		t.Fatal("raw token persisted or an ICMP target address was invented")
 	}
+	serviceHello := hello
+	serviceHello.OS, serviceHello.Username = "windows", `NT AUTHORITY\SYSTEM`
+	if err := TouchAgent(ctx, db, id, serviceHello); err != nil {
+		t.Fatal("could not publish actual service identity", err)
+	}
+	var serverOS, serverUser, agentOS, agentUser string
+	assertIdentity := func() {
+		t.Helper()
+		if err := db.QueryRow(`SELECT s.server_type,s.ssh_username,a.os,a.run_user FROM servers s JOIN server_agents a ON a.server_id=s.id WHERE s.id=$1`, id).Scan(&serverOS, &serverUser, &agentOS, &agentUser); err != nil {
+			t.Fatal(err)
+		}
+		if serverOS != serviceHello.OS || agentOS != serviceHello.OS || serverUser != serviceHello.Username || agentUser != serviceHello.Username {
+			t.Fatalf("server and Agent execution identities disagree: %q %q / %q %q", serverOS, serverUser, agentOS, agentUser)
+		}
+	}
+	assertIdentity()
+	untrustedHello := hello
+	untrustedHello.HostKey = "not-the-enrolled-key"
+	if err := TouchAgent(ctx, db, id, untrustedHello); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatal("unregistered identity updated server metadata", err)
+	}
+	assertIdentity()
 	if err := RevokeAgent(ctx, db, id, uuid.New()); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatal("foreign revocation allowed")
 	}

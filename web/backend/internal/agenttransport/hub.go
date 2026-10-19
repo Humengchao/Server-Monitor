@@ -246,6 +246,10 @@ func (h *Hub) Dial(ctx context.Context, agentID uuid.UUID) (*ssh.Client, net.Con
 		}
 		expected = key
 	}
+	runtime, runtimePinned := ctx.Value(expectedRuntimeContextKey{}).(expectedRuntime)
+	if runtimePinned && (runtime.username == "" || runtime.platform != "linux" && runtime.platform != "windows") {
+		return nil, nil, ErrAgentIdentityChanged
+	}
 	id, err := randomSecret()
 	if err != nil {
 		return nil, nil, err
@@ -261,6 +265,10 @@ func (h *Hub) Dial(ctx context.Context, agentID uuid.UUID) (*ssh.Client, net.Con
 		return nil, nil, ErrOffline
 	}
 	if expected != nil && !bytes.Equal(expected.Marshal(), c.key.Marshal()) {
+		h.mu.Unlock()
+		return nil, nil, ErrAgentIdentityChanged
+	}
+	if runtimePinned && (runtime.username != c.hello.Username || runtime.platform != c.hello.OS) {
 		h.mu.Unlock()
 		return nil, nil, ErrAgentIdentityChanged
 	}

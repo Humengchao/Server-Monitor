@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"server-monitor/internal/models"
@@ -18,10 +19,14 @@ type fakeAIProviderClient struct {
 	tests       int
 	err         error
 	provider    models.AIProvider
+	validate    func(context.Context, string) error
 }
 
-func (f *fakeAIProviderClient) ValidateEndpoint(context.Context, string) error {
+func (f *fakeAIProviderClient) ValidateEndpoint(ctx context.Context, endpoint string) error {
 	f.validations++
+	if f.validate != nil {
+		return f.validate(ctx, endpoint)
+	}
 	return nil
 }
 func (f *fakeAIProviderClient) Test(_ context.Context, p models.AIProvider) error {
@@ -157,5 +162,62 @@ func TestAIProviderHTTPInputRejectedBeforeDatabaseOrNetwork(t *testing.T) {
 	}
 	if client.tests != 0 || client.validations != 0 {
 		t.Fatal("malformed request invoked network")
+	}
+}
+
+func TestAIProviderHTTPConcurrentDisableWinsOverDelayedUpdate(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	raw := testdb.Open(t)
+	user, _, _ := testdb.Seed(t, raw)
+	db := &models.DB{Raw: raw, EncryptionKey: "0123456789abcdef0123456789abcdef"}
+	provider := models.AIProvider{UserID: user, Name: "original", Kind: "deepseek", APIKey: "secret", Enabled: true}
+	if err := models.SaveAIProvider(context.Background(), db, &provider, true); err != nil {
+		t.Fatal(err)
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	client := &fakeAIProviderClient{validate: func(ctx context.Context, _ string) error {
+		close(entered)
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}}
+	h := &AIProviderHandler{client: client}
+	router := gin.New()
+	router.Use(func(c *gin.Context) { c.Set("db", db); c.Set("user_id", user) })
+	router.PUT("/providers/:id", h.Update)
+	request := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("PUT", "/providers/"+provider.ID.String(), strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, req)
+		return response
+	}
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- request(`{"name":"slow edit","enabled":true}`) }()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		close(release)
+		t.Fatal("update did not reach validation")
+	}
+	disabled := request(`{"enabled":false}`)
+	close(release)
+	if disabled.Code != 200 {
+		t.Fatal(disabled.Code, disabled.Body.String())
+	}
+	select {
+	case response := <-done:
+		if response.Code != 409 {
+			t.Fatal("overlapping edit did not report conflict", response.Code, response.Body.String())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("delayed edit did not return")
+	}
+	current, err := models.GetAIProvider(context.Background(), db, provider.ID, user)
+	if err != nil || current.Enabled || current.Name != "original" {
+		t.Fatal("disable was overwritten", current.Public(), err)
 	}
 }

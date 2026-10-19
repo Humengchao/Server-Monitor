@@ -76,6 +76,8 @@ $download = Join-Path $scratch 'agent.exe'
 $checksum = Join-Path $scratch 'checksum.txt'
 $configBackup = Join-Path $scratch 'config.previous'
 $completed = $false
+$enrolled = $false
+$succeeded = $false
 try {
     $url = "$ServerUrl/api/agent/download/windows/$architecture"
     Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $download -TimeoutSec 180 -MaximumRedirection 0
@@ -113,6 +115,9 @@ try {
         $Ticket | & $download enroll --server-url $ServerUrl --ticket-stdin --config $config @enrollFlags
         $Ticket = $null
         if ($LASTEXITCODE -ne 0) { throw 'Enrollment failed.' }
+        # The panel has now revoked the previous token. The new identity must
+        # survive a later binary/service rollback, even if this install fails.
+        $enrolled = $true
         # enroll protects its new file for its own account. Also grant the
         # existing service identity when an administrator re-enrolls it.
         $fileAcl = Get-Acl -LiteralPath $config
@@ -150,9 +155,11 @@ try {
         throw
     }
     if (Test-Path -LiteralPath $previous) { Remove-Item -LiteralPath $previous -Force }
+    $succeeded = $true
     Write-Host "Agent is running as its Windows service identity (LocalSystem by default). Logs: $configDir\agent.log"
 } finally {
-    if (-not $completed -and (Test-Path -LiteralPath $configBackup)) { Copy-Item -LiteralPath $configBackup -Destination $config -Force }
+    if (-not $completed -and -not $enrolled -and (Test-Path -LiteralPath $configBackup)) { Copy-Item -LiteralPath $configBackup -Destination $config -Force }
+    if (-not $succeeded -and $enrolled) { Write-Warning 'Installation failed after registration. The newly enrolled configuration was retained because the old identity has been revoked. Retry with a new enrollment command or restore the executable using the retained configuration.' }
     foreach ($path in @($download, $checksum, $configBackup)) { if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force } }
     if (Test-Path -LiteralPath $scratch) { Remove-Item -LiteralPath $scratch }
 }

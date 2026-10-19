@@ -65,5 +65,9 @@ CREATE INDEX IF NOT EXISTS idx_ai_events_task ON ai_events(task_id,id);
 CREATE TABLE IF NOT EXISTS ai_task_messages (
     task_id UUID NOT NULL REFERENCES ai_tasks(id) ON DELETE CASCADE,
     request_id UUID NOT NULL,
+    message_hash TEXT NOT NULL DEFAULT '',
     PRIMARY KEY(task_id,request_id)
 );
+-- Old accepted requests did not retain a digest. Their empty marker remains
+-- idempotent: return the existing task without appending or executing anything.
+ALTER TABLE ai_task_messages ADD COLUMN IF NOT EXISTS message_hash TEXT NOT NULL DEFAULT '';

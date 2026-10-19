@@ -47,9 +47,9 @@ func aiTaskError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		c.JSON(404, gin.H{"error": "task, server or provider not found"})
-	case errors.Is(err, models.ErrAITaskConflict), errors.Is(err, models.ErrAITaskLimit):
+	case errors.Is(err, models.ErrAITaskConflict), errors.Is(err, models.ErrAITaskLimit), errors.Is(err, models.ErrAIRequestConflict):
 		c.JSON(409, gin.H{"error": err.Error()})
-	case errors.Is(err, models.ErrAIProviderDisabled):
+	case errors.Is(err, models.ErrAIProviderDisabled), errors.Is(err, services.ErrAISecretInput), errors.Is(err, services.ErrAIAgentNotEnrolled):
 		c.JSON(400, gin.H{"error": err.Error()})
 	default:
 		c.JSON(500, gin.H{"error": "AI task operation failed; refresh its status before retrying"})
@@ -193,9 +193,9 @@ func (h *AITaskHandler) Message(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "a unique request ID and a message of 1 to 16000 bytes are required"})
 		return
 	}
-	ctx, cancel, db, user := aiContext(c)
+	ctx, cancel, _, user := aiContext(c)
 	defer cancel()
-	task, err := models.ContinueAITask(ctx, db.Raw, id, user, req.RequestID, strings.TrimSpace(req.Message))
+	task, err := h.worker.Continue(ctx, user, id, req.RequestID, strings.TrimSpace(req.Message))
 	if err != nil {
 		aiTaskError(c, err)
 		return

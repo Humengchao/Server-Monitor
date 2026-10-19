@@ -24,7 +24,7 @@
 .ai-task-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding: 18px 24px; border-bottom: 1px solid var(--border); }
 .ai-task-header > div { min-width: 0; }
 .ai-task-header small { display: block; margin-top: 5px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
-.ai-task-server { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; font-weight: 650; color: var(--text); }
+.ai-task-server { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; font-weight: 650; color: var(--text); overflow-wrap: anywhere; }
 .ai-task-server > .anticon { color: var(--ai-accent); }
 .ai-conversation-body { flex: 1; min-height: 260px; padding: 24px; max-height: 68vh; overflow-y: auto; overscroll-behavior: contain; }
 .ai-conversation-body > .ant-alert { margin-bottom: 14px; }
@@ -57,7 +57,7 @@
 .ai-arguments-preview { max-height: 240px; overflow: auto; margin: 10px 0; border-radius: 8px; }
 .ai-risk-context { padding: 14px 15px; background: color-mix(in srgb, #d98f30 6%, var(--surface)); font-size: 12px; }
 .ai-risk-context > strong { display: block; color: #ba7725; }
-.ai-risk-context > span { display: inline-block; margin: 7px 0 4px; font-weight: 650; }
+.ai-risk-context > span { display: inline-block; margin: 7px 0 4px; font-weight: 650; overflow-wrap: anywhere; }
 .ai-risk-context p { color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
 .ai-action-arguments { padding: 10px 15px; border-top: 1px solid var(--border); color: var(--muted); font-size: 11px; }
 .ai-action-arguments > summary { cursor: pointer; }
@@ -80,15 +80,15 @@
 .ai-composer-targets .ant-select.ant-select-outlined { background: var(--surface-soft); border-color: var(--border); color: var(--text); }
 .ai-composer textarea.ant-input { font-size: 13px; line-height: 1.7; background: var(--surface-soft); border-color: var(--border); border-radius: 12px; resize: none; }
 .ai-composer-footer { display: flex; align-items: flex-start; gap: 18px; justify-content: space-between; margin-top: 11px; }
-.ai-composer-footer > p { flex: 1; color: var(--muted); font-size: 11px; line-height: 1.65; }
+.ai-composer-footer > p { flex: 1; min-width: 0; color: var(--muted); font-size: 11px; line-height: 1.65; overflow-wrap: anywhere; }
 .ai-composer-footer > p > .anticon { margin-right: 6px; color: var(--ai-accent); }
 .ai-background-note { display: block; color: var(--muted); font-size: 10px; margin-top: 10px; line-height: 1.7; }
 .ai-composer-state { color: var(--muted); font-size: 12px; }
-.ai-provider-list { margin: 18px 0; display: grid; gap: 10px; }
+.ai-provider-list { margin: 18px 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .ai-provider-row { display: flex; gap: 12px; align-items: center; border: 1px solid var(--border); border-radius: 11px; padding: 13px; background: var(--surface-soft); }
 .ai-provider-symbol { display: grid; place-items: center; flex: 0 0 35px; height: 35px; color: #5d7df7; background: var(--surface); border-radius: 10px; font-size: 19px; }
 .ai-provider-info { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 0; }
-.ai-provider-info > strong { color: var(--text); font-size: 13px; }
+.ai-provider-info > strong { color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
 .ai-provider-info > span { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 .ai-provider-info .ant-tag { font-size: 10px; line-height: 17px; margin: 0; }
 .ai-provider-actions { display: flex; gap: 6px; flex-wrap: wrap; }

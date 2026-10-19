@@ -40,6 +40,17 @@ func TestAITaskIdempotencyOwnershipAndSingleActiveTarget(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+	for _, change := range []func(*AITask){
+		func(task *AITask) { task.ServerID = uuid.New() },
+		func(task *AITask) { task.ProviderID = uuid.New() },
+		func(task *AITask) { task.Prompt = "changed task" },
+	} {
+		changed := task
+		change(&changed)
+		if err := CreateAITask(ctx, db, &changed); !errors.Is(err, ErrAIRequestConflict) {
+			t.Fatalf("request ID reused with different content: %v", err)
+		}
+	}
 	other := task
 	other.RequestID = uuid.New()
 	if err := CreateAITask(ctx, db, &other); !errors.Is(err, ErrAITaskLimit) {
@@ -193,5 +204,100 @@ func TestAITaskCancelWinsFinishAndFollowupIsIdempotent(t *testing.T) {
 	var count int
 	if err = db.QueryRow(`SELECT COUNT(*) FROM ai_events WHERE task_id=$1 AND kind='user'`, second.ID).Scan(&count); err != nil || count != 2 {
 		t.Fatal(count, err)
+	}
+}
+
+func TestAITaskFollowupDigestRejectsDifferentContentAndKeepsLegacyRetriesReadOnly(t *testing.T) {
+	db := testdb.Open(t)
+	user, server, _ := testdb.Seed(t, db)
+	foreign, _, _ := testdb.Seed(t, db)
+	ctx := context.Background()
+	task := seedAITask(t, db, user, server)
+	claimed, err := ClaimAITask(ctx, db, "followup-worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = FinishAITask(ctx, db, task.ID, claimed.WorkerID, "completed", ""); err != nil {
+		t.Fatal(err)
+	}
+	request := uuid.New()
+	if _, err = ContinueAITask(ctx, db, task.ID, user, request, "inspect version"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = ContinueAITask(ctx, db, task.ID, user, request, "restart instead"); !errors.Is(err, ErrAIRequestConflict) {
+		t.Fatal("changed content reused accepted ID", err)
+	}
+	if _, accepted, err := FindAITaskMessageRequest(ctx, db, task.ID, user, request, "restart instead"); !accepted || !errors.Is(err, ErrAIRequestConflict) {
+		t.Fatal("preflight missed conflicting body", accepted, err)
+	}
+	if got, accepted, err := FindAITaskMessageRequest(ctx, db, task.ID, user, request, "inspect version"); err != nil || !accepted || got.ID != task.ID {
+		t.Fatal(got.ID, accepted, err)
+	}
+	if _, _, err := FindAITaskMessageRequest(ctx, db, task.ID, foreign, request, "inspect version"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatal("foreign retry disclosed task", err)
+	}
+	var digest string
+	if err := db.QueryRow(`SELECT message_hash FROM ai_task_messages WHERE task_id=$1 AND request_id=$2`, task.ID, request).Scan(&digest); err != nil || len(digest) != 64 || digest == "inspect version" {
+		t.Fatal("message digest missing", digest, err)
+	}
+	if _, err := CancelAITask(ctx, db, task.ID, user); err != nil {
+		t.Fatal(err)
+	}
+	legacy := uuid.New()
+	if _, err := db.Exec(`INSERT INTO ai_task_messages(task_id,request_id) VALUES($1,$2)`, task.ID, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if got, accepted, err := FindAITaskMessageRequest(ctx, db, task.ID, user, legacy, "unverifiable old message"); err != nil || !accepted || got.Status != "canceled" {
+		t.Fatal("legacy accepted retry was not read-only", got.Status, accepted, err)
+	}
+	if got, err := ContinueAITask(ctx, db, task.ID, user, legacy, "another old message"); err != nil || got.Status != "canceled" {
+		t.Fatal("legacy retry requeued canceled task", got.Status, err)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM ai_events WHERE task_id=$1 AND kind='user'`, task.ID).Scan(&count); err != nil || count != 2 {
+		t.Fatal("retry appended a user message", count, err)
+	}
+}
+
+func TestAITaskConcurrentFollowupIDCannotAcceptTwoBodies(t *testing.T) {
+	db := testdb.Open(t)
+	user, server, _ := testdb.Seed(t, db)
+	ctx := context.Background()
+	task := seedAITask(t, db, user, server)
+	claimed, err := ClaimAITask(ctx, db, "followup-worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = FinishAITask(ctx, db, task.ID, claimed.WorkerID, "completed", ""); err != nil {
+		t.Fatal(err)
+	}
+	request := uuid.New()
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for _, message := range []string{"first body", "different body"} {
+		go func(message string) {
+			<-start
+			_, err := ContinueAITask(ctx, db, task.ID, user, request, message)
+			results <- err
+		}(message)
+	}
+	close(start)
+	success, conflict := 0, 0
+	for range 2 {
+		err := <-results
+		if err == nil {
+			success++
+		} else if errors.Is(err, ErrAIRequestConflict) {
+			conflict++
+		} else {
+			t.Fatal(err)
+		}
+	}
+	if success != 1 || conflict != 1 {
+		t.Fatal("both bodies were accepted", success, conflict)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM ai_events WHERE task_id=$1 AND kind='user'`, task.ID).Scan(&count); err != nil || count != 2 {
+		t.Fatal("concurrent retry appended more than one message", count, err)
 	}
 }

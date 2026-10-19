@@ -121,7 +121,7 @@ func aiPackageCommand(platform string, args aiPackages) (string, error) {
 			if args.Manager == "winget" {
 				commands = append(commands, "& winget install --id "+aiPSLiteral(name)+" --exact --silent --accept-package-agreements --accept-source-agreements --disable-interactivity; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }")
 			} else {
-				commands = append(commands, "& choco install "+aiPSLiteral(name)+" --yes --no-progress; if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) { exit $LASTEXITCODE }")
+				commands = append(commands, "& choco install "+aiPSLiteral(name)+" --yes --no-progress; if ($LASTEXITCODE -eq 3010) { Write-Output 'Installation succeeded; a reboot is required and was not started.'; $global:LASTEXITCODE=0 } elseif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }")
 			}
 		}
 		return strings.Join(commands, "; "), nil
@@ -129,7 +129,10 @@ func aiPackageCommand(platform string, args aiPackages) (string, error) {
 	prefix, refresh := "", ""
 	switch args.Manager {
 	case "apt":
-		prefix = "env DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-remove --"
+		// apt-get otherwise falls back to substring regular expressions when a
+		// name containing '.' or '+' is missing. Only explicit anchored patterns
+		// are allowed by this fixed option, and our package grammar rejects them.
+		prefix = "env DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-remove -o APT::Cmd::Pattern-Only=true --"
 		refresh = "apt-get update"
 	case "dnf":
 		prefix = "dnf install --assumeyes --"
@@ -334,11 +337,18 @@ func aiSecretPath(filename string) bool {
 	lower := strings.ToLower(strings.ReplaceAll(filename, "\\", "/"))
 	base := path.Base(lower)
 	for _, part := range strings.Split(lower, "/") {
-		if part == ".ssh" || part == ".aws" || part == ".azure" || part == ".kube" || part == ".gnupg" || part == ".config" || part == ".credentials" || part == "secrets" || part == "private" {
+		if part == ".ssh" || part == ".aws" || part == ".azure" || part == ".kube" || part == ".gnupg" || part == ".config" || part == ".credentials" || part == ".docker" || part == ".password-store" || part == "secrets" || part == "private" {
 			return true
 		}
 	}
-	if base == ".env" || strings.HasPrefix(base, ".env.") || strings.HasSuffix(base, ".env") || base == "shadow" || base == "gshadow" || base == "sam" || base == "security" || base == "ntds.dit" || base == ".netrc" || base == ".pgpass" || base == ".my.cnf" || base == "credentials" || base == "credentials.json" || base == "kubeconfig" || base == "id_rsa" || base == "id_ed25519" || base == "id_ecdsa" || base == "id_dsa" || strings.HasSuffix(base, "history") || strings.HasSuffix(base, "history.txt") || lower == "/etc/environment" {
+	// Credential-store backups are as sensitive as the original. In
+	// particular shadow- is created by the normal account-management tools.
+	for _, sensitive := range []string{"shadow", "gshadow", "opasswd", "sam", "security", "ntds.dit", ".netrc", ".pgpass", ".my.cnf", ".git-credentials", ".npmrc", ".dockercfg", "credentials", "credentials.json", "kubeconfig", "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa"} {
+		if base == sensitive || strings.HasPrefix(base, sensitive+".") || strings.HasPrefix(base, sensitive+"-") || strings.HasPrefix(base, sensitive+"~") {
+			return true
+		}
+	}
+	if base == ".env" || strings.HasPrefix(base, ".env.") || strings.HasSuffix(base, ".env") || strings.HasSuffix(base, "history") || strings.HasSuffix(base, "history.txt") || lower == "/etc/environment" {
 		return true
 	}
 	for _, suffix := range []string{".key", ".pem", ".p12", ".pfx", ".jks", ".kdbx", ".keytab"} {
@@ -383,7 +393,7 @@ func aiSecurityOrStartupPath(filename string) bool {
 	return strings.HasPrefix(base, ".bash") || strings.HasPrefix(base, ".zsh") || base == ".profile" || base == "authorized_keys" || strings.Contains(base, "compose") || base == "dockerfile" || base == "makefile"
 }
 
-var aiSecretContent = regexp.MustCompile(`(?im)(-----BEGIN [A-Z ]*PRIVATE KEY-----|(?:password|passwd|api[_-]?key|access[_-]?token|secret(?:[_-]?access)?[_-]?key|client[_-]?secret|bot[_-]?token|authorization|secret|token)["']?\s*[:=]\s*["']?[^\s"';},]{3,}|\bAKIA[A-Z0-9]{16}\b|\bgh[pousr]_[A-Za-z0-9_]{20,}|https?://[^/\s:@]+:[^/\s@]+@|\b(?:Bearer|Basic)\s+[A-Za-z0-9+/=_-]{8,})`)
+var aiSecretContent = regexp.MustCompile(`(?im)(-----BEGIN [A-Z ]*PRIVATE KEY-----|(?:password|passwd|api[_-]?key|access[_-]?token|secret(?:[_-]?access)?[_-]?key|client[_-]?secret|bot[_-]?token|authorization|secret|token)["']?\s*[:=]\s*["']?[^\s"';},]{1,}|["']auth["']\s*:\s*["'][A-Za-z0-9+/=_-]{4,}["']|\bAKIA[A-Z0-9]{16}\b|\bgh[pousr]_[A-Za-z0-9_]{20,}|https?://[^/\s:@]+:[^/\s@]+@|\b(?:Bearer|Basic)\s+[A-Za-z0-9+/=_-]{8,})`)
 
 func aiContainsSecrets(content string) bool { return aiSecretContent.MatchString(content) }
 
@@ -403,27 +413,49 @@ func aiSafeConfiguration(filename, content, platform string) bool {
 	// aimed at /etc/shadow is destructive despite being a familiar directive.
 	quote := rune(0)
 	comment := false
+	depth, directives := 0, 0
 	segment := strings.Builder{}
-	check := func() bool {
+	check := func(boundary rune) bool {
 		line := strings.TrimSpace(segment.String())
 		segment.Reset()
+		if boundary == '}' {
+			depth--
+			return line == "" && depth >= 0
+		}
 		if line == "" {
-			return true
+			return false
 		}
 		words := strings.Fields(line)
 		name := words[0]
 		if !allowed[name] {
 			return false
 		}
+		if boundary == '{' {
+			depth++
+			switch name {
+			case "events", "http", "stream", "server":
+				return len(words) == 1
+			case "location", "upstream":
+				return len(words) >= 2
+			default:
+				return false
+			}
+		}
+		if name == "events" || name == "http" || name == "stream" || name == "location" || name == "upstream" {
+			return false
+		}
+		directives++
 		if len(words) < 2 {
-			return name == "events" || name == "http" || name == "stream" || name == "server"
+			return false
 		}
 		value := words[1]
 		switch name {
 		case "root":
-			return value == "/var/www" || strings.HasPrefix(value, "/var/www/") || value == "/srv/www" || strings.HasPrefix(value, "/srv/www/") || value == "/usr/share/nginx/html" || strings.HasPrefix(value, "/usr/share/nginx/html/")
+			return aiStaticConfigPath(value, "/var/www", true) || aiStaticConfigPath(value, "/srv/www", true) || aiStaticConfigPath(value, "/usr/share/nginx/html", true)
 		case "access_log", "error_log":
-			return value == "off" || value == "stderr" || strings.HasPrefix(value, "/var/log/nginx/")
+			return value == "off" || value == "stderr" || aiStaticConfigPath(value, "/var/log/nginx", false)
+		case "listen":
+			return !strings.HasPrefix(value, "unix:") && !strings.ContainsAny(value, "/$")
 		case "pid":
 			return value == "/run/nginx.pid" || value == "/var/run/nginx.pid"
 		case "include":
@@ -461,7 +493,7 @@ func aiSafeConfiguration(filename, content, platform string) bool {
 			continue
 		}
 		if r == ';' || r == '{' || r == '}' {
-			if !check() {
+			if !check(r) {
 				return false
 			}
 			continue
@@ -471,5 +503,12 @@ func aiSafeConfiguration(filename, content, platform string) bool {
 	if strings.Contains(content, "../") || strings.Contains(content, "$(") {
 		return false
 	}
-	return quote == 0 && strings.TrimSpace(segment.String()) == ""
+	return quote == 0 && depth == 0 && directives > 0 && strings.TrimSpace(segment.String()) == ""
+}
+
+func aiStaticConfigPath(value, directory string, allowDirectory bool) bool {
+	if strings.ContainsAny(value, "$\"'\\") || path.Clean(value) != value {
+		return false
+	}
+	return allowDirectory && value == directory || strings.HasPrefix(value, directory+"/")
 }

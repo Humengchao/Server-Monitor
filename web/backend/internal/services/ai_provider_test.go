@@ -354,3 +354,118 @@ func TestAIProviderRevalidatesDNSBetweenRequestsAndVerifiesTLS(t *testing.T) {
 		}
 	})
 }
+
+func TestAIProviderCancellationStopsInFlightDial(t *testing.T) {
+	client := NewAIClient(false)
+	client.lookupIP = func(context.Context, string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("93.184.216.34")}, nil
+	}
+	started, exited, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	defer close(release)
+	client.dialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		close(started)
+		defer close(exited)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-release:
+			return nil, errors.New("fixture released")
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.Complete(ctx, aiTestProvider(), []AIMessage{{Role: "user", Content: "test"}}, nil)
+		done <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("dial did not start")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatal("request cancellation was lost", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("request did not stop")
+	}
+	select {
+	case <-exited:
+	case <-time.After(time.Second):
+		t.Fatal("HTTP returned but its detached dial kept running after cancellation")
+	}
+}
+
+func TestAIProviderRejectsDuplicateProtocolFields(t *testing.T) {
+	for _, body := range []string{
+		strings.Replace(aiToolCompletion, `"finish_reason":"tool_calls"`, `"finish_reason":"length","finish_reason":"tool_calls"`, 1),
+		strings.Replace(aiToolCompletion, `"finish_reason":"tool_calls"`, `"FINISH_REASON":"length","finish_reason":"tool_calls"`, 1),
+		strings.Replace(aiToolCompletion, `"finish_reason":"tool_calls"`, `"finiſh_reason":"length","finish_reason":"tool_calls"`, 1),
+		strings.Replace(aiToolCompletion, `"type":"function"`, `"type":"untrusted","type":"function"`, 1),
+		strings.Replace(aiToolCompletion, `"name":"inspect_host"`, `"name":"other","name":"inspect_host"`, 1),
+		strings.Replace(aiToolCompletion, `"arguments":"{\"server\":\"one\"}"`, `"arguments":"{\"server\":\"one\",\"server\":\"two\"}"`, 1),
+	} {
+		if _, err := parseAICompletion([]byte(body), map[string]bool{"inspect_host": true}); err == nil {
+			t.Fatalf("ambiguous executable response accepted: %s", body)
+		}
+	}
+}
+
+func TestAIProviderCancellationClosesConnectionDuringTLSHandshake(t *testing.T) {
+	client := NewAIClient(false)
+	client.lookupIP = func(context.Context, string) ([]net.IP, error) { return []net.IP{net.ParseIP("93.184.216.34")}, nil }
+	local, remote := net.Pipe()
+	defer local.Close()
+	defer remote.Close()
+	connected := make(chan struct{})
+	closed := make(chan struct{})
+	client.dialContext = func(context.Context, string, string) (net.Conn, error) { close(connected); return local, nil }
+	// Read the ClientHello but never send a ServerHello. Closing the request
+	// must close this socket, not leave a detached 10-second TLS handshake.
+	go func() { _, _ = io.Copy(io.Discard, remote); close(closed) }()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.Complete(ctx, aiTestProvider(), []AIMessage{{Role: "user", Content: "test"}}, nil)
+		done <- err
+	}()
+	select {
+	case <-connected:
+	case <-time.After(time.Second):
+		t.Fatal("connection was not acquired")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("request did not cancel")
+	}
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("canceled TLS handshake retained its socket")
+	}
+}
+
+func TestAIProviderRejectsUnpersistableOrDeepProtocolJSON(t *testing.T) {
+	for _, body := range []string{
+		strings.Replace(aiStopped, `"content":"OK"`, `"content":"line\u0000break"`, 1),
+		strings.Replace(aiToolCompletion, `"reasoning_content":"continuation-private-state"`, `"reasoning_content":"\u0000"`, 1),
+		strings.Replace(aiStopped, `"choices":`, `"extra":`+strings.Repeat(`[`, 34)+`0`+strings.Repeat(`]`, 34)+`,"choices":`, 1),
+	} {
+		if _, err := parseAICompletion([]byte(body), map[string]bool{"inspect_host": true}); err == nil {
+			t.Fatalf("unpersistable response accepted: %s", body)
+		}
+	}
+	if !validAIProtocolObject([]byte(`{"choices":[],"metadata":{"key":"value"},"text":"the word choices is data"}`), 1024) {
+		t.Fatal("ordinary nested protocol JSON rejected")
+	}
+}

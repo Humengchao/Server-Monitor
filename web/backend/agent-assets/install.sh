@@ -73,6 +73,7 @@ changing=false
 had_binary=false
 had_unit=false
 had_config=false
+enrolled=false
 was_enabled=false
 was_active=false
 restore_file() {
@@ -95,14 +96,20 @@ cleanup() {
     if ! $was_enabled; then systemctl disable "$service.service" 2>/dev/null || true; fi
     restore_file "$binary" "$scratch/binary.previous" "$had_binary" || restored=false
     restore_file "$unit" "$scratch/unit.previous" "$had_unit" || restored=false
-    restore_file "$config" "$scratch/config.previous" "$had_config" || restored=false
+    # A successful registration has already revoked the old token on the
+    # panel. Rolling that identity back locally would strand the old binary.
+    if ! $enrolled; then restore_file "$config" "$scratch/config.previous" "$had_config" || restored=false; fi
     systemctl daemon-reload || restored=false
     if $was_enabled; then systemctl enable "$service.service" || restored=false; fi
     if $was_active && $had_binary && $had_unit; then
       systemctl restart "$service.service" || echo 'Previous files restored, but the old service could not be restarted.' >&2
     fi
     if $restored; then
-      echo 'Installation failed; previous executable, unit and configuration were restored.' >&2
+      if $enrolled; then
+        echo 'Installation failed; previous executable and unit were restored. The newly enrolled configuration was retained because the old identity has been revoked. Retry installation with a new enrollment command or restore the executable using the retained configuration.' >&2
+      else
+        echo 'Installation failed; previous executable, unit and configuration were restored.' >&2
+      fi
     else
       echo "Rollback could not restore every file. Protected backup files remain in $scratch" >&2
     fi
@@ -150,6 +157,7 @@ if [[ $action == install || $action == reenroll ]]; then
   fi
   [[ -n $ticket ]] || { echo 'Enrollment ticket is required' >&2; exit 2; }
   printf '%s\n' "$ticket" | "$scratch/agent" enroll --server-url "$server_url" --ticket-stdin --config "$config" "${enroll_flags[@]}"
+  enrolled=true
   unset ticket
   chown "$run_user" "$config_dir" "$config"
   chmod 600 "$config"

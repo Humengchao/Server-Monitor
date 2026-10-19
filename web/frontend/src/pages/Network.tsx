@@ -16,6 +16,7 @@ export default function Network() {
   const { t } = useTranslation('networkLogs');
   const { message } = App.useApp();
   const [params] = useSearchParams();
+  const target = params.get('server') || '';
   const [checks, setChecks] = useState<NetworkCheck[]>([]);
   const [servers, setServers] = useState<Server[]>([]);
   const [error, setError] = useState(false);
@@ -23,9 +24,12 @@ export default function Network() {
   const [editing, setEditing] = useState<NetworkCheck | 'new' | null>(null);
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const [selected, setSelected] = useState<string[]>([]);
+  const [selection, setSelection] = useState<{ target: string; ids: string[] } | null>(null);
+  const selected = useMemo(() => selection?.target === target ? selection.ids : [], [selection, target]);
   const [hours, setHours] = useState(1);
-  const [history, setHistory] = useState<Record<string, NetworkHistory>>({});
+  const historyKey = JSON.stringify([target, selected, hours]);
+  const [historyResult, setHistoryResult] = useState<{ key: string; data: Record<string, NetworkHistory> } | null>(null);
+  const history = useMemo(() => historyResult?.key === historyKey ? historyResult.data : {}, [historyResult, historyKey]);
   const [historyError, setHistoryError] = useState(false);
   const [form] = Form.useForm<NetworkCheckInput>();
   const request = useRef<AbortController | null>(null);
@@ -38,10 +42,11 @@ export default function Network() {
       const [list, hosts] = await Promise.all([networkApi.list(controller.signal), serversApi.list(controller.signal)]);
       if (controller.signal.aborted) return;
       setChecks(list.data || []); setServers(hosts.data || []); setError(false);
-      setSelected(current => current.length ? current.filter(id => list.data.some(item => item.id === id)) : list.data.filter(item => !params.get('server') || item.target_server_id === params.get('server')).slice(0, 4).map(item => item.id));
+      setSelection(current => ({ target, ids: current?.target === target ? current.ids.filter(id => list.data.some(item => item.id === id))
+        : list.data.filter(item => !target || item.target_server_id === target).slice(0, 4).map(item => item.id) }));
     } catch { if (!controller.signal.aborted) setError(true); }
     finally { if (request.current === controller) { request.current = null; if (!controller.signal.aborted) setLoading(false); } }
-  }, [params]);
+  }, [target]);
   useEffect(() => {
     mounted.current = true; const timer = window.setTimeout(() => { void load(); }, 0);
     const active = actions.current;
@@ -51,15 +56,15 @@ export default function Network() {
   useEffect(() => {
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
-      setHistory({}); setHistoryError(false);
+      setHistoryResult(null); setHistoryError(false);
       const until = new Date(), since = new Date(until.getTime() - hours * 3600000);
       try {
         const results = await Promise.all(selected.map(async id => [id, (await networkApi.history(id, since.toISOString(), until.toISOString(), controller.signal)).data] as const));
-        if (!controller.signal.aborted) setHistory(Object.fromEntries(results));
+        if (!controller.signal.aborted) setHistoryResult({ key: historyKey, data: Object.fromEntries(results) });
       } catch { if (!controller.signal.aborted) setHistoryError(true); }
     }, 0);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [selected, hours, checks]);
+  }, [selected, hours, checks, historyKey]);
   const serverName = (id: string | null) => id ? servers.find(server => server.id === id)?.name || id : t('local');
   const paused = (check: NetworkCheck) => !check.enabled || servers.some(server =>
     (server.id === check.target_server_id || server.id === check.source_server_id)
@@ -108,7 +113,7 @@ export default function Network() {
       { title: t('time'), render: (_, check) => check.latest ? new Date(check.latest.recorded_at).toLocaleTimeString() : '—' },
       { title: '', render: (_, check) => <Space><Button size="small" disabled={paused(check) || !!busy} loading={busy === check.id} onClick={() => { void run(check.id); }}>{t('run')}</Button><Button size="small" onClick={() => open(check)}>{t('edit')}</Button><Popconfirm title={t('confirm')} onConfirm={async () => { try { await networkApi.delete(check.id); await load(); } catch { message.error(t('failed')); } }}><Button size="small" danger>{t('remove')}</Button></Popconfirm></Space> },
     ]} /></Card>
-    <Card title={t('compare')} style={{ marginTop: 20 }}><Space wrap><Select mode="multiple" maxCount={4} aria-label={t('chooseChecks')} placeholder={t('chooseChecks')} value={selected} onChange={setSelected} style={{ minWidth: 300, maxWidth: '100%' }} options={checks.map(check => ({ value: check.id, label: `${check.name} · ${serverName(check.source_server_id)}` }))} /><Select value={hours} onChange={setHours} options={[{ value: 1, label: t('hour') }, { value: 24, label: t('day') }, { value: 168, label: t('week') }]} /></Space>
+    <Card title={t('compare')} style={{ marginTop: 20 }}><Space wrap><Select mode="multiple" maxCount={4} aria-label={t('chooseChecks')} placeholder={t('chooseChecks')} value={selected} onChange={ids => setSelection({ target, ids })} style={{ minWidth: 300, maxWidth: '100%' }} options={checks.map(check => ({ value: check.id, label: `${check.name} · ${serverName(check.source_server_id)}` }))} /><Select value={hours} onChange={setHours} options={[{ value: 1, label: t('hour') }, { value: 24, label: t('day') }, { value: 168, label: t('week') }]} /></Space>
       <Typography.Paragraph type="secondary">{t('historyHint')}</Typography.Paragraph>
       {historyError && <Alert type="warning" title={t('failed')} />}
       {Object.values(history).some(value => value.truncated) && <Alert type="info" title={t('partialHistory')} />}

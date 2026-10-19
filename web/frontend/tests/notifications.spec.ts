@@ -40,6 +40,35 @@ test('editing a channel leaves saved secrets blank and preserves them on save', 
   expect(errors).toEqual([]);
 });
 
+for (const action of ['delete', 'resend'] as const) {
+  test(`leaving notifications dismisses a pending ${action} confirmation without sending it`, async ({ page }) => {
+    const errors = await setup(page);
+    const writes: string[] = [];
+    await page.route('**/api/**', route => {
+      const request = route.request(), path = new URL(request.url()).pathname;
+      if (request.method() !== 'GET') { writes.push(path); return route.fulfill({ status: 204 }); }
+      if (path === '/api/notifications/channels') return route.fulfill({ json: [initial] });
+      if (path === '/api/notifications/deliveries') return route.fulfill({ json: { deliveries: [{ id: 1, channel_id: initial.id, channel_name: initial.name, status: 'failed', attempts: 1, created_at: initial.created_at }] } });
+      if (path === '/api/alerts/summary') return route.fulfill({ json: { active: 0 } });
+      return route.fulfill({ json: [] });
+    });
+    await page.goto('/notifications');
+    if (action === 'resend') {
+      await page.getByRole('tab', { name: 'Delivery history', exact: true }).click();
+      await page.getByRole('button', { name: 'Resend', exact: true }).click();
+    } else await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.evaluate(() => {
+      window.history.pushState({}, '', '/credentials');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    await expect(page).toHaveURL(/credentials$/);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    expect(writes).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+}
+
 test('test delivery shows errors and manual resend requires explicit duplicate warning', async ({ page }) => {
   const errors = await setup(page); let deliveries: NotificationDelivery[] = []; let retries = 0; let tests = 0;
   await page.route('**/api/**', async route => {

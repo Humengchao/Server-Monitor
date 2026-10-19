@@ -2,8 +2,10 @@ package models
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -14,6 +16,7 @@ import (
 
 var ErrAITaskConflict = errors.New("task state changed; refresh before continuing")
 var ErrAITaskLimit = errors.New("finish or cancel the active task on this server first; at most two active tasks per account")
+var ErrAIRequestConflict = errors.New("this request ID was already used with different content; use a new request ID")
 
 type AITask struct {
 	ID                  uuid.UUID       `json:"id"`
@@ -94,6 +97,9 @@ func CreateAITask(ctx context.Context, db *sql.DB, t *AITask) error {
 	}
 	previous, err := scanAITask(tx.QueryRowContext(ctx, `SELECT `+aiTaskColumns+` FROM ai_tasks WHERE user_id=$1 AND request_id=$2`, t.UserID, t.RequestID))
 	if err == nil {
+		if previous.ServerID != t.ServerID || previous.ProviderID != t.ProviderID || previous.Prompt != t.Prompt {
+			return ErrAIRequestConflict
+		}
 		*t = previous
 		return nil
 	}
@@ -297,6 +303,33 @@ func DecideAIAction(ctx context.Context, db *sql.DB, id, action, user uuid.UUID,
 	return GetAITask(ctx, db, id, user)
 }
 
+func aiFollowupHash(message string) string {
+	digest := sha256.Sum256([]byte(message))
+	return hex.EncodeToString(digest[:])
+}
+
+// FindAITaskMessageRequest verifies ownership first. Already accepted retries
+// must succeed even if a provider was since disabled/deleted or a host changed:
+// they only return existing state, never resume or start another action.
+func FindAITaskMessageRequest(ctx context.Context, db *sql.DB, id, user, request uuid.UUID, message string) (AITask, bool, error) {
+	task, err := GetAITask(ctx, db, id, user)
+	if err != nil {
+		return AITask{}, false, err
+	}
+	var digest string
+	err = db.QueryRowContext(ctx, `SELECT message_hash FROM ai_task_messages WHERE task_id=$1 AND request_id=$2`, id, request).Scan(&digest)
+	if errors.Is(err, sql.ErrNoRows) {
+		return task, false, nil
+	}
+	if err != nil {
+		return AITask{}, false, err
+	}
+	if digest != "" && digest != aiFollowupHash(message) {
+		return AITask{}, true, ErrAIRequestConflict
+	}
+	return task, true, nil
+}
+
 // Follow-ups carry a separate idempotency key and cannot alter a pending action.
 func ContinueAITask(ctx context.Context, db *sql.DB, id, user, request uuid.UUID, message string) (AITask, error) {
 	tx, err := db.BeginTx(ctx, nil)
@@ -312,12 +345,16 @@ func ContinueAITask(ctx context.Context, db *sql.DB, id, user, request uuid.UUID
 	if err != nil {
 		return t, err
 	}
-	var exists bool
-	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM ai_task_messages WHERE task_id=$1 AND request_id=$2)`, id, request).Scan(&exists); err != nil {
-		return t, err
-	}
-	if exists {
+	var digest string
+	err = tx.QueryRowContext(ctx, `SELECT message_hash FROM ai_task_messages WHERE task_id=$1 AND request_id=$2`, id, request).Scan(&digest)
+	if err == nil {
+		if digest != "" && digest != aiFollowupHash(message) {
+			return t, ErrAIRequestConflict
+		}
 		return t, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return t, err
 	}
 	if t.Status != "completed" && t.Status != "awaiting_input" {
 		return t, ErrAITaskConflict
@@ -332,6 +369,7 @@ func ContinueAITask(ctx context.Context, db *sql.DB, id, user, request uuid.UUID
 	if active >= 2 {
 		return t, ErrAITaskLimit
 	}
+	var exists bool
 	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM ai_tasks WHERE id<>$1 AND server_id=$2 AND status IN ('queued','running','awaiting_approval','awaiting_input','cancel_requested'))`, id, t.ServerID).Scan(&exists); err != nil {
 		return t, err
 	}
@@ -345,7 +383,7 @@ func ContinueAITask(ctx context.Context, db *sql.DB, id, user, request uuid.UUID
 	if _, err = tx.ExecContext(ctx, `UPDATE ai_tasks SET messages=messages||jsonb_build_array($2::jsonb),status='queued',error='',updated_at=NOW() WHERE id=$1`, id, string(msg)); err != nil {
 		return t, err
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO ai_task_messages(task_id,request_id) VALUES($1,$2)`, id, request); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO ai_task_messages(task_id,request_id,message_hash) VALUES($1,$2,$3)`, id, request, aiFollowupHash(message)); err != nil {
 		return t, err
 	}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO ai_events(task_id,kind,content) VALUES($1,'user',$2)`, id, message); err != nil {

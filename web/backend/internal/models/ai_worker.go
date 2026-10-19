@@ -35,6 +35,16 @@ func lockAIWorker(ctx context.Context, tx *sql.Tx, id uuid.UUID, worker string) 
 	return tx.QueryRowContext(ctx, `SELECT id FROM ai_tasks WHERE id=$1 AND worker_id=$2 AND status='running' AND lease_until>NOW() FOR UPDATE`, id, worker).Scan(&owned)
 }
 func SaveAIConversation(ctx context.Context, db *sql.DB, id uuid.UUID, worker string, messages json.RawMessage, content string, promptTokens, completionTokens int64) error {
+	return saveAIConversation(ctx, db, id, worker, messages, content, promptTokens, completionTokens, 1)
+}
+
+// A validation reply belongs to the model step already recorded. Saving it
+// must not consume another step or charge the same provider usage twice.
+func SaveAIValidationReply(ctx context.Context, db *sql.DB, id uuid.UUID, worker string, messages json.RawMessage) error {
+	return saveAIConversation(ctx, db, id, worker, messages, "", 0, 0, 0)
+}
+
+func saveAIConversation(ctx context.Context, db *sql.DB, id uuid.UUID, worker string, messages json.RawMessage, content string, promptTokens, completionTokens int64, steps int) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -43,7 +53,7 @@ func SaveAIConversation(ctx context.Context, db *sql.DB, id uuid.UUID, worker st
 	if err = lockAIWorker(ctx, tx, id, worker); err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE ai_tasks SET messages=$3,steps=steps+1,prompt_tokens=prompt_tokens+$4,completion_tokens=completion_tokens+$5,updated_at=NOW() WHERE id=$1 AND worker_id=$2`, id, worker, []byte(messages), promptTokens, completionTokens)
+	_, err = tx.ExecContext(ctx, `UPDATE ai_tasks SET messages=$3,steps=steps+$6,prompt_tokens=prompt_tokens+$4,completion_tokens=completion_tokens+$5,updated_at=NOW() WHERE id=$1 AND worker_id=$2`, id, worker, []byte(messages), promptTokens, completionTokens, steps)
 	if err != nil {
 		return err
 	}

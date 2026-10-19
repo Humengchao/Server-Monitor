@@ -564,3 +564,34 @@ func TestPinnedSSHHandshakeChecksActualDataChannelKey(t *testing.T) {
 		t.Fatalf("unexpected handshake failure: %v", err)
 	}
 }
+
+func TestPinnedDialAlsoRequiresTheReviewedRuntimeAccountAndOS(t *testing.T) {
+	f := newTunnel(t)
+	f.hub.mu.Lock()
+	hello := f.hub.controls[f.id].hello
+	f.hub.mu.Unlock()
+	for _, runtime := range []struct{ username, platform string }{
+		{"different-service-account", hello.OS},
+		{hello.Username, map[string]string{"linux": "windows", "windows": "linux"}[hello.OS]},
+		{"", hello.OS},
+		{hello.Username, ""},
+	} {
+		ctx := WithExpectedIdentity(context.Background(), hello.HostKey, runtime.username, runtime.platform)
+		client, _, err := f.hub.Dial(ctx, f.id)
+		if client != nil {
+			client.Close()
+		}
+		if !errors.Is(err, ErrAgentIdentityChanged) {
+			t.Fatalf("accepted changed runtime %q/%q: %v", runtime.username, runtime.platform, err)
+		}
+	}
+	ctx := WithExpectedIdentity(context.Background(), hello.HostKey, hello.Username, hello.OS)
+	client, _, err := f.hub.Dial(ctx, f.id)
+	if err != nil {
+		t.Fatal("exact reviewed runtime did not connect", err)
+	}
+	defer client.Close()
+	if _, _, err := client.SendRequest("keepalive@openssh.com", true, nil); err != nil {
+		t.Fatal("runtime pin did not preserve the real SSH path", err)
+	}
+}

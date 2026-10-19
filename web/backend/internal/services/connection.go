@@ -46,7 +46,7 @@ func DialServer(ctx context.Context, s *models.Server) (*ssh.Client, net.Conn, e
 			return nil, nil, errors.New("agent connection unavailable")
 		}
 		if s.AgentHostKey != "" {
-			ctx = agenttransport.WithExpectedHostKey(ctx, s.AgentHostKey)
+			ctx = agenttransport.WithExpectedIdentity(ctx, s.AgentHostKey, s.SSHUsername, s.ServerType)
 		}
 		return dial(ctx, s.ID)
 	}

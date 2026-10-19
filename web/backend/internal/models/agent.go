@@ -143,7 +143,19 @@ func GetAgentHostKey(ctx context.Context, db *sql.DB, id, userID uuid.UUID) (str
 }
 
 func TouchAgent(ctx context.Context, db *sql.DB, id uuid.UUID, hello agenttransport.Hello) error {
-	result, err := db.ExecContext(ctx, `UPDATE server_agents SET last_seen_at=NOW(),version=$2,hostname=$3,os=$4,arch=$5,run_user=$6 WHERE server_id=$1 AND host_key=$7`,
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// Follow the enrollment/revocation lock order, and update both snapshots
+	// atomically. Enrollment may run as an administrator while the actual
+	// service runs as LocalSystem or a dedicated Unix account.
+	var owned uuid.UUID
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM servers WHERE id=$1 AND connection_mode='agent' FOR UPDATE`, id).Scan(&owned); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE server_agents SET last_seen_at=NOW(),version=$2,hostname=$3,os=$4,arch=$5,run_user=$6 WHERE server_id=$1 AND host_key=$7`,
 		id, hello.Version, hello.Hostname, hello.OS, hello.Arch, hello.Username, hello.HostKey)
 	if err != nil {
 		return err
@@ -155,7 +167,10 @@ func TouchAgent(ctx context.Context, db *sql.DB, id uuid.UUID, hello agenttransp
 	if rows == 0 {
 		return sql.ErrNoRows
 	}
-	return nil
+	if _, err := tx.ExecContext(ctx, `UPDATE servers SET server_type=$2,ssh_username=$3 WHERE id=$1`, id, hello.OS, hello.Username); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 type AgentStatus struct {

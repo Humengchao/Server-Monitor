@@ -35,7 +35,17 @@ export default function Notifications() {
   const tlsMode = Form.useWatch(['config', 'tls_mode'], form);
   const request = useRef<AbortController | null>(null);
   const mounted = useRef(false);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; request.current?.abort(); }; }, []);
+  const confirmations = useRef(new Set<ReturnType<typeof modal.confirm>>());
+  const confirm = (options: Parameters<typeof modal.confirm>[0]) => {
+    if (!mounted.current) return;
+    const instance = modal.confirm({ ...options, afterClose: () => { confirmations.current.delete(instance); options.afterClose?.(); } });
+    confirmations.current.add(instance);
+  };
+  useEffect(() => {
+    mounted.current = true;
+    const pending = confirmations.current;
+    return () => { mounted.current = false; request.current?.abort(); for (const instance of pending) instance.destroy(); pending.clear(); };
+  }, []);
   const load = useCallback(async () => {
     if (!mounted.current || busyRef.current) return;
     request.current?.abort(); const controller = new AbortController(); request.current = controller; setLoading(true);
@@ -53,7 +63,7 @@ export default function Notifications() {
   usePolling(load, 10000, { leading: false });
 
   const mutate = async (action: () => Promise<unknown>, success?: string) => {
-    if (busyRef.current) return false;
+    if (!mounted.current || busyRef.current) return false;
     busyRef.current = true; setBusy(true); request.current?.abort();
     try { await action(); if (mounted.current && success) message.success(success); return true; }
     catch (error) { if (mounted.current) message.error(errorText(error, t('failed'))); return false; }
@@ -78,7 +88,7 @@ export default function Notifications() {
   const rowActions = (channel: NotificationChannel) => <Space>
     <Button size="small" icon={<ExperimentOutlined />} disabled={busy || !channel.enabled} onClick={() => void mutate(() => notificationsApi.test(channel.id), t('testQueued'))}>{t('test')}</Button>
     <Button size="small" aria-label={t('edit')} icon={<EditOutlined />} disabled={busy} onClick={() => edit(channel)} />
-    <Button size="small" danger aria-label={t('remove')} icon={<DeleteOutlined />} disabled={busy} onClick={() => modal.confirm({
+    <Button size="small" danger aria-label={t('remove')} icon={<DeleteOutlined />} disabled={busy} onClick={() => confirm({
       title: t('remove'), content: t('deleteConfirm'), okButtonProps: { danger: true },
       onOk: async () => { if (!await mutate(() => notificationsApi.remove(channel.id), t('deleted'))) throw new Error('delete failed'); },
     })} />
@@ -120,7 +130,7 @@ export default function Notifications() {
             { title: t('lastAttempt'), render: (_, row) => valueTime(row.last_attempt_at) },
             { title: t('nextAttempt'), render: (_, row) => valueTime(row.next_attempt_at) },
             { title: t('error'), dataIndex: 'last_error', width: 240 },
-            { title: '', render: (_, row) => <Button size="small" disabled={busy || !row.channel_id || row.status === 'sending'} onClick={() => modal.confirm({
+            { title: '', render: (_, row) => <Button size="small" disabled={busy || !row.channel_id || row.status === 'sending'} onClick={() => confirm({
               title: t('resendTitle'), content: t('resendConfirm'), okText: t('resend'), onOk: async () => {
                 if (!await mutate(() => notificationsApi.retry(row.id), t('resendQueued'))) throw new Error('retry failed');
               },

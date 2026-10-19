@@ -103,6 +103,150 @@ test('a lost submission response retries the same request id without producing a
   expect(state.errors).toEqual([]);
 });
 
+test('changing the server URL inside the workspace submits only to the newly selected server', async ({ page }) => {
+  const state = await setup(page);
+  await page.goto('/ai?server=server-one');
+  await expect(page.getByText('Task content and command results from Production web will be sent to My DeepSeek.', { exact: true })).toBeVisible();
+  await page.evaluate(() => {
+    window.history.pushState({}, '', '/ai?server=server-two');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  await expect(page.getByText('Task content and command results from Staging web will be sent to My DeepSeek.', { exact: true })).toBeVisible();
+  await page.getByRole('textbox', { name: 'Task instructions' }).fill('Inspect the staging configuration');
+  await page.getByRole('button', { name: 'Start task', exact: true }).click();
+  await expect.poll(() => state.writes.find(item => item.path === '/api/ai/tasks')?.body.server_id).toBe('server-two');
+  expect(state.errors).toEqual([]);
+});
+
+test('a lost response stays with its original submission when browser navigation switches tasks', async ({ page }) => {
+  const state = await setup(page);
+  state.providers.push({ ...provider, id: 'provider-two', name: 'Other provider' });
+  state.holdCreate = true;
+  await page.goto('/ai?server=server-one');
+  await page.getByRole('textbox', { name: 'Task instructions' }).fill('Install Nginx on production');
+  await page.getByRole('button', { name: 'Start task', exact: true }).click();
+  await expect.poll(() => !!state.held).toBe(true);
+  const submitted = state.writes.find(item => item.path === '/api/ai/tasks')!.body;
+  await page.evaluate(() => {
+    window.history.pushState({}, '', '/ai?task=history-one');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  await expect(page).toHaveURL(/task=history-one/);
+  await state.held!.abort('failed');
+  await expect(page.getByText('The requested service is configured.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Retry same submission', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('textbox', { name: 'Task instructions' })).toBeEnabled();
+  await page.getByRole('button', { name: 'New task', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Retry same submission', exact: true })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Task instructions' })).toHaveValue('Install Nginx on production');
+  await page.evaluate(() => {
+    window.history.pushState({}, '', '/ai?server=server-two');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  await page.getByRole('combobox', { name: 'AI provider', exact: true }).click();
+  await page.getByTitle('Other provider · deepseek-flash', { exact: true }).click();
+  await page.evaluate(() => {
+    window.history.pushState({}, '', '/ai?server=server-one');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  await expect(page.getByText('Task content and command results from Production web will be sent to My DeepSeek.', { exact: true })).toBeVisible();
+  state.holdCreate = false;
+  await page.getByRole('button', { name: 'Retry same submission', exact: true }).click();
+  await expect(page).toHaveURL(/task=created-one/);
+  const attempts = state.writes.filter(item => item.path === '/api/ai/tasks');
+  expect(attempts).toHaveLength(2);
+  expect(attempts[1].body).toEqual(submitted);
+  expect(state.errors).toEqual([]);
+});
+
+test('a delayed creation response cannot redirect a newer server selection', async ({ page }) => {
+  const state = await setup(page);
+  state.holdCreate = true;
+  await page.goto('/ai?server=server-one');
+  await page.getByRole('textbox', { name: 'Task instructions' }).fill('Inspect production');
+  await page.getByRole('button', { name: 'Start task', exact: true }).click();
+  await expect.poll(() => !!state.held).toBe(true);
+  await page.evaluate(() => {
+    window.history.pushState({}, '', '/ai?server=server-two');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  await expect(page.getByText('Task content and command results from Staging web will be sent to My DeepSeek.', { exact: true })).toBeVisible();
+  await state.held!.fulfill({ status: 202, json: task('late-production-task', 'queued') });
+  await expect(page.getByRole('textbox', { name: 'Task instructions' })).toBeEnabled();
+  await expect(page).toHaveURL(/server=server-two/);
+  await expect(page.getByRole('textbox', { name: 'Task instructions' })).toHaveValue('Inspect production');
+  expect(state.errors).toEqual([]);
+});
+
+test('recovering a completed follow-up refreshes its events without waiting for active-task polling', async ({ page }) => {
+  const state = await setup(page);
+  const submissions: Record<string, unknown>[] = [];
+  await page.route('**/api/ai/tasks/history-one/messages', route => {
+    submissions.push(route.request().postDataJSON());
+    const detail = state.details.get('history-one')!;
+    if (submissions.length === 1) {
+      detail.events.push({ id: 2, kind: 'assistant', content: 'The follow-up has already finished.', created_at: new Date(observedAt + 1000).toISOString() });
+      return route.abort('failed');
+    }
+    return route.fulfill({ status: 202, json: detail.task });
+  });
+  await page.goto('/ai?task=history-one');
+  await page.getByRole('textbox', { name: 'Task instructions' }).fill('Check the completed result');
+  await page.getByRole('button', { name: 'Send follow-up', exact: true }).click();
+  await page.getByRole('button', { name: 'Retry same submission', exact: true }).click();
+  await expect(page.getByText('The follow-up has already finished.', { exact: true })).toBeVisible();
+  expect(submissions).toHaveLength(2);
+  expect(submissions[0]).toEqual(submissions[1]);
+  expect(state.errors).toEqual([]);
+});
+
+test('a stale task read cannot overwrite a follow-up that is now running', async ({ page }) => {
+  const state = await setup(page);
+  await page.goto('/ai?task=history-one');
+  await expect(page.getByRole('textbox', { name: 'Task instructions' })).toBeVisible();
+  const stale = structuredClone(state.details.get('history-one')!);
+  state.holdRead = 'history-one';
+  await page.locator('.ai-task-header').getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect.poll(() => !!state.held).toBe(true);
+  const oldRead = state.held!;
+  const settled = new Promise<void>(resolve => {
+    const done = (request: import('@playwright/test').Request) => { if (request === oldRead.request()) resolve(); };
+    page.on('requestfinished', done); page.on('requestfailed', done);
+  });
+  state.holdRead = '';
+  await page.getByRole('textbox', { name: 'Task instructions' }).fill('Inspect the configuration');
+  await page.getByRole('button', { name: 'Send follow-up', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Cancel task', exact: true })).toBeVisible();
+  await oldRead.fulfill({ json: stale });
+  await settled;
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await expect(page.getByRole('textbox', { name: 'Task instructions' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Cancel task', exact: true })).toBeVisible();
+  expect(state.errors).toEqual([]);
+});
+
+test('disabling the selected provider never silently routes an existing draft to another provider', async ({ page }) => {
+  const state = await setup(page);
+  state.providers.push({ ...provider, id: 'provider-two', name: 'Other provider' });
+  await page.goto('/ai?server=server-one');
+  await page.getByRole('textbox', { name: 'Task instructions' }).fill('Inspect confidential configuration');
+  await page.getByRole('button', { name: 'Providers', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'Edit: My DeepSeek', exact: true }).click();
+  await dialog.getByRole('switch', { name: 'Enabled', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Save provider', exact: true }).click();
+  await expect.poll(() => state.providers[0].enabled).toBe(false);
+  await expect(dialog.getByRole('button', { name: 'Add provider' })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Start task', exact: true })).toBeDisabled();
+  await expect(page.getByRole('textbox', { name: 'Task instructions' })).toHaveValue('Inspect confidential configuration');
+  await page.getByRole('combobox', { name: 'AI provider', exact: true }).click();
+  await page.getByTitle('Other provider · deepseek-flash', { exact: true }).click();
+  await page.getByRole('button', { name: 'Start task', exact: true }).click();
+  await expect.poll(() => state.writes.find(item => item.path === '/api/ai/tasks')?.body.provider_id).toBe('provider-two');
+  expect(state.errors).toEqual([]);
+});
+
 for (const decision of ['approve', 'reject'] as const) {
   test(`a high-risk action can only ${decision} its saved command after exact-action confirmation`, async ({ page }) => {
     const state = await setup(page);

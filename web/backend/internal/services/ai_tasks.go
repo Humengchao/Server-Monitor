@@ -22,6 +22,9 @@ import (
 const aiMaxSteps = 24
 const aiConversationLimit = 256 * 1024
 
+var ErrAISecretInput = errors.New("Task text contains credentials. Remove passwords, API keys and private keys before submitting.")
+var ErrAIAgentNotEnrolled = errors.New("enroll the Agent before starting an AI task")
+
 func AITargetFingerprint(s *models.Server) string {
 	raw, _ := json.Marshal([]any{s.ID, s.UserID, s.ConnectionMode, s.ServerType, s.Host, s.Port, s.SSHUsername, s.SSHPassword, s.SSHKey, s.SSHHostKey, s.CredentialID, s.AgentHostKey})
 	sum := sha256.Sum256(raw)
@@ -197,36 +200,50 @@ func aiKnownSecret(s string, server *models.Server, p models.AIProvider) bool {
 		}
 		return aiContainsSecrets(value)
 	}
-	if contains(s) {
-		return true
-	}
-	// JSON escapes quotes, backslashes and control characters; inspect decoded
-	// values as well so the serialized spelling cannot hide a known credential.
-	var value any
-	if json.Unmarshal([]byte(s), &value) != nil {
-		return false
-	}
-	var walk func(any) bool
-	walk = func(item any) bool {
-		switch node := item.(type) {
-		case string:
-			return contains(node)
-		case []any:
-			for _, child := range node {
-				if walk(child) {
+	// File-tool output wraps file content in JSON, and that file may itself be
+	// JSON. Scan tokens rather than a map so duplicate keys cannot discard a
+	// secret. Decode nested JSON text as well, with explicit work/depth bounds.
+	remaining := 8 * len(s)
+	var walk func(string, int) bool
+	walk = func(value string, depth int) bool {
+		if contains(value) {
+			return true
+		}
+		value = strings.TrimSpace(value)
+		if value == "" || !strings.ContainsRune(`{["`, rune(value[0])) {
+			return false
+		}
+		if depth >= 8 || len(value) > remaining {
+			// Fail closed for opaque, repeatedly encoded content.
+			return true
+		}
+		remaining -= len(value)
+		decoder := json.NewDecoder(strings.NewReader(value))
+		decoder.UseNumber()
+		nesting := 0
+		for {
+			token, err := decoder.Token()
+			if err != nil {
+				return false
+			}
+			switch token := token.(type) {
+			case string:
+				if walk(token, depth+1) {
 					return true
 				}
-			}
-		case map[string]any:
-			for key, child := range node {
-				if contains(key) || walk(child) {
-					return true
+			case json.Delim:
+				if token == '{' || token == '[' {
+					nesting++
+					if nesting > 32 {
+						return true
+					}
+				} else {
+					nesting--
 				}
 			}
 		}
-		return false
 	}
-	return walk(value)
+	return walk(s, 0)
 }
 
 func redactAIText(s string, server *models.Server, p models.AIProvider) string {
@@ -236,7 +253,14 @@ func redactAIText(s string, server *models.Server, p models.AIProvider) string {
 		}
 	}
 	// Find every private block, including one after a harmless certificate.
-	return aiPrivateKeyBlock.ReplaceAllString(s, "[redacted private key]")
+	s = aiPrivateKeyBlock.ReplaceAllString(s, "[redacted private key]")
+	// File tools return JSON; escaped quotes, backslashes or Unicode may hide
+	// the literal spelling of a configured credential. Refuse any remaining
+	// decoded secret rather than forwarding or persisting the encoded value.
+	if aiKnownSecret(s, server, p) {
+		return "[redacted credential-like content]"
+	}
+	return s
 }
 func marshalAIConversation(messages []AIMessage) (json.RawMessage, error) {
 	raw, err := json.Marshal(messages)
@@ -327,10 +351,9 @@ func (w *AITaskWorker) process(ctx context.Context, t *models.AITask) error {
 			if err != nil {
 				return err
 			}
-			if err = models.SaveAIConversation(ctx, w.db.Raw, t.ID, t.WorkerID, raw, "", 0, 0); err != nil {
+			if err = models.SaveAIValidationReply(ctx, w.db.Raw, t.ID, t.WorkerID, raw); err != nil {
 				return errors.New("Could not record rejected tool arguments.")
 			}
-			t.Steps++
 			continue
 		}
 		stored := models.AIAction{CallID: call.ID, ToolName: action.ToolName, Arguments: action.Arguments, Summary: action.Summary, Command: action.Command, RequiresApproval: action.RequiresApproval, RiskReason: action.RiskReason, Mutating: action.Mutating}
@@ -388,9 +411,15 @@ func (w *AITaskWorker) executeAction(ctx context.Context, t models.AITask, serve
 	}
 	toolResult, _ := json.Marshal(map[string]any{"status": a.Status, "output": boundedAIText(a.Output, 24*1024), "error": a.Error, "exit_code": a.ExitCode, "truncated": a.Truncated || len(a.Output) > 24*1024, "unknown": a.Unknown, "backup_path": a.BackupPath})
 	*messages = append(*messages, AIMessage{Role: "tool", ToolCallID: a.CallID, Content: string(toolResult)})
-	raw, err := marshalAIConversation(*messages)
-	if err != nil {
-		return err
+	raw, conversationErr := marshalAIConversation(*messages)
+	if conversationErr != nil {
+		// The command has already finished: preserve its actual result even if
+		// the model context has no room left. The task will stop after saving,
+		// and the complete output remains available in its action history.
+		raw, err = json.Marshal((*messages)[:len(*messages)-1])
+		if err != nil {
+			return errors.New("Could not encode the AI conversation.")
+		}
 	}
 	saveCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -400,12 +429,15 @@ func (w *AITaskWorker) executeAction(ctx context.Context, t models.AITask, serve
 	if a.Unknown {
 		return errors.New("Remote completion is unknown. Inspect the server before starting another task.")
 	}
-	return nil
+	return conversationErr
 }
 
 // CreateAITask validates scope before the worker can ever see a queued task.
 func (w *AITaskWorker) Create(ctx context.Context, user, serverID, providerID, request uuid.UUID, prompt string) (models.AITask, error) {
 	if previous, err := models.FindAITaskRequest(ctx, w.db.Raw, user, request); err == nil {
+		if previous.ServerID != serverID || previous.ProviderID != providerID || previous.Prompt != prompt {
+			return models.AITask{}, models.ErrAIRequestConflict
+		}
 		return previous, nil
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return models.AITask{}, err
@@ -421,13 +453,34 @@ func (w *AITaskWorker) Create(ctx context.Context, user, serverID, providerID, r
 	if !p.Enabled {
 		return models.AITask{}, models.ErrAIProviderDisabled
 	}
+	if aiKnownSecret(prompt, server, p) {
+		return models.AITask{}, ErrAISecretInput
+	}
 	if server.ConnectionMode == "agent" {
 		server.AgentHostKey, err = models.GetAgentHostKey(ctx, w.db.Raw, serverID, user)
 		if err != nil {
-			return models.AITask{}, fmt.Errorf("enroll the Agent before starting an AI task")
+			return models.AITask{}, ErrAIAgentNotEnrolled
 		}
 	}
 	task := models.AITask{UserID: user, ServerID: server.ID, ServerName: server.Name, ServerType: server.ServerType, ProviderID: p.ID, ProviderName: p.Name, Model: p.Model, RequestID: request, Prompt: prompt, TargetFingerprint: AITargetFingerprint(server), ProviderFingerprint: AIProviderFingerprint(p), Messages: InitialAITaskMessages(server, prompt)}
 	err = models.CreateAITask(ctx, w.db.Raw, &task)
 	return task, err
+}
+
+func (w *AITaskWorker) Continue(ctx context.Context, user, id, request uuid.UUID, message string) (models.AITask, error) {
+	task, accepted, err := models.FindAITaskMessageRequest(ctx, w.db.Raw, id, user, request, message)
+	if err != nil {
+		return models.AITask{}, err
+	}
+	if accepted {
+		return task, nil
+	}
+	server, provider, err := w.loadBound(ctx, task)
+	if err != nil {
+		return models.AITask{}, fmt.Errorf("%w: %s", models.ErrAITaskConflict, err.Error())
+	}
+	if aiKnownSecret(message, server, provider) {
+		return models.AITask{}, ErrAISecretInput
+	}
+	return models.ContinueAITask(ctx, w.db.Raw, id, user, request, message)
 }

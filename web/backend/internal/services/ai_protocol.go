@@ -1,5 +1,93 @@
 package services
 
+import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"strings"
+	"unicode"
+	"unicode/utf8"
+)
+
+// encoding/json normally accepts duplicate keys, with the later value winning.
+// Executable completions must not reinterpret a truncated finish_reason or
+// tool name that way. Match keys case-insensitively as Go's struct decoder does.
+// Reject NUL as well: PostgreSQL JSONB cannot persist it in a conversation.
+func validAIProtocolObject(raw []byte, limit int) bool {
+	if len(raw) == 0 || len(raw) > limit || !utf8.Valid(raw) {
+		return false
+	}
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return false
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var readValue func(int) bool
+	readValue = func(depth int) bool {
+		if depth > 32 {
+			return false
+		}
+		token, err := decoder.Token()
+		if err != nil {
+			return false
+		}
+		if value, ok := token.(string); ok {
+			return !strings.ContainsRune(value, 0)
+		}
+		delimiter, ok := token.(json.Delim)
+		if !ok {
+			return true
+		}
+		switch delimiter {
+		case '{':
+			seen := map[string]bool{}
+			for decoder.More() {
+				token, err := decoder.Token()
+				key, ok := token.(string)
+				if err != nil || !ok || strings.ContainsRune(key, 0) {
+					return false
+				}
+				key = strings.Map(func(r rune) rune {
+					// EqualFold includes aliases such as long-s and Kelvin-sign,
+					// unlike ToLower alone. Pick the minimum rune in that cycle.
+					for {
+						next := unicode.SimpleFold(r)
+						if next <= r {
+							return next
+						}
+						r = next
+					}
+				}, key)
+				if seen[key] {
+					return false
+				}
+				seen[key] = true
+				if !readValue(depth + 1) {
+					return false
+				}
+			}
+			end, err := decoder.Token()
+			return err == nil && end == json.Delim('}')
+		case '[':
+			for decoder.More() {
+				if !readValue(depth + 1) {
+					return false
+				}
+			}
+			end, err := decoder.Token()
+			return err == nil && end == json.Delim(']')
+		default:
+			return false
+		}
+	}
+	if !readValue(0) {
+		return false
+	}
+	_, err := decoder.Token()
+	return err == io.EOF
+}
+
 // Chat-completions tool calling is shared by the provider adapter and task
 // worker. Model-provided arguments remain untrusted until PrepareAIAction.
 type AIMessage struct {
