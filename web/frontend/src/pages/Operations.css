@@ -10,6 +10,10 @@
 }
 .network-comparison-controls > .ant-select:first-child { width: min(460px, 100%); min-width: 0; }
 .network-comparison-controls > .ant-select:last-child { width: 160px; }
+.network-detail-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 12px; }
+.network-detail-controls > .ant-select { width: min(360px, 100%); min-width: 0; }
+.network-trend-tooltip { max-width: min(340px, 75vw); overflow-wrap: anywhere; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font-size: 12px; }
+.network-trend-tooltip > div { margin-top: 8px; }
 .logs-filter-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));

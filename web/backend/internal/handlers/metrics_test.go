@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -273,6 +274,35 @@ func TestMetricsRequestsCancelDatabaseWork(t *testing.T) {
 			}
 			if db.Stats().InUse != 0 {
 				t.Fatal("canceled request retained its database connection")
+			}
+		})
+	}
+}
+
+func TestMetricsHistoryRejectsMalformedOrUnboundedRanges(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	for _, test := range []struct {
+		name, since, until string
+	}{
+		{"bad since", "bad", ""},
+		{"bad until", "", "bad"},
+		{"equal", now.Format(time.RFC3339), now.Format(time.RFC3339)},
+		{"reversed", now.Format(time.RFC3339), now.Add(-time.Hour).Format(time.RFC3339)},
+		{"too wide", now.Add(-367 * 24 * time.Hour).Format(time.RFC3339), now.Format(time.RFC3339)},
+		{"future", "", now.Add(time.Hour).Format(time.RFC3339)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			router, _, path := metricsTestHandler(t, func(_ context.Context, statement string, _ []driver.NamedValue) (driver.Rows, error) {
+				if !strings.Contains(statement, "SELECT EXISTS") {
+					t.Fatal("invalid range reached metrics query")
+				}
+				return &metricsRows{columns: []string{"owned"}, values: [][]driver.Value{{true}}}, nil
+			})
+			query := url.Values{"since": {test.since}, "until": {test.until}}
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path+"?"+query.Encode(), nil))
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status %d: %s", response.Code, response.Body)
 			}
 		})
 	}

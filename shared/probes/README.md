@@ -52,6 +52,12 @@ A skipped section still emits its separator, so the section count never moves.
 
 ## `windows-metrics.ps1`
 
+CPU uses two cumulative counter readings. Counter resets and impossible idle
+deltas fall back to `Win32_Processor.LoadPercentage` only when every returned
+processor has a finite reading between 0 and 100. If neither source is valid,
+collection fails instead of reporting an invented zero or negative CPU value.
+Individual invalid core readings are omitted.
+
 Sent deflated (RFC 1951) and base64'd inside a self-extracting stub, then
 handed to `powershell -EncodedCommand`, which takes UTF-16LE base64. Two
 reasons, both load-bearing:

@@ -65,17 +65,26 @@ func (h *MetricsHandler) GetHistory(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
 		return
 	}
-	since := time.Now().Add(-1 * time.Hour)
-	if val := c.Query("since"); val != "" {
-		if t, err := time.Parse(time.RFC3339, val); err == nil {
-			since = t
+	now := time.Now()
+	until := now
+	if val := c.Query("until"); val != "" {
+		until, err = time.Parse(time.RFC3339Nano, val)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid until timestamp"})
+			return
 		}
 	}
-	until := time.Now()
-	if val := c.Query("until"); val != "" {
-		if t, err := time.Parse(time.RFC3339, val); err == nil {
-			until = t
+	since := until.Add(-time.Hour)
+	if val := c.Query("since"); val != "" {
+		since, err = time.Parse(time.RFC3339Nano, val)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid since timestamp"})
+			return
 		}
+	}
+	if !since.Before(until) || until.Sub(since) > models.MaxMetricHistoryWindow || until.After(now.Add(5*time.Minute)) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "history range must be positive, at most 366 days, and not in the future"})
+		return
 	}
 	points, err := models.GetMetrics(c.Request.Context(), db.Raw, id, since, until)
 	if err != nil {

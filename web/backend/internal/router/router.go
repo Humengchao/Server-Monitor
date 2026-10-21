@@ -158,6 +158,7 @@ func SetupFeatures(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCac
 		secured.DELETE("/network/checks/:check_id", networkH.Delete)
 		secured.POST("/network/checks/:check_id/run", middleware.RateLimit(12, time.Minute), networkH.Run)
 		secured.GET("/network/checks/:check_id/history", networkH.History)
+		secured.GET("/network/checks/:check_id/trend", networkH.Trend)
 	}
 	logsH := handlers.NewLogsHandler(sshCache)
 	secured.GET("/servers/:id/logs", logsH.Journal)

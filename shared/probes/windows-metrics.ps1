@@ -32,11 +32,30 @@ foreach ($b in $raw2) {
   if ($a) {
     $dt = [double]($b.Timestamp_Sys100NS - $a.Timestamp_Sys100NS)
     $di = [double]($b.PercentProcessorTime - $a.PercentProcessorTime)
-    if ($dt -gt 0) { $cpuPct[$b.Name] = [math]::Round((1 - ($di / $dt)) * 100, 1) }
+    # A reset or inconsistent idle delta is not a negative/over-100 CPU reading.
+    if ($dt -gt 0 -and $di -ge 0 -and $di -le $dt) { $cpuPct[$b.Name] = [math]::Round((1 - ($di / $dt)) * 100, 1) }
   }
 }
 $cpu = $cpuPct['_Total']
-if ($null -eq $cpu) { $cpu = (Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average }
+if ($null -eq $cpu) {
+  # Measure-Object turns a null property into zero. Validate every processor
+  # before averaging so an unavailable measurement cannot look like idle CPU.
+  $processors = @(Get-CimInstance Win32_Processor)
+  $validLoads = $processors.Count -gt 0
+  $loadSum = 0.0
+  foreach ($processor in $processors) {
+    $load = 0.0
+    if ($null -eq $processor.LoadPercentage -or
+        -not [double]::TryParse([string]$processor.LoadPercentage, [ref]$load) -or
+        [double]::IsNaN($load) -or [double]::IsInfinity($load) -or $load -lt 0 -or $load -gt 100) {
+      $validLoads = $false
+      break
+    }
+    $loadSum += $load
+  }
+  if ($validLoads) { $cpu = $loadSum / $processors.Count }
+}
+if ($null -eq $cpu -or [double]::IsNaN([double]$cpu) -or [double]::IsInfinity([double]$cpu) -or $cpu -lt 0 -or $cpu -gt 100) { throw 'CPU measurement unavailable' }
 $nics = Get-CimInstance Win32_PerfRawData_Tcpip_NetworkInterface
 $netrx = ($nics | Measure-Object -Property BytesReceivedPersec -Sum).Sum
 $nettx = ($nics | Measure-Object -Property BytesSentPersec -Sum).Sum

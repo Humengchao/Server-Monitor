@@ -9,15 +9,16 @@ import (
 	"net/http"
 	"server-monitor/internal/models"
 	"server-monitor/internal/services"
-	"strconv"
 	"strings"
-	"time"
 )
 
-type NetworkHandler struct{ monitor *services.NetworkMonitor }
+type NetworkHandler struct {
+	monitor      *services.NetworkMonitor
+	historyCache *networkTrendCache
+}
 
 func NewNetworkHandler(m *services.NetworkMonitor) *NetworkHandler {
-	return &NetworkHandler{monitor: m}
+	return &NetworkHandler{monitor: m, historyCache: newNetworkTrendCache()}
 }
 func networkDB(c *gin.Context) (*sql.DB, uuid.UUID) {
 	return c.MustGet("db").(*models.DB).Raw, c.MustGet("user_id").(uuid.UUID)
@@ -123,48 +124,4 @@ func (h *NetworkHandler) Run(c *gin.Context) {
 		return
 	}
 	c.JSON(200, sample)
-}
-func (h *NetworkHandler) History(c *gin.Context) {
-	id, ok := networkID(c)
-	if !ok {
-		return
-	}
-	db, user := networkDB(c)
-	since, until := time.Now().Add(-time.Hour), time.Now()
-	var err error
-	if v := c.Query("since"); v != "" {
-		since, err = time.Parse(time.RFC3339, v)
-		if err != nil {
-			c.JSON(400, gin.H{"error": "invalid since"})
-			return
-		}
-	}
-	if v := c.Query("until"); v != "" {
-		until, err = time.Parse(time.RFC3339, v)
-		if err != nil {
-			c.JSON(400, gin.H{"error": "invalid until"})
-			return
-		}
-	}
-	limit := 300
-	if v := c.Query("limit"); v != "" {
-		limit, err = strconv.Atoi(v)
-		if err != nil {
-			limit = 0
-		}
-	}
-	if limit < 1 || limit > 2000 || !since.Before(until) || until.Sub(since) > 7*24*time.Hour {
-		c.JSON(400, gin.H{"error": "history must span at most seven days; limit 1..2000"})
-		return
-	}
-	if _, err = models.GetNetworkCheck(c.Request.Context(), db, id, user); err != nil {
-		c.JSON(404, gin.H{"error": "check not found"})
-		return
-	}
-	samples, summary, err := models.NetworkHistory(c.Request.Context(), db, id, user, since, until, limit)
-	if err != nil {
-		c.JSON(500, gin.H{"error": "failed to read history"})
-		return
-	}
-	c.JSON(200, gin.H{"samples": samples, "summary": summary, "truncated": summary.KnownSamples+summary.UnknownSamples > len(samples)})
 }

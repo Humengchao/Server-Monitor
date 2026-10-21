@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"os/exec"
 	"strconv"
@@ -650,13 +651,23 @@ func (c *Collector) collectOne(s *models.Server, fingerprint [32]byte) (*models.
 func (c *Collector) applyRates(serverID uuid.UUID, m *models.MetricPoint, netRx, netTx, diskRx, diskTx int64) {
 	now := m.RecordedAt
 	c.mu.Lock()
-	if prev, ok := c.prev[serverID]; ok && prev.netRx <= netRx && prev.netTx <= netTx {
+	if prev, ok := c.prev[serverID]; ok {
 		elapsed := now.Sub(prev.time).Seconds()
 		if elapsed > 0 {
-			m.NetworkRxBytes = int64(float64(netRx-prev.netRx) / elapsed)
-			m.NetworkTxBytes = int64(float64(netTx-prev.netTx) / elapsed)
-			m.DiskRxBytes = int64(float64(diskRx-prev.diskRx) / elapsed)
-			m.DiskTxBytes = int64(float64(diskTx-prev.diskTx) / elapsed)
+			// Counters reset independently (e.g. a disk reattached while the NIC
+			// stays up). Rebase only that counter; never publish negative rates.
+			if prev.netRx >= 0 && netRx >= prev.netRx {
+				m.NetworkRxBytes = int64(float64(netRx-prev.netRx) / elapsed)
+			}
+			if prev.netTx >= 0 && netTx >= prev.netTx {
+				m.NetworkTxBytes = int64(float64(netTx-prev.netTx) / elapsed)
+			}
+			if prev.diskRx >= 0 && diskRx >= prev.diskRx {
+				m.DiskRxBytes = int64(float64(diskRx-prev.diskRx) / elapsed)
+			}
+			if prev.diskTx >= 0 && diskTx >= prev.diskTx {
+				m.DiskTxBytes = int64(float64(diskTx-prev.diskTx) / elapsed)
+			}
 		}
 	}
 	c.prev[serverID] = &prevStats{netRx: netRx, netTx: netTx, diskRx: diskRx, diskTx: diskTx, time: now}
@@ -820,6 +831,9 @@ func (c *Collector) collectLinux(client *ssh.Client, s *models.Server) (*models.
 
 	m := &models.MetricPoint{RecordedAt: time.Now()}
 	m.CPUPercent = cpuPercentFromSamples(sections[linuxSectionStatFirst], sections[linuxSectionStatSecond])
+	if !validCPUPercent(m.CPUPercent) {
+		return nil, fmt.Errorf("linux metrics: CPU counters unavailable")
+	}
 	m.Load1, m.Load5, m.Load15 = parseLoadAvg(sections[linuxSectionLoadAvg])
 	m.MemoryUsed, m.MemoryTotal = parseMemInfo(sections[linuxSectionMemInfo])
 
@@ -911,10 +925,14 @@ func cpuPercentFromSamples(first, second string) float64 {
 	idle2, total2 := parseProcStatCPU(second)
 	dIdle := idle2 - idle1
 	dTotal := total2 - total1
-	if dTotal > 0 {
+	if total1 > 0 && total2 > 0 && dTotal > 0 && dIdle >= 0 && dIdle <= dTotal {
 		return (1.0 - float64(dIdle)/float64(dTotal)) * 100
 	}
-	return 0
+	return math.NaN()
+}
+
+func validCPUPercent(cpu float64) bool {
+	return !math.IsNaN(cpu) && !math.IsInf(cpu, 0) && cpu >= 0 && cpu <= 100
 }
 
 func parseProcStatCPU(out string) (idle, total int64) {
@@ -926,7 +944,11 @@ func parseProcStatCPU(out string) (idle, total int64) {
 			}
 			var vals [8]int64
 			for i := 0; i < 8 && i < len(fields)-1; i++ {
-				vals[i], _ = strconv.ParseInt(fields[i+1], 10, 64)
+				value, err := strconv.ParseInt(fields[i+1], 10, 64)
+				if err != nil || value < 0 {
+					return 0, 0
+				}
+				vals[i] = value
 			}
 			idle = vals[3] + vals[4]
 			total = vals[0] + vals[1] + vals[2] + vals[3] + vals[4] + vals[5] + vals[6] + vals[7]
@@ -1176,8 +1198,12 @@ func (c *Collector) collectWindows(client *ssh.Client, s *models.Server) (*model
 		return nil, fmt.Errorf("windows metrics: no data in output %q", strings.TrimSpace(out))
 	}
 
+	cpu, present := vals["cpu"]
+	if !present || !validCPUPercent(float64(cpu)) {
+		return nil, fmt.Errorf("windows metrics: CPU measurement unavailable")
+	}
 	m := &models.MetricPoint{RecordedAt: time.Now()}
-	m.CPUPercent = float64(vals["cpu"])
+	m.CPUPercent = float64(cpu)
 	// TotalVisibleMemorySize / FreePhysicalMemory are in kB
 	m.MemoryTotal = vals["memtotal"] * 1024
 	m.MemoryUsed = (vals["memtotal"] - vals["memfree"]) * 1024

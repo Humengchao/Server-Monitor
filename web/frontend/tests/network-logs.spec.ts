@@ -2,6 +2,14 @@ import { test, expect } from '@playwright/test';
 import type { Page, Route } from '@playwright/test';
 import { host, observedAt } from './fixtures/fleet';
 import { incidentLogsURL } from '../src/utils/logs';
+import type { NetworkSummary } from '../src/api/network';
+
+function trend(route: Route, overrides: Partial<NetworkSummary> = {}) {
+  const range = new URL(route.request().url()).searchParams;
+  const since = range.get('since')!, until = range.get('until')!;
+  const summary = { sent: 5, received: 4, loss_percent: 20, avg_ms: 12, min_ms: 10, max_ms: 15, known_samples: 1, unknown_samples: 0, loss_samples: 1, down_samples: 0, threshold_exceeded_samples: 1, sample_count: 1, ...overrides };
+  return { buckets: [{ ...summary, recorded_at: since, until, status: 'loss' }], summary, since, until, bucket_seconds: 60 };
+}
 
 async function setup(page: Page) {
   const errors: string[] = [];
@@ -13,6 +21,7 @@ async function setup(page: Page) {
     if (path === '/api/alerts/summary') return route.fulfill({ json: { active: 0, servers: [] } });
     return route.fulfill({ json: [] });
   });
+  await page.route('**/api/network/checks/*/trend?**', route => route.fulfill({ json: trend(route) }));
   return errors;
 }
 const sample = { recorded_at: new Date(observedAt).toISOString(), status: 'loss', sent: 5, received: 4, loss_percent: 20, avg_ms: 12, min_ms: 10, max_ms: 15, mdev_ms: 2, threshold_exceeded: true };
@@ -22,6 +31,7 @@ test('network compares measured and unknown probes without turning failed execut
   const errors = await setup(page);
   await page.route('**/api/network/checks', route => route.fulfill({ json: [check, { ...check, id: 'check-two', name: 'Remote probe', source_server_id: 'source', latest: { ...sample, status: 'error', sent: null, received: null, loss_percent: null, avg_ms: null, mdev_ms: null, error_code: 'source_unreachable' } }] }));
   await page.route('**/api/network/checks/*/history?**', route => route.fulfill({ json: { samples: [sample], truncated: false, summary: { sent: 6, received: 5, loss_percent: 100 / 6, avg_ms: 12, known_samples: 2, unknown_samples: 1 } } }));
+  await page.route('**/api/network/checks/*/trend?**', route => route.fulfill({ json: trend(route, { sent: 6, received: 5, loss_percent: 100 / 6, known_samples: 2, unknown_samples: 1, sample_count: 3 }) }));
   await page.goto('/network');
   const local = page.getByRole('row').filter({ hasText: 'Local to target' }).first();
   await expect(local).toContainText('5 / 4');
@@ -57,13 +67,13 @@ test('changing a network target cancels old history and selects only checks for 
   const errors = await setup(page);
   let held: Route | undefined;
   await page.route('**/api/network/checks', route => route.fulfill({ json: [check, { ...check, id: 'check-two', name: 'Source target check', target_server_id: 'source' }] }));
-  await page.route('**/api/network/checks/*/history?**', route => {
+  await page.route('**/api/network/checks/*/trend?**', route => {
     if (route.request().url().includes('/check-one/')) { held = route; return; }
-    return route.fulfill({ json: { samples: [{ ...sample, avg_ms: 22 }], summary: { avg_ms: 22 }, truncated: false } });
+    return route.fulfill({ json: trend(route, { avg_ms: 22 }) });
   });
   await page.goto('/network?server=target');
   await expect.poll(() => !!held).toBe(true);
-  const aborted = page.waitForEvent('requestfailed', request => request.url().includes('/check-one/history'));
+  const aborted = page.waitForEvent('requestfailed', request => request.url().includes('/check-one/trend'));
   await page.evaluate(() => {
     window.history.pushState({}, '', '/network?server=source');
     window.dispatchEvent(new PopStateEvent('popstate'));
@@ -72,7 +82,7 @@ test('changing a network target cancels old history and selects only checks for 
   const selection = page.locator('.ant-select').filter({ has: page.getByRole('combobox', { name: 'Select up to four checks' }) });
   await expect(selection).toContainText('Source target check');
   await expect(selection).not.toContainText('Local to target');
-  await held!.fulfill({ json: { samples: [{ ...sample, avg_ms: 999 }], summary: { avg_ms: 999 }, truncated: false } });
+  await held!.fulfill({ json: trend(held!, { avg_ms: 999 }) });
   await expect(page.getByText('22.00 ms').first()).toBeVisible();
   await expect(page.getByText('999.00 ms')).toHaveCount(0);
   // An explicit empty comparison stays empty when the list refreshes.

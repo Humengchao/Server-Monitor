@@ -4,7 +4,7 @@ import { host, observedAt } from './fixtures/fleet';
 import { apiBaseURL, websocketURL } from '../src/utils/apiURL';
 import { apiError } from '../src/utils/apiError';
 import { networkChartRows } from '../src/utils/networkChart';
-import type { NetworkHistory } from '../src/api/network';
+import type { NetworkTrend } from '../src/api/network';
 
 async function setup(page: Page) {
   await page.addInitScript(() => {
@@ -138,13 +138,15 @@ test('collapsed Docker hosts load only inventory and acquire statistics when exp
   expect(stats[0]).toBe('/api/servers/docker-0/docker/stats');
 });
 
-test('minute comparisons retain the newest value, including an unknown result, in either API order', () => {
-  const at = '2026-10-20T00:00:';
-  for (const newestValue of [900, null]) for (const reversed of [false, true]) {
-    const samples = [{ recorded_at: at + '50Z', avg_ms: newestValue }, { recorded_at: at + '10Z', avg_ms: 10 }];
-    if (reversed) samples.reverse();
-    const rows = networkChartRows({ probe: { samples } as NetworkHistory });
-    expect(rows).toEqual([{ time: Date.parse(at + '00Z'), probe: newestValue }]);
+test('network comparisons preserve peaks, unknown attempts and empty gaps without fabricating RTT', () => {
+  const bucket = { recorded_at: '2026-10-20T00:00:00Z', avg_ms: 12, max_ms: 900, down_samples: 0, loss_samples: 1, unknown_samples: 0, threshold_exceeded_samples: 1 };
+  const buckets = [bucket, { ...bucket, recorded_at: '2026-10-20T00:01:00Z', avg_ms: null, max_ms: null, loss_samples: 0, threshold_exceeded_samples: 0, unknown_samples: 1 }, { ...bucket, recorded_at: '2026-10-20T00:02:00Z', avg_ms: null, max_ms: null, loss_samples: 0, threshold_exceeded_samples: 0 }];
+  for (const ordered of [buckets, [...buckets].reverse()]) {
+    const rows = networkChartRows({ probe: { buckets: ordered } as NetworkTrend });
+    expect(rows.map(row => row.values.probe)).toEqual([
+      { avg: 12, peak: 900, event: 12 }, { avg: null, peak: null, event: 0 }, { avg: null, peak: null, event: null },
+    ]);
+    expect(rows.map(row => row.time)).toEqual(buckets.map(item => Date.parse(item.recorded_at)));
   }
 });
 

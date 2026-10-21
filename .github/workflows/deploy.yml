@@ -81,6 +81,8 @@ jobs:
           }
           go vet ./cmd/agent ./internal/agenttransport
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test ./internal/services -run 'TestCPUCounter|TestWindowsCollectionDoesNot|TestCounterResets|TestWindowsProbeUses' -count=1 -timeout=120s
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $parseErrors = $null
           [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'agent-assets/install.ps1'), [ref]$null, [ref]$parseErrors) | Out-Null
           if ($parseErrors.Count) { $parseErrors | Write-Error; exit 1 }

@@ -38,7 +38,7 @@ const aiPanelFleetCTE = `WITH fleet AS (
  WHEN m.recorded_at IS NULL AND s.connection_mode='agent' AND NOT EXISTS(SELECT 1 FROM server_agents a WHERE a.server_id=s.id) THEN 'pending'
  WHEN m.recorded_at IS NULL OR m.recorded_at>$2::timestamptz+INTERVAL '30 seconds' THEN 'unknown'
  WHEN m.recorded_at<=$2::timestamptz-INTERVAL '120 seconds' THEN 'offline' ELSE 'fresh' END AS status,
- CASE WHEN m.cpu_percent>=0 THEN LEAST(m.cpu_percent,100) END AS cpu_percent,
+ CASE WHEN m.cpu_percent BETWEEN 0 AND 100 THEN m.cpu_percent END AS cpu_percent,
  CASE WHEN m.memory_used>=0 AND m.memory_total>0 THEN ROUND(LEAST(m.memory_used::numeric/m.memory_total*100,100),2) END AS memory_percent,
  CASE WHEN m.disk_used_bytes>=0 AND s.disk_total_bytes>0 THEN ROUND(LEAST(m.disk_used_bytes::numeric/s.disk_total_bytes*100,100),2) END AS disk_percent,
  CASE WHEN m.load_1>=0 THEN m.load_1 END AS load_1,
@@ -178,7 +178,7 @@ type AIPanelHistory struct {
 }
 
 func GetAIPanelHistory(ctx context.Context, db *sql.DB, userID, serverID uuid.UUID, now time.Time, window string, limit int) (AIPanelHistory, error) {
-	result := AIPanelHistory{ObservedAt: now, ServerID: serverID, Range: window, Points: []json.RawMessage{}, Notes: "Only observed buckets are returned; missing buckets mean no collected data, not zero usage or proven downtime. Averages are weighted by recorded sample count. History uses raw samples for 24 hours and one-minute rollups before that; rollup samples near the retention boundary may be unavailable. Disk percentages use current known disk capacity. This is monitoring history, not measured packet loss, jitter, or uptime availability."}
+	result := AIPanelHistory{ObservedAt: now, ServerID: serverID, Range: window, Points: []json.RawMessage{}, Notes: "Only observed buckets are returned; missing buckets mean no collected data, not zero usage or proven downtime. Averages are weighted by recorded sample count, excluding invalid CPU samples. Raw, one-minute and fifteen-minute tiers are selected by display resolution with finer data filling gaps and the recent tail. Partial edges beyond finer retention use the stored coarse average. Legacy fifteen-minute averages without surviving finer data retain their original approximation. Disk percentages use current known disk capacity. This is monitoring history, not measured packet loss, jitter, or uptime availability."}
 	durations := map[string]time.Duration{"1h": time.Hour, "24h": 24 * time.Hour, "7d": 7 * 24 * time.Hour}
 	duration, ok := durations[window]
 	if !ok || limit < 1 || limit > 120 || userID == uuid.Nil || serverID == uuid.Nil {
@@ -192,25 +192,21 @@ func GetAIPanelHistory(ctx context.Context, db *sql.DB, userID, serverID uuid.UU
 		return result, sql.ErrNoRows
 	}
 	result.Since = now.Add(-duration)
-	result.BucketSeconds = (int(duration.Seconds()) + limit - 1) / limit
-	result.ExpectedBuckets = (int(duration.Seconds()) + result.BucketSeconds - 1) / result.BucketSeconds
-	// Both branches repeat the ownership condition to remain scoped if a server
-	// is removed or transferred after the initial existence check.
-	query := `WITH source AS (
- SELECT m.recorded_at,m.cpu_percent,m.memory_used,m.memory_total,m.disk_used_bytes,s.disk_total_bytes,m.latency_ms,1::bigint AS samples
- FROM server_metrics m JOIN servers s ON s.id=m.server_id WHERE s.user_id=$1 AND s.id=$2 AND m.recorded_at>=$3 AND m.recorded_at<=$4 AND m.recorded_at>=$6
- UNION ALL
- SELECT m.recorded_at,m.cpu_percent,m.memory_used,m.memory_total,m.disk_used_bytes,s.disk_total_bytes,m.latency_ms,GREATEST(m.sample_count,1)::bigint
- FROM server_metrics_1m m JOIN servers s ON s.id=m.server_id WHERE s.user_id=$1 AND s.id=$2 AND m.recorded_at>=$3 AND m.recorded_at<=$4 AND m.recorded_at<$6
- ),bucketed AS (SELECT *,LEAST(FLOOR(EXTRACT(EPOCH FROM(recorded_at-$3::timestamptz))/$5)::int,$7-1) AS bucket FROM source)
- SELECT jsonb_build_object('bucket_start',$3::timestamptz+bucket*$5*INTERVAL '1 second','samples',SUM(samples),
+	result.BucketSeconds, result.ExpectedBuckets, err = metricHistoryBuckets(result.Since, now, limit)
+	if err != nil {
+		return result, err
+	}
+	// Recheck ownership in the data query to cover deletion/transfer between
+	// the initial existence check and this statement.
+	query := metricHistorySourceCTE + `
+ SELECT jsonb_build_object('bucket_start',$2::timestamptz+bucket*$4*INTERVAL '1 second','samples',SUM(samples),
  'first_sample_at',MIN(recorded_at),'last_sample_at',MAX(recorded_at),
- 'cpu_average_percent',ROUND(SUM(cpu_percent*samples) FILTER(WHERE cpu_percent>=0)/NULLIF(SUM(samples) FILTER(WHERE cpu_percent>=0),0),2),
+ 'cpu_average_percent',ROUND(SUM(cpu_percent*samples)/NULLIF(SUM(samples),0),2),
  'memory_average_percent',ROUND(SUM(LEAST(memory_used::numeric/NULLIF(memory_total,0)*100,100)*samples) FILTER(WHERE memory_used>=0 AND memory_total>0)/NULLIF(SUM(samples) FILTER(WHERE memory_used>=0 AND memory_total>0),0),2),
  'disk_average_percent',ROUND(SUM(LEAST(disk_used_bytes::numeric/NULLIF(disk_total_bytes,0)*100,100)*samples) FILTER(WHERE disk_used_bytes>=0 AND disk_total_bytes>0)/NULLIF(SUM(samples) FILTER(WHERE disk_used_bytes>=0 AND disk_total_bytes>0),0),2),
  'latency_average_ms',ROUND(SUM(latency_ms::numeric*samples) FILTER(WHERE latency_ms>=0)/NULLIF(SUM(samples) FILTER(WHERE latency_ms>=0),0),2))
- FROM bucketed GROUP BY bucket ORDER BY bucket`
-	result.Points, err = aiPanelReadRows(ctx, db, query, userID, serverID, result.Since, now, result.BucketSeconds, now.Add(-24*time.Hour), result.ExpectedBuckets)
+ FROM bucketed b JOIN servers s ON s.id=$1 AND s.user_id=$7 GROUP BY bucket ORDER BY bucket`
+	result.Points, err = aiPanelReadRows(ctx, db, query, serverID, result.Since, now, result.BucketSeconds, result.ExpectedBuckets, now, userID)
 	result.ObservedBuckets = len(result.Points)
 	result.MissingBuckets = result.ExpectedBuckets - result.ObservedBuckets
 	return result, err

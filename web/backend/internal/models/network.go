@@ -325,47 +325,25 @@ func networkNotificationMessage(check NetworkCheck, sample NetworkSample, transi
 }
 
 type NetworkSummary struct {
-	Sent           int      `json:"sent"`
-	Received       int      `json:"received"`
-	LossPercent    *float64 `json:"loss_percent"`
-	AvgMS          *float64 `json:"avg_ms"`
-	KnownSamples   int      `json:"known_samples"`
-	UnknownSamples int      `json:"unknown_samples"`
+	Sent                     int      `json:"sent"`
+	Received                 int      `json:"received"`
+	LossPercent              *float64 `json:"loss_percent"`
+	AvgMS                    *float64 `json:"avg_ms"`
+	KnownSamples             int      `json:"known_samples"`
+	UnknownSamples           int      `json:"unknown_samples"`
+	SampleCount              int      `json:"sample_count"`
+	LossSamples              int      `json:"loss_samples"`
+	DownSamples              int      `json:"down_samples"`
+	ThresholdExceededSamples int      `json:"threshold_exceeded_samples"`
+	MinMS                    *float64 `json:"min_ms"`
+	MaxMS                    *float64 `json:"max_ms"`
 }
 
 func NetworkHistory(ctx context.Context, db *sql.DB, id, user uuid.UUID, since, until time.Time, limit int) ([]NetworkSample, NetworkSummary, error) {
-	result := []NetworkSample{}
-	var summary NetworkSummary
-	rows, err := db.QueryContext(ctx, `SELECT s.sample FROM network_samples s JOIN network_checks c ON c.id=s.check_id WHERE c.id=$1 AND c.user_id=$2 AND s.recorded_at >= $3 AND s.recorded_at <= $4 ORDER BY s.recorded_at DESC,s.id DESC LIMIT $5`, id, user, since, until, limit)
+	trend, err := NetworkTrendHistory(ctx, db, id, user, since, until)
 	if err != nil {
-		return nil, summary, err
+		return nil, trend.Summary, err
 	}
-	for rows.Next() {
-		var body []byte
-		var sample NetworkSample
-		if err = rows.Scan(&body); err != nil {
-			rows.Close()
-			return nil, summary, err
-		}
-		if err = json.Unmarshal(body, &sample); err != nil {
-			rows.Close()
-			return nil, summary, err
-		}
-		result = append(result, sample)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return nil, summary, err
-	}
-	var avg sql.NullFloat64
-	err = db.QueryRowContext(ctx, `SELECT COALESCE(sum((sample->>'sent')::int),0),COALESCE(sum((sample->>'received')::int),0),count(*) FILTER(WHERE sample->>'sent' IS NOT NULL),count(*) FILTER(WHERE sample->>'sent' IS NULL),sum((sample->>'avg_ms')::float8*(sample->>'received')::int)/NULLIF(sum((sample->>'received')::int) FILTER(WHERE sample->>'avg_ms' IS NOT NULL),0) FROM network_samples s JOIN network_checks c ON c.id=s.check_id WHERE c.id=$1 AND c.user_id=$2 AND s.recorded_at >= $3 AND s.recorded_at <= $4`, id, user, since, until).Scan(&summary.Sent, &summary.Received, &summary.KnownSamples, &summary.UnknownSamples, &avg)
-	if summary.Sent > 0 {
-		loss := 100 * float64(summary.Sent-summary.Received) / float64(summary.Sent)
-		summary.LossPercent = &loss
-	}
-	if avg.Valid {
-		summary.AvgMS = &avg.Float64
-	}
-	return result, summary, err
+	samples, _, err := NetworkHistoryPage(ctx, db, id, user, since, until, limit, "")
+	return samples, trend.Summary, err
 }

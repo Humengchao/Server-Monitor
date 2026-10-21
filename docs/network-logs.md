@@ -12,8 +12,9 @@ reports `target_address_required` with unknown packet counts. This address is
 not required for the Agent to act as a probe source or for its management tunnel.
 
 `GET/POST /api/network/checks`, `PUT/DELETE /api/network/checks/:check_id`,
-`POST /api/network/checks/:check_id/run`, and
-`GET /api/network/checks/:check_id/history?since=...&until=...&limit=...` require
+`POST /api/network/checks/:check_id/run`,
+`GET /api/network/checks/:check_id/trend?since=...&until=...`, and
+`GET /api/network/checks/:check_id/history?since=...&until=...&limit=...&cursor=...` require
 authentication. A check contains `name`, nullable `source_server_id` (null means
 the panel), `target_server_id`, `packets` (1–10), `enabled`, `loss_threshold`
 (0–100%), and nullable `latency_threshold_ms`. Accounts can configure 100 checks;
@@ -27,13 +28,50 @@ packet counts and never manufacture 100% loss. BusyBox ping can provide min/mean
 max without deviation; in that case only `mdev_ms` remains null. The Windows
 source computes statistics from individual .NET Ping replies.
 
-History accepts at most seven days and 2,000 samples per response. Its `summary`
-covers the entire requested range, even when the returned plot samples are
-truncated. Loss is `(sum(sent)-sum(received))/sum(sent)`, and mean RTT is weighted
-by received packets. Failed/unknown samples are counted separately. Changing a
-check's source/target clears its incomparable history and rejects late samples
-from the old pair. Threshold transitions are passed to the shared notification
-queue; unknown samples do not announce recovery.
+Both history endpoints accept RFC3339 `since` and `until` timestamps spanning at
+most seven days. Their `summary` covers the entire requested range. Loss is
+`100 * (sum(sent)-sum(received))/sum(sent)`, and mean RTT is weighted by received
+packets. Failed/unknown samples are counted separately and never enter the loss
+denominator.
+
+The trend response is `{buckets,summary,since,until,bucket_seconds}`. It covers the
+complete requested interval in at most 500 buckets, including empty intervals.
+Buckets are at least one minute wide, matching the scheduled probe cadence; an
+hour uses 60 buckets and a seven-day range uses at most 500.
+Each bucket has `recorded_at`, `until`, and `status`, plus the same statistics as
+the summary: `sample_count`, `known_samples`, `unknown_samples`, `loss_samples`,
+`down_samples`, `threshold_exceeded_samples`, packet totals, loss percentage, and
+minimum/average/maximum RTT. A bucket's status reports the worst observed result
+(`down`, then `loss`, then `error`, then `ok`); an empty bucket has `status: "none"`,
+zero sample counts and null RTT/loss values. Counts preserve mixed outcomes even
+when a bucket also contains successful probes.
+
+The chart draws reply-weighted average RTT as a solid line and peak RTT as a
+dashed line. Small RTT dots keep isolated measurements visible; empty intervals
+remain gaps. Separate markers identify no replies (red), packet loss or threshold
+breaches (amber), and unknown attempts (gray). Hover details include peak RTT and
+all exception counts, so an average cannot hide a brief outage or latency spike.
+
+Raw history returns `{samples,summary,truncated,next_cursor}`, newest first. The
+API accepts `limit` from 1 to 2,000 (default 300); the panel requests 20 samples per
+page. `truncated` means an older page exists. Pass the opaque `next_cursor` back
+with the same check, `since`, and `until`; null means the last page. The cursor
+uses timestamp plus sample identity, so samples sharing a timestamp are neither
+skipped nor duplicated. It is navigation state, not an authorization credential;
+ownership is checked on every request.
+
+The browser refreshes the check list every 15 seconds but rereads trend history
+only when the selected checks, range, or selected checks' latest observations
+change. A separate visible-page timer checks once a minute whether the rolling
+window needs to advance when probes stop; background tabs pause these timers.
+Manual probes refresh their new result immediately. Switching targets or ranges
+cancels obsolete requests. Older raw pages keep their original time window even
+while the chart refreshes; returning to the first page resumes the latest window.
+The panel displays the raw page's actual start and end times.
+
+Changing a check's source/target clears its incomparable history and rejects late
+samples from the old pair. Threshold transitions are passed to the shared
+notification queue; unknown samples do not announce recovery.
 
 The panel runtime needs `ping` and permission to send ICMP. A missing utility or
 missing ICMP capability produces an explicit probe error. Linux commands follow
