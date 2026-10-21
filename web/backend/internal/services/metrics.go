@@ -587,7 +587,7 @@ func (c *Collector) dropClient(serverID uuid.UUID, pc *pooledClient) {
 
 func (c *Collector) collectOne(s *models.Server, fingerprint [32]byte) (*models.MetricPoint, error) {
 	pingLatency := make(chan int, 1)
-	go func() { pingLatency <- collectPingLatency(s.Host) }()
+	go func() { pingLatency <- collectPingLatency(c.stopContext, s.Host) }()
 
 	dialStarted := time.Now()
 	pc, err := c.getClient(s, fingerprint)
@@ -854,11 +854,19 @@ func (c *Collector) collectLinux(client *ssh.Client, s *models.Server) (*models.
 	return m, nil
 }
 
-func collectPingLatency(host string) int {
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+func collectPingLatency(parent context.Context, host string) int {
+	ctx, cancel := context.WithTimeout(parent, 4*time.Second)
 	defer cancel()
-	out, _ := exec.CommandContext(ctx, "ping", "-n", "-c", "3", "-W", "1", host).CombinedOutput()
+	out, _ := metricPingCommand(ctx, host).CombinedOutput()
 	return parsePingAverage(string(out))
+}
+
+func metricPingCommand(ctx context.Context, host string) *exec.Cmd {
+	// Keep three observations per sample, but do not occupy a collector slot
+	// for ping's default two seconds between them. 200 ms works for an
+	// unprivileged iputils process and leaves the SSH probe in charge of the
+	// normal collection duration. The caller still bounds loss/DNS waits.
+	return exec.CommandContext(ctx, "ping", "-n", "-c", "3", "-i", "0.2", "-W", "1", host)
 }
 
 func parsePingAverage(output string) int {

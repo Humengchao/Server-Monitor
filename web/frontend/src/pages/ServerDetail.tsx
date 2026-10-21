@@ -131,7 +131,7 @@ export default function ServerDetail() {
   const [timeRange, setTimeRange] = useState<TimeRange>(() => getPresetRange('1h'));
   const serverRequestRef = useRef<AbortController | null>(null);
 
-  const { metrics, clock: metricsClock, latestError, history, historyLoading, historyError, refetchHistory } = useMetrics(id!, timeRange);
+  const { metrics, clock: metricsClock, latestError, history, historyLoading, historyError, refetchHistory } = useMetrics(id!, timeRange, { historyEnabled: activeTab === 'metrics' });
   const sampleObservedAt = useResponseClock(metricsClock ?? (server && server.id === id ? serverClock : null));
 
   // Presets whose window ends "now" keep sliding: recompute the range every
@@ -140,7 +140,7 @@ export default function ServerDetail() {
   usePolling(
     () => { if (activePreset) setTimeRange(getPresetRange(activePreset)); },
     30000,
-    { leading: false, enabled: !!activePreset && activePreset !== 'yesterday' },
+    { leading: false, enabled: activeTab === 'metrics' && !!activePreset && activePreset !== 'yesterday' },
   );
 
   const presets: { key: PresetKey; label: string }[] = [
@@ -196,6 +196,13 @@ export default function ServerDetail() {
   const handlePreset = (key: PresetKey) => {
     setActivePreset(key);
     setTimeRange(getPresetRange(key));
+  };
+
+  const handleTabChange = (key: string) => {
+    // Returning to a live preset starts at now, while yesterday/custom windows
+    // keep both their bounds and their already loaded data.
+    if (key === 'metrics' && activePreset && activePreset !== 'yesterday') setTimeRange(getPresetRange(activePreset));
+    setActiveTab(key);
   };
 
   const handleRangeChange = (dates: [Dayjs | null, Dayjs | null] | null) => {
@@ -462,11 +469,11 @@ export default function ServerDetail() {
         />
       </div>
 
-      <Tabs className="server-detail-tabs" activeKey={activeTab} onChange={setActiveTab} items={[
+      <Tabs className="server-detail-tabs" activeKey={activeTab} onChange={handleTabChange} items={[
         {
           key: 'metrics',
           label: t('metrics.title'),
-          children: (
+          children: activeTab === 'metrics' ? (
             <Card className="panel-card">
               <div className="chart-toolbar">
                 <Segmented
@@ -495,7 +502,7 @@ export default function ServerDetail() {
                 ) : <MetricsChart history={history} />}
               </div>
             </Card>
-          ),
+          ) : null,
         },
         {
           key: 'availability',

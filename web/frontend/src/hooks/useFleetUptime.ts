@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { uptimeApi, UptimeWindow, UptimeWindowKey } from '../api/uptime';
 import { usePolling } from './usePolling';
 
@@ -20,10 +20,15 @@ export interface FleetUptimeState {
 export function useFleetUptime(): FleetUptimeState {
   const [byServer, setByServer] = useState<Map<string, UptimeWindow[]>>(new Map());
   const [loading, setLoading] = useState(true);
+  const requestRef = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
+    if (requestRef.current) return;
+    const controller = new AbortController();
+    requestRef.current = controller;
     try {
-      const res = await uptimeApi.fleet();
+      const res = await uptimeApi.fleet(controller.signal);
+      if (controller.signal.aborted || requestRef.current !== controller) return;
       const next = new Map<string, UptimeWindow[]>();
       for (const entry of res.data.servers || []) {
         next.set(entry.server_id, entry.windows);
@@ -32,11 +37,19 @@ export function useFleetUptime(): FleetUptimeState {
     } catch {
       // Availability is supplementary; a failure must not disturb the page.
     } finally {
-      setLoading(false);
+      if (requestRef.current === controller) {
+        requestRef.current = null;
+        if (!controller.signal.aborted) setLoading(false);
+      }
     }
   }, []);
 
   usePolling(() => load(), REFRESH_MS);
+
+  useEffect(() => () => {
+    requestRef.current?.abort();
+    requestRef.current = null;
+  }, []);
 
   return { byServer, loading };
 }

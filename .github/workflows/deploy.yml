@@ -177,7 +177,7 @@ jobs:
       - name: Production browser smoke
         env:
           SMOKE_BASE_URL: https://${{ secrets.DOMAIN }}
-        run: npm ci && npx playwright install --with-deps chromium && npm run test:smoke
+        run: npm ci && npx playwright install --with-deps chromium && npm run test:production
         working-directory: web/frontend
       - name: Roll back failed production smoke
         if: failure() && steps.release.outcome == 'success'
@@ -194,4 +194,4 @@ jobs:
         if: failure()
         with:
           name: production-browser-results
-          path: web/frontend/test-results
+          path: web/frontend/test-results-production

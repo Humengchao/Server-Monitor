@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import type { Page } from '@playwright/test';
+import type { Page, Route } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { observedAt, sampleFleet, host } from './fixtures/fleet';
 
@@ -277,5 +277,192 @@ test('switching hosts in the same detail component shows request failures and ca
   await failure.getByRole('button', { name: en['common.refresh'], exact: true }).click();
   await expect(page.locator('.detail-identity h3')).toHaveText('busy-host');
   await expect(tile(page, en['metrics.cpu']).locator('strong')).toHaveText('92%');
+  expect(state.errors).toEqual([]);
+});
+
+test('history pauses outside its tab, resumes live windows immediately and preserves fixed windows', async ({ page }) => {
+  await page.clock.install({ time: new Date(observedAt) });
+  const state = await fixture(page);
+  const windows: string[] = [];
+  let latestReads = 0;
+  page.on('request', request => {
+    const url = new URL(request.url());
+    if (url.pathname === '/api/servers/idle-host/metrics') windows.push(url.searchParams.get('until')!);
+    if (url.pathname === '/api/servers/idle-host/metrics/latest') latestReads++;
+  });
+  await page.goto('/servers/idle-host');
+  await expect(page.locator('.metrics-charts')).toBeVisible();
+  expect(windows).toHaveLength(1);
+  await page.getByRole('tab', { name: en['server.notes'], exact: true }).click();
+  await expect(page.locator('.metrics-charts')).toHaveCount(0);
+  const initialLatest = latestReads;
+  await page.clock.fastForward(61000);
+  await expect.poll(() => latestReads).toBeGreaterThan(initialLatest);
+  expect(windows).toHaveLength(1);
+  await page.getByRole('tab', { name: en['metrics.title'], exact: true }).click();
+  await expect(page.locator('.metrics-charts')).toBeVisible();
+  expect(windows).toHaveLength(2);
+  expect(Date.parse(windows[1])).toBeGreaterThan(Date.parse(windows[0]));
+
+  await page.getByRole('radio', { name: en['preset.yesterday'], exact: true }).locator('..').click();
+  await expect(page.locator('.metrics-history')).toHaveAttribute('aria-busy', 'false');
+  expect(windows).toHaveLength(3);
+  const fixedUntil = windows[2];
+  await page.getByRole('tab', { name: en['server.notes'], exact: true }).click();
+  await page.clock.fastForward(61000);
+  await page.getByRole('tab', { name: en['metrics.title'], exact: true }).click();
+  await expect(page.locator('.metrics-charts')).toBeVisible();
+  expect(windows).toHaveLength(3);
+  expect(windows.at(-1)).toBe(fixedUntil);
+  expect(state.errors).toEqual([]);
+});
+
+test('backgrounding the browser retains history and refreshes it when visible again', async ({ page }) => {
+  await page.clock.install({ time: new Date(observedAt) });
+  const state = await fixture(page);
+  let reads = 0;
+  page.on('request', request => {
+    if (new URL(request.url()).pathname === '/api/servers/idle-host/metrics') reads++;
+  });
+  await page.goto('/servers/idle-host');
+  await expect(page.locator('.metrics-charts')).toBeVisible();
+  expect(reads).toBe(1);
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await page.clock.fastForward(61000);
+  expect(reads).toBe(1);
+  await expect(page.locator('.metrics-charts')).toBeVisible();
+  await expect(page.getByRole('button', { name: en['metrics.export'], exact: true })).toBeEnabled();
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect.poll(() => reads).toBe(2);
+  await expect(page.locator('.metrics-charts')).toBeVisible();
+  expect(state.errors).toEqual([]);
+});
+
+async function trackReadAborts(page: Page) {
+  await page.addInitScript(() => {
+    const original = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (method: string, url: string | URL, async = true, username?: string | null, password?: string | null) {
+      this.addEventListener('abort', () => {
+        const aborted = JSON.parse(document.documentElement.dataset.abortedReads || '[]') as string[];
+        aborted.push(new URL(String(url), location.href).pathname);
+        document.documentElement.dataset.abortedReads = JSON.stringify(aborted);
+      });
+      return original.call(this, method, url, async, username, password);
+    };
+  });
+}
+
+test('leaving history aborts a pending chart request and returning fetches the current window', async ({ page }) => {
+  await trackReadAborts(page);
+  await page.clock.install({ time: new Date(observedAt) });
+  await fixture(page);
+  let reads = 0;
+  await page.route('**/api/servers/idle-host/metrics?*', route => {
+    reads++;
+    if (reads === 1) return;
+    return route.fallback();
+  });
+  await page.goto('/servers/idle-host');
+  await expect.poll(() => reads).toBe(1);
+  await page.getByRole('tab', { name: en['server.notes'], exact: true }).click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(document.documentElement.dataset.abortedReads || '[]')))
+    .toContain('/api/servers/idle-host/metrics');
+  await page.clock.fastForward(61000);
+  expect(reads).toBe(1);
+  await page.getByRole('tab', { name: en['metrics.title'], exact: true }).click();
+  await expect(page.locator('.metrics-charts')).toBeVisible();
+  expect(reads).toBe(2);
+});
+
+for (const source of ['fleet', 'detail'] as const) {
+  test(`${source} availability requests are cancelled when their view leaves`, async ({ page }) => {
+    await trackReadAborts(page);
+    await page.clock.install({ time: new Date(observedAt) });
+    await fixture(page);
+    const reads: string[] = [];
+    await page.route(/\/api\/servers(?:\/idle-host)?\/uptime(?:\?|$)/, route => {
+      reads.push(new URL(route.request().url()).pathname);
+    });
+    await page.goto(source === 'fleet' ? '/dashboard' : '/servers/idle-host');
+    if (source === 'detail') await page.getByRole('tab', { name: en['uptime.title'], exact: true }).click();
+    const expected = source === 'fleet' ? ['/api/servers/uptime'] : ['/api/servers/idle-host/uptime', '/api/servers/uptime'];
+    await expect.poll(() => [...reads].sort()).toEqual([...expected].sort());
+    if (source === 'detail') await page.getByRole('tab', { name: en['server.notes'], exact: true }).click();
+    else await page.getByRole('menuitem').filter({ hasText: 'Credentials' }).click();
+    await expect.poll(() => page.evaluate(() => JSON.parse(document.documentElement.dataset.abortedReads || '[]')))
+      .toEqual(expect.arrayContaining(expected));
+    await page.clock.fastForward(310000);
+    expect(reads).toHaveLength(expected.length);
+  });
+}
+
+test('availability failure cancels its remaining request and the next visit can recover', async ({ page }) => {
+  await trackReadAborts(page);
+  const state = await fixture(page);
+  let fail = true;
+  let reads = 0;
+  await page.route('**/api/servers/idle-host/uptime?*', route => {
+    reads++;
+    return fail
+      ? route.fulfill({ status: 503, json: { error: 'unavailable' } })
+      : route.fulfill({ json: { server_id: 'idle-host', days: [], outages: [] } });
+  });
+  await page.route('**/api/servers/uptime', route => {
+    if (fail) return;
+    return route.fulfill({ json: { servers: [] } });
+  });
+  await page.goto('/servers/idle-host');
+  await page.getByRole('tab', { name: en['uptime.title'], exact: true }).click();
+  await expect(page.getByText(en['uptime.loadFailed'], { exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => JSON.parse(document.documentElement.dataset.abortedReads || '[]')))
+    .toContain('/api/servers/uptime');
+  fail = false;
+  await page.getByRole('tab', { name: en['server.notes'], exact: true }).click();
+  await page.getByRole('tab', { name: en['uptime.title'], exact: true }).click();
+  await expect(page.getByText(en['uptime.noHistory'], { exact: true })).toBeVisible();
+  expect(reads).toBe(2);
+  expect(state.errors).toEqual([]);
+});
+
+test('a slow initial latest read survives polling and still cancels immediately when the host changes', async ({ page }) => {
+  await trackReadAborts(page);
+  await page.clock.install({ time: new Date(observedAt) });
+  const state = await fixture(page);
+  const pending: Route[] = [];
+  const reads: string[] = [];
+  await page.route(/\/api\/servers\/(idle-host|busy-host)\/metrics\/latest$/, route => {
+    reads.push(new URL(route.request().url()).pathname);
+    pending.push(route);
+  });
+  await page.goto('/servers/idle-host');
+  await expect.poll(() => reads).toEqual(['/api/servers/idle-host/metrics/latest']);
+  await page.clock.fastForward(3100);
+  await expect(page.locator('.detail-identity h3')).toHaveText('idle-host');
+  expect(reads).toHaveLength(1);
+  expect(await page.evaluate(() => JSON.parse(document.documentElement.dataset.abortedReads || '[]')))
+    .not.toContain('/api/servers/idle-host/metrics/latest');
+
+  await page.evaluate(() => {
+    history.pushState({}, '', '/servers/busy-host');
+    dispatchEvent(new PopStateEvent('popstate'));
+  });
+  await expect.poll(() => reads).toEqual(['/api/servers/idle-host/metrics/latest', '/api/servers/busy-host/metrics/latest']);
+  await expect.poll(() => page.evaluate(() => JSON.parse(document.documentElement.dataset.abortedReads || '[]')))
+    .toContain('/api/servers/idle-host/metrics/latest');
+  // Completing the old transport must not clear the new host's in-flight guard.
+  await pending[0].fulfill({ json: { ...state.hosts[0].latest_metrics, cpu_percent: 17 } });
+  await page.clock.fastForward(3100);
+  expect(reads).toHaveLength(2);
+  await pending[1].fulfill({ headers: { Date: new Date(observedAt).toUTCString() }, json: { ...state.hosts[1].latest_metrics, cpu_percent: 68 } });
+  await expect(tile(page, en['metrics.cpu']).locator('strong')).toHaveText('68%');
+  await page.clock.fastForward(3100);
+  await expect.poll(() => reads).toHaveLength(3);
+  expect(reads.at(-1)).toBe('/api/servers/busy-host/metrics/latest');
   expect(state.errors).toEqual([]);
 });

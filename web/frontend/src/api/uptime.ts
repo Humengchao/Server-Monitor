@@ -63,7 +63,7 @@ export function availabilityColor(percent: number): string {
 }
 
 export const uptimeApi = {
-  fleet: () => client.get<FleetUptime>('/servers/uptime'),
-  detail: (id: string, days = 30) =>
-    client.get<ServerUptimeDetail>(`/servers/${id}/uptime`, { params: { days } }),
+  fleet: (signal?: AbortSignal) => client.get<FleetUptime>('/servers/uptime', { signal }),
+  detail: (id: string, days = 30, signal?: AbortSignal) =>
+    client.get<ServerUptimeDetail>(`/servers/${id}/uptime`, { params: { days }, signal }),
 };

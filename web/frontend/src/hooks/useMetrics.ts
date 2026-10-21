@@ -42,16 +42,20 @@ interface HistoryResult {
 
 const EMPTY_HISTORY: MetricPoint[] = [];
 
-export function useMetrics(serverId: string, timeRange: TimeRange, interval = 3000) {
+export function useMetrics(serverId: string, timeRange: TimeRange, options: { interval?: number; historyEnabled?: boolean } = {}) {
+  const { interval = 3000, historyEnabled = true } = options;
   const [latest, setLatest] = useState<LatestResult | null>(null);
   const [history, setHistory] = useState<HistoryResult | null>(null);
   const latestAbortRef = useRef<AbortController | null>(null);
   const historyAbortRef = useRef<AbortController | null>(null);
+  const completedHistoryKeyRef = useRef<string | null>(null);
   const { since, until } = timeRange;
   const historyKey = JSON.stringify([serverId, since, until]);
 
   const fetchLatest = useCallback(async () => {
-    latestAbortRef.current?.abort();
+    // The initial read is outside usePolling's own serialization. Give it the
+    // full request deadline instead of restarting it on the first 3s tick.
+    if (latestAbortRef.current && !latestAbortRef.current.signal.aborted) return;
     const controller = new AbortController();
     latestAbortRef.current = controller;
     try {
@@ -70,13 +74,16 @@ export function useMetrics(serverId: string, timeRange: TimeRange, interval = 30
   }, [serverId]);
 
   const fetchHistory = useCallback(async () => {
+    if (!historyEnabled) return;
     historyAbortRef.current?.abort();
     const controller = new AbortController();
     historyAbortRef.current = controller;
+    completedHistoryKeyRef.current = null;
     setHistory({ key: historyKey, data: EMPTY_HISTORY, loading: true, error: false });
     try {
       const res = await serversApi.getMetricsHistory(serverId, since, until, controller.signal);
       if (controller.signal.aborted || historyAbortRef.current !== controller) return;
+      completedHistoryKeyRef.current = historyKey;
       setHistory({ key: historyKey, data: res.data || EMPTY_HISTORY, loading: false, error: false });
     } catch {
       if (controller.signal.aborted || historyAbortRef.current !== controller) return;
@@ -84,7 +91,7 @@ export function useMetrics(serverId: string, timeRange: TimeRange, interval = 30
     } finally {
       if (historyAbortRef.current === controller) historyAbortRef.current = null;
     }
-  }, [serverId, since, until, historyKey]);
+  }, [serverId, since, until, historyKey, historyEnabled]);
 
   usePolling(fetchLatest, interval, { leading: false });
 
@@ -97,12 +104,15 @@ export function useMetrics(serverId: string, timeRange: TimeRange, interval = 30
   }, [fetchLatest]);
 
   useEffect(() => {
+    // A hidden chart has no consumer. Keep a completed fixed window in memory
+    // so reopening it does not repeat the read; interrupted reads can retry.
+    if (!historyEnabled || completedHistoryKeyRef.current === historyKey) return;
     const timer = window.setTimeout(() => { void fetchHistory(); }, 0);
     return () => {
       window.clearTimeout(timer);
       historyAbortRef.current?.abort();
     };
-  }, [fetchHistory]);
+  }, [fetchHistory, historyEnabled, historyKey]);
 
   // Rendering can precede effect cleanup. Keying the results prevents a
   // previous host/window from being displayed or exported during that render.

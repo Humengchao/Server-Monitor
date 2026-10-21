@@ -132,9 +132,9 @@ const DailyStripBucketSeconds = 15 * 60
 
 // GetServerCreatedAt is needed on its own for the per-server detail, which does
 // not go through the fleet census.
-func GetServerCreatedAt(db *sql.DB, serverID, userID uuid.UUID) (time.Time, error) {
+func GetServerCreatedAt(ctx context.Context, db *sql.DB, serverID, userID uuid.UUID) (time.Time, error) {
 	var createdAt time.Time
-	err := db.QueryRow(
+	err := db.QueryRowContext(ctx,
 		`SELECT created_at FROM servers WHERE id=$1 AND user_id=$2`, serverID, userID).Scan(&createdAt)
 	return createdAt, err
 }
@@ -143,8 +143,8 @@ func GetServerCreatedAt(db *sql.DB, serverID, userID uuid.UUID) (time.Time, erro
 // fifteen-minute tier (see DailyStripBucketSeconds). Days with no samples at all
 // are absent from the result; the caller fills the calendar so a fully-down day
 // still shows up in the strip.
-func GetDailyAvailability(db *sql.DB, serverID uuid.UUID, since, until time.Time) ([]DailyAvailability, error) {
-	rows, err := db.Query(
+func GetDailyAvailability(ctx context.Context, db *sql.DB, serverID uuid.UUID, since, until time.Time) ([]DailyAvailability, error) {
+	rows, err := db.QueryContext(ctx,
 		`SELECT date_trunc('day', recorded_at) AS day, COUNT(*)
 		 FROM server_metrics_15m
 		 WHERE server_id=$1 AND recorded_at >= $2 AND recorded_at < $3
@@ -168,8 +168,8 @@ func GetDailyAvailability(db *sql.DB, serverID uuid.UUID, since, until time.Time
 // GetMetricGaps returns only the adjacent bucket pairs that are further apart
 // than gapSeconds. Finding them with a window function server-side means the
 // full bucket list (tens of thousands of rows) never crosses the wire.
-func GetMetricGaps(db *sql.DB, serverID uuid.UUID, since, until time.Time, gapSeconds, limit int) ([]MetricGapRow, error) {
-	rows, err := db.Query(
+func GetMetricGaps(ctx context.Context, db *sql.DB, serverID uuid.UUID, since, until time.Time, gapSeconds, limit int) ([]MetricGapRow, error) {
+	rows, err := db.QueryContext(ctx,
 		`SELECT prev_at, recorded_at FROM (
 			SELECT recorded_at, LAG(recorded_at) OVER (ORDER BY recorded_at) AS prev_at
 			FROM server_metrics_1m
@@ -205,9 +205,9 @@ type MetricGapRow struct {
 // GetLastMetricBucket returns the newest minute bucket for a server, or the
 // zero time when it has never reported. This is what lets an ongoing outage be
 // detected: there is no later bucket to pair the gap with.
-func GetLastMetricBucket(db *sql.DB, serverID uuid.UUID, until time.Time) (time.Time, error) {
+func GetLastMetricBucket(ctx context.Context, db *sql.DB, serverID uuid.UUID, until time.Time) (time.Time, error) {
 	var last sql.NullTime
-	err := db.QueryRow(
+	err := db.QueryRowContext(ctx,
 		`SELECT MAX(recorded_at) FROM server_metrics_1m WHERE server_id=$1 AND recorded_at < $2`,
 		serverID, until).Scan(&last)
 	if err != nil {

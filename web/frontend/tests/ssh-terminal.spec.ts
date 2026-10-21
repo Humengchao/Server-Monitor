@@ -60,6 +60,14 @@ test('SSH preserves UTF-8 output, resizes, and retains its session across theme 
   await expect(screen).toContainText('command complete');
   expect(sessions[0].received.filter(frame => !frame.startsWith('\x01')).join('')).toBe('pwd\r');
 
+  // Suspending hidden metric reads must not destroy an established terminal.
+  await page.getByRole('tab', { name: en['metrics.title'], exact: true }).click();
+  await expect(page.locator('.metrics-charts')).toBeVisible();
+  await page.getByRole('tab', { name: en['terminal.title'], exact: true }).click();
+  await expect(screen).toContainText('command complete');
+  expect(sessions).toHaveLength(1);
+  expect(sessions[0].closed).toBe(false);
+
   const initialResizeCount = sessions[0].received.filter(frame => frame.startsWith('\x01')).length;
   await page.setViewportSize({ width: 1000, height: 850 });
   await expect.poll(() => sessions[0].received.filter(frame => frame.startsWith('\x01')).length).toBeGreaterThan(initialResizeCount);

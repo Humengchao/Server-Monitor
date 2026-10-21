@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Empty, Skeleton, Tooltip, Typography } from 'antd';
 import { AlertOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
@@ -12,6 +12,13 @@ const { Text } = Typography;
 
 interface Props {
   serverId: string;
+}
+
+interface AvailabilityResult {
+  serverId: string;
+  detail: ServerUptimeDetail | null;
+  windows: UptimeWindow[] | undefined;
+  failed: boolean;
 }
 
 function formatDuration(seconds: number, t: (key: string, opts?: Record<string, unknown>) => string): string {
@@ -46,26 +53,36 @@ function OutageRow({ outage, t, lang }: { outage: Outage; t: (k: string, o?: Rec
  */
 export default function AvailabilityPanel({ serverId }: Props) {
   const { t, i18n } = useTranslation();
-  const [detail, setDetail] = useState<ServerUptimeDetail | null>(null);
-  const [windows, setWindows] = useState<UptimeWindow[] | undefined>(undefined);
-  const [loading, setLoading] = useState(true);
-  const [failed, setFailed] = useState(false);
+  const [result, setResult] = useState<AvailabilityResult | null>(null);
+  const requestRef = useRef<AbortController | null>(null);
+  const current = result?.serverId === serverId ? result : null;
+  const detail = current?.detail ?? null;
+  const windows = current?.windows;
+  const loading = current === null;
+  const failed = current?.failed ?? false;
 
   const load = useCallback(async () => {
+    if (requestRef.current) return;
+    const controller = new AbortController();
+    requestRef.current = controller;
     try {
       // The fleet census is cached server-side for a minute, so asking it for
       // one server's window figures is cheaper than a second bespoke query.
       const [detailRes, fleetRes] = await Promise.all([
-        uptimeApi.detail(serverId, 30),
-        uptimeApi.fleet(),
+        uptimeApi.detail(serverId, 30, controller.signal),
+        uptimeApi.fleet(controller.signal),
       ]);
-      setDetail(detailRes.data);
-      setWindows(fleetRes.data.servers.find((s) => s.server_id === serverId)?.windows);
-      setFailed(false);
+      if (controller.signal.aborted || requestRef.current !== controller) return;
+      setResult({ serverId, detail: detailRes.data, windows: fleetRes.data.servers.find((s) => s.server_id === serverId)?.windows, failed: false });
     } catch {
-      setFailed(true);
+      if (controller.signal.aborted || requestRef.current !== controller) return;
+      // Stop the sibling request when either half fails. The panel requires
+      // both snapshots, so letting the remaining query finish serves no view.
+      controller.abort();
+      setResult(previous => ({ serverId, detail: previous?.serverId === serverId ? previous.detail : null,
+        windows: previous?.serverId === serverId ? previous.windows : undefined, failed: true }));
     } finally {
-      setLoading(false);
+      if (requestRef.current === controller) requestRef.current = null;
     }
   }, [serverId]);
 
@@ -76,7 +93,11 @@ export default function AvailabilityPanel({ serverId }: Props) {
   // reused across servers without remounting.
   useEffect(() => {
     const initial = window.setTimeout(() => load(), 0);
-    return () => window.clearTimeout(initial);
+    return () => {
+      window.clearTimeout(initial);
+      requestRef.current?.abort();
+      requestRef.current = null;
+    };
   }, [load]);
 
   const totals = useMemo(() => {

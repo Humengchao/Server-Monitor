@@ -58,21 +58,15 @@ func RepairMetricHistory(ctx context.Context, db *sql.DB) (MetricRepairResult, e
 	batch := func(source, target string, width int, samples string, since, until time.Time) error {
 		batchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
-		tx, err := db.BeginTx(batchCtx, nil)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-		if _, err = tx.ExecContext(batchCtx, `SET LOCAL statement_timeout='10s'`); err != nil {
-			return err
-		}
-		if _, err = tx.ExecContext(batchCtx, `SET LOCAL lock_timeout='1s'`); err != nil {
-			return err
-		}
-		if err = rollupMetricsWithExecutor(batchCtx, tx, source, target, width, samples, since, until); err != nil {
-			return err
-		}
-		return tx.Commit()
+		return withMetricRollupTransaction(batchCtx, db, func(tx *sql.Tx) error {
+			if _, err := tx.ExecContext(batchCtx, `SET LOCAL statement_timeout='10s'`); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(batchCtx, `SET LOCAL lock_timeout='1s'`); err != nil {
+				return err
+			}
+			return rollupMetricsWithExecutor(batchCtx, tx, source, target, width, samples, since, until)
+		})
 	}
 	raw := result.Plan.RawToMinute
 	for since := raw.Since; since.Before(raw.Until); {

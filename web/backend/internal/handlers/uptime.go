@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -18,6 +19,7 @@ import (
 // over 24 hours cannot move meaningfully inside a minute, and the dashboard
 // polls far more often than that.
 const fleetUptimeCacheTTL = 60 * time.Second
+const uptimeDetailTimeout = 10 * time.Second
 
 type UptimeWindowResult struct {
 	Window   string  `json:"window"`
@@ -141,10 +143,16 @@ func (h *UptimeHandler) Detail(c *gin.Context) {
 		}
 	}
 
+	ctx, cancel := context.WithTimeout(c.Request.Context(), uptimeDetailTimeout)
+	defer cancel()
 	db := c.MustGet("db").(*models.DB)
-	createdAt, err := models.GetServerCreatedAt(db.Raw, id, userID)
+	createdAt, err := models.GetServerCreatedAt(ctx, db.Raw, id, userID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
+		} else {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "failed to load availability"})
+		}
 		return
 	}
 
@@ -157,20 +165,20 @@ func (h *UptimeHandler) Detail(c *gin.Context) {
 	start, _ := services.WindowStart(stripEnd, span, createdAt)
 	outageStart, _ := services.WindowStart(outageEnd, span, createdAt)
 
-	daily, err := models.GetDailyAvailability(db.Raw, id, start, stripEnd)
+	daily, err := models.GetDailyAvailability(ctx, db.Raw, id, start, stripEnd)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load availability"})
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "failed to load availability"})
 		return
 	}
-	gapRows, err := models.GetMetricGaps(db.Raw, id, outageStart, outageEnd,
+	gapRows, err := models.GetMetricGaps(ctx, db.Raw, id, outageStart, outageEnd,
 		int(services.UptimeOutageGap.Seconds()), services.UptimeMaxOutages)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load outages"})
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "failed to load outages"})
 		return
 	}
-	lastSample, err := models.GetLastMetricBucket(db.Raw, id, outageEnd)
+	lastSample, err := models.GetLastMetricBucket(ctx, db.Raw, id, outageEnd)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load availability"})
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "failed to load availability"})
 		return
 	}
 

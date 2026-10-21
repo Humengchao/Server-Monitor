@@ -218,15 +218,9 @@ func RollupMetrics15m(db *sql.DB, since, until time.Time) error {
 }
 
 func rollupMetrics(db *sql.DB, sourceTable, targetTable string, bucketSeconds int, sampleExpression string, since, until time.Time) error {
-	tx, err := db.BeginTx(context.Background(), nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := rollupMetricsWithExecutor(context.Background(), tx, sourceTable, targetTable, bucketSeconds, sampleExpression, since, until); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return withMetricRollupTransaction(context.Background(), db, func(tx *sql.Tx) error {
+		return rollupMetricsWithExecutor(context.Background(), tx, sourceTable, targetTable, bucketSeconds, sampleExpression, since, until)
+	})
 }
 
 type metricRollupExecutor interface {
