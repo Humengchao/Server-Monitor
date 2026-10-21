@@ -86,12 +86,14 @@ func (h *DockerHandler) CheckDocker(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
 			return
 		}
-		client, err := h.sshCache.Get(server)
+		client, err := h.sshCache.GetContext(c.Request.Context(), server)
 		if err != nil {
 			c.JSON(http.StatusBadGateway, gin.H{"error": "SSH connection failed"})
 			return
 		}
-		probe := services.ProbeDocker(client, server.ServerType)
+		probeContext, cancel := context.WithTimeout(c.Request.Context(), services.DockerCommandTimeout)
+		defer cancel()
+		probe := services.ProbeDockerContext(probeContext, client, server.ServerType)
 		if probe.Known {
 			// Same rule as the collector: an installed host whose daemon stayed
 			// silent keeps its stored version rather than having it blanked.
@@ -151,7 +153,7 @@ func (h *DockerHandler) containers(c *gin.Context, detailed bool) {
 	c.JSON(200, result)
 }
 func (h *DockerHandler) loadContainers(ctx context.Context, server *models.Server, detailed bool) ([]DockerContainer, error) {
-	client, err := h.sshCache.Get(server)
+	client, err := h.sshCache.GetContext(ctx, server)
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +262,9 @@ func (h *DockerHandler) ContainerAction(c *gin.Context) {
 		return
 	}
 
-	client, err := h.sshCache.Get(server)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
+	defer cancel()
+	client, err := h.sshCache.GetContext(ctx, server)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "SSH connection failed"})
 		return
@@ -268,7 +272,7 @@ func (h *DockerHandler) ContainerAction(c *gin.Context) {
 
 	defer h.results.Forget(dockerCacheKey(server, false))
 	defer h.statistics.Forget(dockerCacheKey(server, true))
-	_, err = services.RunDockerCmd(client, action+" "+containerID)
+	err = services.RunDockerMutationContext(ctx, client, action+" "+containerID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "action failed"})
 		return
@@ -302,14 +306,16 @@ func (h *DockerHandler) ContainerLogs(c *gin.Context) {
 		return
 	}
 
-	client, err := h.sshCache.Get(server)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), services.LogsTimeout)
+	defer cancel()
+	client, err := h.sshCache.GetContext(ctx, server)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "SSH connection failed"})
 		return
 	}
 
 	cmd := fmt.Sprintf("logs --tail %d %s", tailNum, containerID)
-	output, err := services.RunDockerCmd(client, cmd)
+	output, err := services.RunDockerContext(ctx, client, cmd, services.LogsOutputLimit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get logs"})
 		return
@@ -354,6 +360,11 @@ func (h *DockerHandler) ContainerExec(c *gin.Context) {
 		return
 	}
 	defer client.Close()
+	unregister, err := registerTerminal(c, func() { _ = conn.Close(); _ = client.Close() })
+	if err != nil {
+		return
+	}
+	defer unregister()
 
 	// Use shell session (same as SSH terminal), then send docker exec command
 	ts, err := services.NewTerminalSession(conn, client)

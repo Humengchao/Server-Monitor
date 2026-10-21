@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import CredentialSelect from './CredentialSelect';
 import TagSelect from './TagSelect';
 import type { ServerFormValues } from '../utils/serverForm';
+import type { SSHAuthMethod } from '../api/servers';
 import '../i18n/operations';
 
 const { Text } = Typography;
@@ -13,6 +14,7 @@ interface Props {
   form: FormInstance<ServerFormValues>;
   /** Editing keeps secrets optional ("leave blank to keep"); adding a Windows host needs a password. */
   editing: boolean;
+  savedAuthMethod?: SSHAuthMethod;
   credentialId?: string;
   onCredentialChange: (id?: string) => void;
   tagIds: string[];
@@ -26,13 +28,16 @@ interface Props {
  * two can never drift apart. Grouped into sections because fifteen fields in a
  * single column pushed the dialog's buttons off the screen.
  */
-export default function ServerForm({ form, editing, credentialId, onCredentialChange, tagIds, onTagsChange, disabled, onFinish }: Props) {
+export default function ServerForm({ form, editing, savedAuthMethod, credentialId, onCredentialChange, tagIds, onTagsChange, disabled, onFinish }: Props) {
   const { t } = useTranslation();
   const { t: op } = useTranslation('operations');
   const agent = Form.useWatch('connection_mode', form) === 'agent';
   const serverType = Form.useWatch('server_type', form) || 'linux';
   const sshHostKey = Form.useWatch('ssh_host_key', form);
   const windows = serverType === 'windows';
+  const selectedAuth = Form.useWatch('ssh_auth_method', form) || 'password';
+  const authMethod = windows ? 'password' : selectedAuth;
+  const needsSecret = !editing || savedAuthMethod !== authMethod;
   const autoRenewHelp = <div>
     {['autoRenewHelpConditions', 'autoRenewHelpCalendar', 'autoRenewHelpLimits'].map(key =>
       <p key={key} style={{ margin: '0 0 8px' }}>{op(key)}</p>)}
@@ -45,7 +50,7 @@ export default function ServerForm({ form, editing, credentialId, onCredentialCh
       <Form.Item name="connection_mode" label={op('connectionMode')} initialValue="ssh">
         <Select disabled={editing} options={[{ value: 'ssh', label: op('sshMode') }, { value: 'agent', label: op('agentMode') }]} onChange={(mode) => {
           onCredentialChange(undefined);
-          form.setFieldsValue({ ...(mode === 'agent' ? { host: undefined } : {}), ssh_username: undefined, ssh_password: undefined, ssh_key: undefined, ssh_host_key: undefined, port: mode === 'ssh' && !windows ? 22 : undefined });
+          form.setFieldsValue({ ...(mode === 'agent' ? { host: undefined } : {}), ssh_auth_method: 'password', ssh_username: undefined, ssh_password: undefined, ssh_key: undefined, ssh_host_key: undefined, port: mode === 'ssh' && !windows ? 22 : undefined });
         }} />
       </Form.Item>
       {agent && <Alert type="info" showIcon title={op('agentHint')} style={{ marginBottom: 16 }} />}
@@ -62,8 +67,8 @@ export default function ServerForm({ form, editing, credentialId, onCredentialCh
               onChange={(value) => {
                 onCredentialChange(undefined);
                 form.setFieldsValue(value === 'windows'
-                  ? { port: undefined, ssh_username: undefined, ssh_password: undefined, ssh_key: undefined, ssh_host_key: undefined }
-                  : { port: agent ? undefined : form.getFieldValue('port') || 22, ssh_username: undefined, ssh_password: undefined, ssh_key: undefined, ssh_host_key: undefined });
+                  ? { port: undefined, ssh_auth_method: 'password', ssh_username: undefined, ssh_password: undefined, ssh_key: undefined }
+                  : { port: agent ? undefined : form.getFieldValue('port') || 22, ssh_username: undefined, ssh_password: undefined, ssh_key: undefined });
               }}
               options={[
                 { value: 'linux', label: <><DesktopOutlined /> Linux</> },
@@ -94,34 +99,35 @@ export default function ServerForm({ form, editing, credentialId, onCredentialCh
       </Form.Item>
       {!credentialId && (
         <>
+          {!windows && <Form.Item name="ssh_auth_method" label={t('ssh.authMethod')} initialValue="password" extra={editing ? t('ssh.authHint') : undefined}>
+            <Select options={[{ value: 'password', label: t('ssh.passwordAuth') }, { value: 'key', label: t('ssh.keyAuth') }]} />
+          </Form.Item>}
           <Row gutter={12}>
             <Col xs={24} sm={12}>
               <Form.Item name="ssh_username" label={t(windows ? 'server.username' : 'server.sshUsername')} rules={[{ required: true }]}>
                 <Input placeholder={t(windows ? 'server.usernamePlaceholder' : 'server.sshUsernamePlaceholder')} />
               </Form.Item>
             </Col>
-            <Col xs={24} sm={12}>
-              <Form.Item name="ssh_password" label={t(windows ? 'server.password' : 'server.sshPassword')} rules={windows && !editing ? [{ required: true }] : undefined}>
-                <Input.Password placeholder={t(editing ? 'server.sshKeyEditPlaceholder' : windows ? 'server.passwordPlaceholder' : 'server.sshPasswordPlaceholder')} />
+            {authMethod === 'password' && <Col xs={24} sm={12}>
+              <Form.Item name="ssh_password" label={t(windows ? 'server.password' : 'server.sshPassword')} rules={needsSecret ? [{ required: true }] : undefined}>
+                <Input.Password placeholder={t(!needsSecret ? 'server.sshKeyEditPlaceholder' : windows ? 'server.passwordPlaceholder' : 'server.sshPasswordPlaceholder')} />
               </Form.Item>
-            </Col>
+            </Col>}
           </Row>
-          {!windows && (
-            <Form.Item name="ssh_key" label={t('server.sshKey')}>
-              <Input.TextArea rows={3} placeholder={t(editing ? 'server.sshKeyEditPlaceholder' : 'server.sshKeyPlaceholder')} />
+          {authMethod === 'key' && (
+            <Form.Item name="ssh_key" label={t('server.sshKey')} rules={needsSecret ? [{ required: true, whitespace: true }] : undefined}>
+              <Input.TextArea rows={3} placeholder={t(!needsSecret ? 'server.sshKeyEditPlaceholder' : 'server.sshKeyPlaceholder')} />
             </Form.Item>
           )}
         </>
       )}
-      {!windows && (
         <Form.Item
           name="ssh_host_key"
           label={t('server.sshHostKey')}
-          extra={sshHostKey?.trim() ? undefined : <Text type="warning">{t('server.sshHostKeyWarning')}</Text>}
+          extra={<Text type={sshHostKey?.trim() ? 'secondary' : 'warning'}>{t('ssh.hostKeyHelp')}</Text>}
         >
           <Input.TextArea rows={2} placeholder={t('server.sshHostKeyPlaceholder')} />
         </Form.Item>
-      )}
 
       </>}
       <div className="form-section-title">{t('server.sectionBilling')}</div>

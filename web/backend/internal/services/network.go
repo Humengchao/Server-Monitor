@@ -2,8 +2,6 @@ package services
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,7 +15,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf16"
 
 	"github.com/google/uuid"
 	"server-monitor/internal/models"
@@ -78,12 +75,7 @@ func ParseNetworkPing(output string) models.NetworkSample {
 func networkPowerShell(host string, count int) string {
 	// .NET Ping is locale-independent and exposes a status for each attempted packet.
 	script := fmt.Sprintf(`$ErrorActionPreference='Stop';$p=New-Object System.Net.NetworkInformation.Ping;$values=@();$sent=0;try {for($i=0;$i -lt %d;$i++) {$sent++;$r=$p.Send('%s',1000);if($r.Status -eq 'Success'){$values+=([double]$r.RoundtripTime)}};@{sent=$sent;values=@($values)}|ConvertTo-Json -Compress} finally {$p.Dispose()}`, count, host)
-	units := utf16.Encode([]rune(script))
-	bytes := make([]byte, len(units)*2)
-	for i, v := range units {
-		binary.LittleEndian.PutUint16(bytes[i*2:], v)
-	}
-	return "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand " + base64.StdEncoding.EncodeToString(bytes)
+	return "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand " + encodePowerShell(script)
 }
 func parseNetworkWindows(output string) models.NetworkSample {
 	var decoded struct {
@@ -317,8 +309,4 @@ func (m *NetworkMonitor) Run(ctx context.Context, user, id uuid.UUID) (models.Ne
 
 func validNetworkTarget(host string) bool {
 	return net.ParseIP(host) != nil || networkHost.MatchString(host) && !strings.Contains(host, ":")
-}
-
-func networkTransition(check models.NetworkCheck, sample *models.NetworkSample) string {
-	return models.NetworkSampleTransition(check, sample)
 }

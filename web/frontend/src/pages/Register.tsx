@@ -1,3 +1,4 @@
+import { apiError } from '../utils/apiError';
 import React, { useState } from 'react';
 import { Form, Input, Button, Card, Typography, App } from 'antd';
 import { UserOutlined, LockOutlined, CloudServerOutlined, CheckCircleFilled } from '@ant-design/icons';
@@ -6,11 +7,6 @@ import { useTranslation } from 'react-i18next';
 import { authApi } from '../api/auth';
 
 const { Title, Text } = Typography;
-
-function apiError(err: unknown, fallback: string): string {
-  const detail = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
-  return detail || fallback;
-}
 
 export default function Register() {
   const { t } = useTranslation();

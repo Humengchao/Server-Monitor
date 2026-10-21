@@ -1,3 +1,4 @@
+import { API_BASE_URL, websocketURL } from '../api/config';
 import { useEffect, useRef, useState } from 'react';
 import { Button, Drawer, Space, Tag, Tooltip } from 'antd';
 import { CodeOutlined, ReloadOutlined } from '@ant-design/icons';
@@ -65,10 +66,9 @@ export default function ContainerExecDrawer({ serverId, containerId, containerNa
     observer.observe(host);
 
     const token = localStorage.getItem('token');
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     // The JWT travels as a subprotocol ("bearer, <jwt>") so it stays out of access logs.
     const ws = new WebSocket(
-      `${protocol}//${window.location.host}/api/ws/servers/${serverId}/docker/containers/${containerId}/exec`,
+      websocketURL(`ws/servers/${serverId}/docker/containers/${containerId}/exec`, API_BASE_URL),
       token ? ['bearer', token] : undefined,
     );
     // xterm decodes a byte stream across frame boundaries. Blob.text() would

@@ -1,40 +1,55 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"fmt"
 	"log"
 	"math"
 	"net/http"
+	"sort"
+	"sync"
 	"time"
 
 	"server-monitor/internal/models"
 	"server-monitor/internal/services"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 // publicStatusCacheTTL bounds how often the status query runs regardless of
 // visitor count. Metrics only change once per poll interval anyway.
 const publicStatusCacheTTL = 2 * time.Second
+const publicAvailabilityCacheTTL = time.Minute
 
 // minPublicAvailabilityBuckets is four hours of fifteen-minute buckets. Under
 // that, an availability percentage is noise.
 const minPublicAvailabilityBuckets = 16
 
 type PublicStatusHandler struct {
-	cache *services.RequestCache[gin.H]
+	mu           sync.Mutex
+	generation   uint64
+	cache        *services.RequestCache[gin.H]
+	availability *services.RequestCache[map[uuid.UUID]models.PublicAvailability]
 }
 
 func NewPublicStatusHandler() *PublicStatusHandler {
-	return &PublicStatusHandler{cache: services.NewRequestCache[gin.H](1)}
+	return &PublicStatusHandler{cache: services.NewRequestCache[gin.H](1), availability: services.NewRequestCache[map[uuid.UUID]models.PublicAvailability](1)}
 }
 
-// Visibility mutations invalidate both a cached response and its in-flight
-// refresh. RequestCache's entry identity prevents the old refresh from
-// repopulating the cache after a server was made private or removed.
-func (h *PublicStatusHandler) Invalidate() { h.cache.Forget("public") }
+// Swap both caches as one generation. Old refreshes retain only the old cache
+// instances, including a census they start after invalidation. They cannot
+// repopulate either current cache. Get also refuses their response.
+func (h *PublicStatusHandler) Invalidate() {
+	h.mu.Lock()
+	h.generation++
+	h.cache = services.NewRequestCache[gin.H](1)
+	h.availability = services.NewRequestCache[map[uuid.UUID]models.PublicAvailability](1)
+	h.mu.Unlock()
+}
 
 type publicNode struct {
 	Name string `json:"name"`
@@ -92,12 +107,33 @@ type publicSummary struct {
 
 func (h *PublicStatusHandler) Get(c *gin.Context) {
 	db := c.MustGet("db").(*models.DB)
-	response, err := h.cache.Get(c.Request.Context(), "public", publicStatusCacheTTL, func(ctx context.Context) (gin.H, error) {
-		// One caller leaving must not cancel a refresh shared by other visitors.
-		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		defer cancel()
-		return buildPublicStatus(ctx, db.Raw)
-	})
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+	var response gin.H
+	var err error
+	for {
+		h.mu.Lock()
+		cache, availability, generation := h.cache, h.availability, h.generation
+		h.mu.Unlock()
+		response, err = cache.Get(ctx, "public", publicStatusCacheTTL, func(ctx context.Context) (gin.H, error) {
+			// One caller leaving must not cancel a refresh shared by visitors.
+			ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+			return buildPublicStatus(ctx, db.Raw, availability, generation)
+		})
+		h.mu.Lock()
+		current := generation == h.generation
+		h.mu.Unlock()
+		if current {
+			break
+		}
+		if ctx.Err() != nil {
+			err = ctx.Err()
+			break
+		}
+		// A visibility change committed while this snapshot was loading. Load
+		// the current generation rather than publish the old inventory.
+	}
 	if err != nil {
 		log.Printf("public status error: %v", err)
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "status temporarily unavailable"})
@@ -106,14 +142,30 @@ func (h *PublicStatusHandler) Get(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-func buildPublicStatus(ctx context.Context, db *sql.DB) (gin.H, error) {
+func buildPublicStatus(ctx context.Context, db *sql.DB, cache *services.RequestCache[map[uuid.UUID]models.PublicAvailability], generation uint64) (gin.H, error) {
 	now := time.Now().UTC()
 	// Snapped to the fifteen-minute tier the SLA figure is counted from, so the
 	// still-open bucket is excluded from both the count and the expectation.
 	availabilityEnd := services.TierEnd(now, models.DailyStripBucketSeconds)
-	metrics, err := models.GetPublicServerMetricsContext(ctx, db, availabilityEnd.Add(-30*24*time.Hour), availabilityEnd)
+	metrics, err := models.GetPublicServerMetricsContext(ctx, db)
 	if err != nil {
 		return nil, err
+	}
+	if len(metrics) > 0 {
+		key, ids := publicAvailabilityKey(generation, availabilityEnd, metrics)
+		availability, err := cache.Get(ctx, key, publicAvailabilityCacheTTL, func(ctx context.Context) (map[uuid.UUID]models.PublicAvailability, error) {
+			ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+			return models.GetPublicAvailabilityContext(ctx, db, ids, availabilityEnd.Add(-30*24*time.Hour), availabilityEnd)
+		})
+		if err != nil {
+			return nil, err
+		}
+		for i := range metrics {
+			counts := availability[metrics[i].ServerID]
+			metrics[i].Availability30dObserved = counts.Observed
+			metrics[i].Availability30dExpected = counts.Expected
+		}
 	}
 
 	nodes := make([]publicNode, 0, len(metrics))
@@ -196,6 +248,19 @@ func buildPublicStatus(ctx context.Context, db *sql.DB) (gin.H, error) {
 	}
 
 	return response, nil
+}
+
+func publicAvailabilityKey(generation uint64, end time.Time, metrics []models.PublicServerMetric) (string, []uuid.UUID) {
+	ids := make([]uuid.UUID, len(metrics))
+	for i := range metrics {
+		ids[i] = metrics[i].ServerID
+	}
+	sort.Slice(ids, func(i, j int) bool { return bytes.Compare(ids[i][:], ids[j][:]) < 0 })
+	digest := sha256.New()
+	for _, id := range ids {
+		_, _ = digest.Write(id[:])
+	}
+	return fmt.Sprintf("%d/%d/%x", generation, end.Unix(), digest.Sum(nil)), ids
 }
 
 func percent(used, total int64) int {

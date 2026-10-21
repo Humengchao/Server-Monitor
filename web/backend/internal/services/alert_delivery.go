@@ -36,16 +36,9 @@ func StartWebhookDispatcher(db *sql.DB, notifier *WebhookNotifier) *WebhookDispa
 	d := &WebhookDispatcher{db: db, notifier: notifier, cancel: cancel, done: make(chan struct{})}
 	go func() {
 		defer close(d.done)
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				d.deliver(ctx)
-			}
-		}
+		wake, unsubscribe := models.SubscribeNotificationWork(db)
+		defer unsubscribe()
+		runIdleQueue(ctx, wake, d.deliver)
 	}()
 	return d
 }
@@ -56,7 +49,7 @@ func webhookRetryDelay(attempt int) time.Duration {
 	return exponentialDelay(attempt, 5*time.Second, 15*time.Minute)
 }
 
-func (d *WebhookDispatcher) deliver(ctx context.Context) {
+func (d *WebhookDispatcher) deliver(ctx context.Context) bool {
 	queryContext, cancel := context.WithTimeout(ctx, 10*time.Second)
 	items, err := models.ClaimAlertWebhooks(queryContext, d.db, 4)
 	cancel()
@@ -64,7 +57,7 @@ func (d *WebhookDispatcher) deliver(ctx context.Context) {
 		if ctx.Err() == nil {
 			log.Printf("alerts: claim webhook deliveries: %v", err)
 		}
-		return
+		return false
 	}
 	var pending sync.WaitGroup
 	for _, item := range items {
@@ -87,4 +80,5 @@ func (d *WebhookDispatcher) deliver(ctx context.Context) {
 		}(item)
 	}
 	pending.Wait()
+	return len(items) > 0
 }

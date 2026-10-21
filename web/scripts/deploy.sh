@@ -19,6 +19,10 @@ if [[ ! -f $config ]]; then
   cp "$root/web/.env" "$config"
 fi
 chmod 600 "$config"
+# A migration must not leave the original copy readable to other local users.
+if [[ -f $root/web/.env ]]; then chmod 600 "$root/web/.env"; fi
+# Expanded compose snapshots include environment secrets as well.
+find "$root/releases" -maxdepth 2 -type f \( -name 'previous.yml' -o -name 'rollback.yml' -o -name '.env' \) -exec chmod 600 {} +
 restore() {
   if [[ -s $release/rollback.yml ]]; then
     docker compose --project-name "$project" -f "$release/rollback.yml" up -d --remove-orphans --pull never --wait --wait-timeout 180 || return 1

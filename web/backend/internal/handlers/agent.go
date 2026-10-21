@@ -6,6 +6,8 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -25,10 +27,11 @@ type AgentHandler struct {
 	hub               *agenttransport.Hub
 	cache             *services.SSHConnCache
 	publicURL, assets string
+	checksums         *services.RequestCache[string]
 }
 
 func NewAgentHandler(hub *agenttransport.Hub, cache *services.SSHConnCache, publicURL, assets string) *AgentHandler {
-	return &AgentHandler{hub: hub, cache: cache, publicURL: strings.TrimRight(publicURL, "/"), assets: assets}
+	return &AgentHandler{hub: hub, cache: cache, publicURL: strings.TrimRight(publicURL, "/"), assets: assets, checksums: services.NewRequestCache[string](1)}
 }
 
 func (h *AgentHandler) baseURL(c *gin.Context) (string, error) {
@@ -198,18 +201,68 @@ func (h *AgentHandler) Download(c *gin.Context) {
 		name += ".exe"
 	}
 	path := filepath.Join(h.assets, name)
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		c.JSON(503, gin.H{"error": "agent binary is not available for this platform"})
 		return
 	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		c.Status(http.StatusServiceUnavailable)
+		return
+	}
 	if c.Query("checksum") == "1" {
-		sum := sha256.Sum256(data)
-		c.Data(200, "text/plain", []byte(hex.EncodeToString(sum[:])+"  "+name+"\n"))
+		key := fmt.Sprintf("%s:%d:%d", path, info.Size(), info.ModTime().UnixNano())
+		sum, err := h.checksums.Get(c.Request.Context(), key, 24*time.Hour, func(ctx context.Context) (string, error) {
+			input, err := os.Open(path)
+			if err != nil {
+				return "", err
+			}
+			defer input.Close()
+			before, err := input.Stat()
+			if err != nil {
+				return "", err
+			}
+			if !os.SameFile(info, before) || info.Size() != before.Size() || !info.ModTime().Equal(before.ModTime()) {
+				return "", errors.New("agent binary changed")
+			}
+			hash := sha256.New()
+			buffer := make([]byte, 64*1024)
+			for {
+				if err := ctx.Err(); err != nil {
+					return "", err
+				}
+				n, readErr := input.Read(buffer)
+				if n > 0 {
+					_, _ = hash.Write(buffer[:n])
+				}
+				if readErr == io.EOF {
+					break
+				}
+				if readErr != nil {
+					return "", readErr
+				}
+			}
+			after, err := input.Stat()
+			if err != nil {
+				return "", err
+			}
+			if after.Size() != before.Size() || !after.ModTime().Equal(before.ModTime()) {
+				return "", errors.New("agent binary changed")
+			}
+			return hex.EncodeToString(hash.Sum(nil)), nil
+		})
+		if err != nil {
+			c.Status(http.StatusServiceUnavailable)
+			return
+		}
+		c.Data(200, "text/plain", []byte(sum+"  "+name+"\n"))
 		return
 	}
 	c.Header("Content-Disposition", `attachment; filename="`+name+`"`)
-	c.Data(200, "application/octet-stream", data)
+	c.Header("Content-Type", "application/octet-stream")
+	http.ServeContent(c.Writer, c.Request, name, info.ModTime(), file)
 }
 func (h *AgentHandler) Installer(c *gin.Context) {
 	name := "install.sh"

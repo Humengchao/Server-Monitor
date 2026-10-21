@@ -1,6 +1,6 @@
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
-import type { Server } from '../api/servers';
+import type { Server, ServerInput, SSHAuthMethod } from '../api/servers';
 
 const GB = 1024 * 1024 * 1024;
 
@@ -12,6 +12,7 @@ export interface ServerFormValues {
   name: string;
   host: string;
   port?: number;
+  ssh_auth_method?: SSHAuthMethod;
   ssh_username?: string;
   ssh_password?: string;
   ssh_key?: string;
@@ -25,28 +26,7 @@ export interface ServerFormValues {
   public_location?: string;
 }
 
-export interface ServerPayload {
-  connection_mode?: 'ssh' | 'agent';
-  is_public?: boolean;
-  monitoring_enabled?: boolean;
-  auto_renew_enabled?: boolean;
-  name: string;
-  host: string;
-  port?: number;
-  ssh_username?: string;
-  ssh_password?: string;
-  ssh_key?: string;
-  ssh_host_key?: string;
-  credential_id?: string | null;
-  expires_at?: string | null;
-  billing_price?: number;
-  billing_currency?: string;
-  billing_cycle?: string;
-  traffic_limit_bytes?: number;
-  public_location?: string;
-  notes?: string;
-  server_type?: string;
-}
+export type ServerPayload = ServerInput;
 
 const trim = (value: unknown) => (typeof value === 'string' ? value.trim() : value);
 
@@ -66,6 +46,7 @@ export function serverFormValues(server: Server): ServerFormValues {
     host: server.connection_mode === 'agent' && server.host === 'agent' ? '' : server.host,
     port: server.port,
     ssh_username: server.ssh_username,
+    ssh_auth_method: server.ssh_auth_method || 'password',
     ssh_host_key: server.ssh_host_key || '',
     expires_at: server.expires_at ? dayjs(server.expires_at) : null,
     server_type: server.server_type || 'linux',
@@ -83,7 +64,7 @@ export function serverFormValues(server: Server): ServerFormValues {
  * values of unmounted fields, so a password typed for another server would
  * otherwise ride along and silently overwrite this one's credentials.
  */
-export function buildServerPayload(values: ServerFormValues, options: { credentialId?: string; notes?: string; editing?: boolean } = {}): ServerPayload {
+export function buildServerPayload(values: ServerFormValues, options: { credentialId?: string; editing?: boolean } = {}): ServerPayload {
   const serverType = values.server_type || 'linux';
   const windows = serverType === 'windows';
   const shared = !!options.credentialId;
@@ -95,14 +76,14 @@ export function buildServerPayload(values: ServerFormValues, options: { credenti
     // Only later edits may configure an explicit network-probe target.
     host: agent ? options.editing ? values.host?.trim() || '' : '' : trim(values.host) as string,
     ssh_username: agent ? undefined : trim(values.ssh_username) as string | undefined,
-    ssh_password: agent || shared ? undefined : values.ssh_password,
-    ssh_key: agent || windows || shared ? undefined : values.ssh_key,
-    ssh_host_key: agent || windows ? undefined : values.ssh_host_key,
+    ssh_auth_method: agent || shared ? undefined : windows ? 'password' : values.ssh_auth_method,
+    ssh_password: agent || shared || values.ssh_auth_method === 'key' && !windows ? undefined : values.ssh_password,
+    ssh_key: agent || windows || shared || values.ssh_auth_method === 'password' ? undefined : values.ssh_key,
+    ssh_host_key: agent ? undefined : values.ssh_host_key,
     port: agent || windows ? undefined : values.port,
     credential_id: agent ? null : options.credentialId || null,
     server_type: serverType,
     expires_at: values.expires_at ? values.expires_at.toISOString() : null,
     traffic_limit_bytes: Math.round((values.traffic_limit_gb || 0) * GB),
-    notes: options.notes || '',
   };
 }

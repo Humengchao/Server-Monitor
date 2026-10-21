@@ -51,7 +51,7 @@ func TestNotificationProtocolsUseLocalMocksAndCheckBusinessFailures(t *testing.T
 		{"wecom", models.NotificationConfig{WebhookURL: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=PRIVATE_KEY"}, `{"errcode":93000,"errmsg":"PRIVATE_KEY failed"}`, true},
 		{"dingtalk", models.NotificationConfig{WebhookURL: "https://oapi.dingtalk.com/robot/send?access_token=PRIVATE_TOKEN", Secret: "SECtest"}, `{"errcode":0}`, false},
 		{"dingtalk", models.NotificationConfig{WebhookURL: "https://oapi.dingtalk.com/robot/send?access_token=PRIVATE_TOKEN"}, `{"errcode":310000,"errmsg":"PRIVATE_TOKEN rejected"}`, true},
-		{"webhook", models.NotificationConfig{WebhookURL: "http://127.0.0.1/receive", BearerToken: "BEARER_SECRET"}, `{"success":true}`, false},
+		{"webhook", models.NotificationConfig{WebhookURL: "https://127.0.0.1/receive", BearerToken: "BEARER_SECRET"}, `{"success":true}`, false},
 		{"webhook", models.NotificationConfig{WebhookURL: "http://127.0.0.1/receive"}, `{"success":false,"error":"private text"}`, true},
 	}
 	for _, tc := range cases {

@@ -45,7 +45,7 @@ func (handler *FileHandler) Deadline(httpContext *gin.Context) {
 	httpContext.Next()
 }
 
-func (handler *FileHandler) connect(httpContext *gin.Context) (services.RemoteFiles, func(), bool) {
+func (handler *FileHandler) connect(httpContext *gin.Context, directoryOnly ...bool) (services.RemoteFiles, func(), bool) {
 	serverID, err := uuid.Parse(httpContext.Param("id"))
 	containerID := httpContext.Query("container")
 	if err != nil || (containerID != "" && !services.ValidFileContainerID(containerID)) {
@@ -66,14 +66,16 @@ func (handler *FileHandler) connect(httpContext *gin.Context) (services.RemoteFi
 		return nil, nil, false
 	}
 	release := func() { cancel(); <-handler.slots }
-	client, err := handler.sshCache.Get(server)
+	client, err := handler.sshCache.GetContext(ctx, server)
 	if err != nil {
 		release()
 		fileError(httpContext, err)
 		return nil, nil, false
 	}
 	var store services.RemoteFiles
-	if containerID == "" {
+	if containerID == "" && len(directoryOnly) > 0 && directoryOnly[0] {
+		store = services.NewSFTPDirectoryFiles(ctx, client, server.ServerType)
+	} else if containerID == "" {
 		store, err = services.NewSFTPFiles(ctx, client, server.ServerType)
 	} else {
 		store, err = services.NewContainerFiles(ctx, client, containerID, server.ServerType)
@@ -137,7 +139,7 @@ func (handler *FileHandler) List(httpContext *gin.Context) {
 		fileError(httpContext, services.ErrFilePath)
 		return
 	}
-	store, closeStore, ok := handler.managed(httpContext)
+	store, closeStore, ok := handler.managed(httpContext, true)
 	if !ok {
 		return
 	}

@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { useAuthStore } from '../store/authStore';
+import { API_BASE_URL } from './config';
 
 declare module 'axios' {
   export interface AxiosRequestConfig {
@@ -14,10 +15,8 @@ declare module 'axios' {
   }
 }
 
-const baseURL = import.meta.env.VITE_API_URL || `${window.location.origin}/api`;
-
 const client = axios.create({
-  baseURL,
+  baseURL: API_BASE_URL,
   timeout: 10000,
   headers: {
     'Cache-Control': 'no-cache, no-store, must-revalidate',

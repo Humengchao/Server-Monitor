@@ -80,33 +80,44 @@ const (
 )
 
 type Collector struct {
-	db         *models.DB
-	interval   time.Duration
-	mu         sync.Mutex
-	prev       map[uuid.UUID]*prevStats
-	sysInfo    map[uuid.UUID]sysInfoState
-	dockerInfo map[uuid.UUID]dockerInfoState
-	pollMu     sync.Mutex
-	inFlight   map[uuid.UUID]struct{}
-	failures   map[uuid.UUID]pollFailureState
-	clientMu   sync.Mutex
-	clients    map[uuid.UUID]*pooledClient
-	pollSlots  chan struct{}
-	stopCh     chan struct{}
+	db            *models.DB
+	interval      time.Duration
+	mu            sync.Mutex
+	prev          map[uuid.UUID]*prevStats
+	sysInfo       map[uuid.UUID]sysInfoState
+	dockerInfo    map[uuid.UUID]dockerInfoState
+	dockerChecked map[uuid.UUID]time.Time
+	metadataSlots chan struct{}
+	stopContext   context.Context
+	cancel        context.CancelFunc
+	observations  *collectionTimings
+	pollMu        sync.Mutex
+	inFlight      map[uuid.UUID]struct{}
+	failures      map[uuid.UUID]pollFailureState
+	clientMu      sync.Mutex
+	clients       map[uuid.UUID]*pooledClient
+	pollSlots     chan struct{}
+	stopCh        chan struct{}
 }
 
 func NewCollector(db *models.DB, interval time.Duration) *Collector {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Collector{
-		db:         db,
-		interval:   interval,
-		prev:       make(map[uuid.UUID]*prevStats),
-		sysInfo:    make(map[uuid.UUID]sysInfoState),
-		dockerInfo: make(map[uuid.UUID]dockerInfoState),
-		inFlight:   make(map[uuid.UUID]struct{}),
-		failures:   make(map[uuid.UUID]pollFailureState),
-		clients:    make(map[uuid.UUID]*pooledClient),
-		pollSlots:  make(chan struct{}, 10),
-		stopCh:     make(chan struct{}),
+		db:            db,
+		interval:      interval,
+		prev:          make(map[uuid.UUID]*prevStats),
+		sysInfo:       make(map[uuid.UUID]sysInfoState),
+		dockerInfo:    make(map[uuid.UUID]dockerInfoState),
+		dockerChecked: make(map[uuid.UUID]time.Time),
+		metadataSlots: make(chan struct{}, 4),
+		stopContext:   ctx,
+		cancel:        cancel,
+		observations:  newCollectionTimings(),
+		inFlight:      make(map[uuid.UUID]struct{}),
+		failures:      make(map[uuid.UUID]pollFailureState),
+		clients:       make(map[uuid.UUID]*pooledClient),
+		pollSlots:     make(chan struct{}, 10),
+		stopCh:        make(chan struct{}),
 	}
 }
 
@@ -161,6 +172,7 @@ func (c *Collector) seedDockerInfo() {
 
 // Stop signals the collector to stop polling and closes pooled connections.
 func (c *Collector) Stop() {
+	c.cancel()
 	close(c.stopCh)
 	c.clientMu.Lock()
 	clients := c.clients
@@ -257,6 +269,7 @@ func (c *Collector) pollAll() {
 		if !c.beginPoll(s.ID, fingerprint) {
 			continue
 		}
+		queuedAt := time.Now()
 		go func() {
 			defer c.endPoll(s.ID)
 			select {
@@ -265,6 +278,7 @@ func (c *Collector) pollAll() {
 			case <-c.stopCh:
 				return
 			}
+			c.observations.record(s.ServerType, "queue", time.Since(queuedAt), false)
 			m, err := c.collectOne(&s, fingerprint)
 			if err != nil {
 				delay := c.recordPollFailure(s.ID, fingerprint, err, time.Now())
@@ -274,7 +288,9 @@ func (c *Collector) pollAll() {
 				}
 				return
 			}
+			storageStarted := time.Now()
 			if err := models.SaveMetric(c.db.Raw, s.ID, m); err != nil {
+				c.observations.record(s.ServerType, "storage", time.Since(storageStarted), true)
 				delay := c.recordPollFailure(s.ID, fingerprint, err, time.Now())
 				log.Printf("collector: save metric for %s failed: %v; retry in %s", s.Name, err, delay)
 				if c.failureAttempts(s.ID) >= 2 {
@@ -282,8 +298,12 @@ func (c *Collector) pollAll() {
 				}
 				return
 			}
+			c.observations.record(s.ServerType, "storage", time.Since(storageStarted), false)
 			c.clearPollFailure(s.ID)
-			c.clearPersistedPollError(s.ID)
+			if s.LastErrorKind != "" || s.LastError != "" || s.LastErrorAt != nil {
+				c.clearPersistedPollError(s.ID)
+			}
+			c.refreshDockerInfo(&s, fingerprint)
 		}()
 	}
 }
@@ -396,6 +416,11 @@ func (c *Collector) pruneServerState(active map[uuid.UUID]struct{}) {
 			delete(c.dockerInfo, id)
 		}
 	}
+	for id := range c.dockerChecked {
+		if _, ok := active[id]; !ok {
+			delete(c.dockerChecked, id)
+		}
+	}
 	c.mu.Unlock()
 }
 
@@ -408,6 +433,7 @@ func serverPollFingerprint(server *models.Server) [32]byte {
 		server.SSHUsername,
 		server.SSHPassword,
 		server.SSHKey,
+		server.SSHAuthMethod,
 		server.SSHHostKey,
 		server.ServerType,
 	} {
@@ -529,7 +555,7 @@ func (c *Collector) getClient(s *models.Server, fingerprint [32]byte) (*pooledCl
 		c.dropClient(s.ID, pc)
 	}
 
-	dialContext, cancel := context.WithTimeout(context.Background(), sshDialTimeout)
+	dialContext, cancel := context.WithTimeout(c.stopContext, sshDialTimeout)
 	defer cancel()
 	client, conn, err := DialServer(dialContext, s)
 	if err != nil {
@@ -537,6 +563,11 @@ func (c *Collector) getClient(s *models.Server, fingerprint [32]byte) (*pooledCl
 	}
 	pc = &pooledClient{client: client, conn: conn, fingerprint: fingerprint}
 	c.clientMu.Lock()
+	if c.stopContext.Err() != nil {
+		c.clientMu.Unlock()
+		client.Close()
+		return nil, ErrCollectorStopped
+	}
 	c.clients[s.ID] = pc
 	c.clientMu.Unlock()
 	return pc, nil
@@ -557,7 +588,9 @@ func (c *Collector) collectOne(s *models.Server, fingerprint [32]byte) (*models.
 	pingLatency := make(chan int, 1)
 	go func() { pingLatency <- collectPingLatency(s.Host) }()
 
+	dialStarted := time.Now()
 	pc, err := c.getClient(s, fingerprint)
+	c.observations.record(s.ServerType, "connection", time.Since(dialStarted), err != nil)
 	if err != nil {
 		return nil, err
 	}
@@ -573,6 +606,7 @@ func (c *Collector) collectOne(s *models.Server, fingerprint [32]byte) (*models.
 	// waiting for an open-channel response after the transport stops making
 	// progress. Run the complete host collection behind a hard deadline and
 	// close the SSH client on timeout so one broken host never blocks pollAll.
+	sampleStarted := time.Now()
 	resultCh := make(chan collectionResult, 1)
 	go func() {
 		var m *models.MetricPoint
@@ -592,6 +626,7 @@ func (c *Collector) collectOne(s *models.Server, fingerprint [32]byte) (*models.
 	defer timer.Stop()
 	select {
 	case result := <-resultCh:
+		c.observations.record(s.ServerType, "sample", time.Since(sampleStarted), result.err != nil)
 		if result.err != nil {
 			// A failed command usually means a broken transport; drop the
 			// connection so the next poll redials instead of reusing it.
@@ -601,8 +636,12 @@ func (c *Collector) collectOne(s *models.Server, fingerprint [32]byte) (*models.
 		_ = pc.conn.SetDeadline(time.Time{})
 		return result.metric, nil
 	case <-timer.C:
+		c.observations.record(s.ServerType, "sample", time.Since(sampleStarted), true)
 		c.dropClient(s.ID, pc)
 		return nil, fmt.Errorf("collection timed out after %s", sshCollectionTimeout)
+	case <-c.stopContext.Done():
+		c.dropClient(s.ID, pc)
+		return nil, ErrCollectorStopped
 	}
 }
 
@@ -634,7 +673,12 @@ func (c *Collector) syncHostInfo(serverID uuid.UUID, cores int, memTotal, diskTo
 		prev, known := c.sysInfo[serverID]
 		c.mu.Unlock()
 		if !known || prev != info {
-			if err := models.UpdateServerSystemInfo(c.db.Raw, serverID, cores, memTotal, diskTotal); err != nil {
+			ctx, cancel := context.WithTimeout(c.stopContext, 3*time.Second)
+			started := time.Now()
+			err := models.UpdateServerSystemInfoContext(ctx, c.db.Raw, serverID, cores, memTotal, diskTotal)
+			cancel()
+			c.observations.record("all", "host_info_storage", time.Since(started), err != nil)
+			if err != nil {
 				log.Printf("collector: update system info for %s: %v", serverID, err)
 			} else {
 				c.mu.Lock()
@@ -644,12 +688,18 @@ func (c *Collector) syncHostInfo(serverID uuid.UUID, cores int, memTotal, diskTo
 		}
 	}
 
+	c.syncDockerInfo(serverID, presence, dockerVersion)
+}
+
+func (c *Collector) syncDockerInfo(serverID uuid.UUID, presence dockerPresence, dockerVersion string) {
 	c.mu.Lock()
 	prevDocker, known := c.dockerInfo[serverID]
 	c.mu.Unlock()
 	docker, write := resolveDockerState(prevDocker, known, presence, dockerVersion)
 	if write {
-		if err := models.UpdateDockerInfo(c.db.Raw, serverID, docker.hasDocker, docker.version); err != nil {
+		ctx, cancel := context.WithTimeout(c.stopContext, 3*time.Second)
+		defer cancel()
+		if err := models.UpdateDockerInfoContext(ctx, c.db.Raw, serverID, docker.hasDocker, docker.version); err != nil {
 			log.Printf("collector: update docker info for %s: %v", serverID, err)
 		} else {
 			c.mu.Lock()
@@ -715,7 +765,7 @@ var linuxMetricsCommand = strings.Join([]string{
 	sharedLinuxSections["uptime"],
 	sharedLinuxSections["nproc"],
 	sharedProbeValues["web-disk-usage"],
-	linuxDockerProbe,
+	"echo unknown", // Docker metadata is refreshed independently once per minute.
 }, "; echo "+linuxSectionSeparator+"; ")
 
 // linuxDockerProbe answers two separate questions, because conflating them is
@@ -1072,7 +1122,7 @@ var windowsMetricsCommand = buildWindowsMetricsCommand()
 func buildWindowsMetricsCommand() string {
 	var compressed bytes.Buffer
 	writer, _ := flate.NewWriter(&compressed, flate.BestCompression)
-	_, _ = writer.Write([]byte(windowsMetricsScript))
+	_, _ = writer.Write([]byte(windowsWebMetricsScript))
 	_ = writer.Close()
 	payload := base64.StdEncoding.EncodeToString(compressed.Bytes())
 	stub := "$s=[IO.Compression.DeflateStream]::new([IO.MemoryStream]::new([Convert]::FromBase64String('" + payload + "')),[IO.Compression.CompressionMode]::Decompress);iex ([IO.StreamReader]::new($s)).ReadToEnd()"
@@ -1181,11 +1231,20 @@ type DockerProbeResult struct {
 // same reading as the collector, so a manual "re-check" and the background poll
 // can never disagree about what counts as installed.
 func ProbeDocker(client *ssh.Client, serverType string) DockerProbeResult {
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	return ProbeDockerContext(ctx, client, serverType)
+}
+
+func ProbeDockerContext(ctx context.Context, client *ssh.Client, serverType string) DockerProbeResult {
 	if serverType == "windows" {
-		out, _ := RunCmd(client, "powershell -NoProfile -NonInteractive -EncodedCommand "+
+		out, _, err := runCmdContext(ctx, client, "powershell -NoProfile -NonInteractive -EncodedCommand "+
 			encodePowerShell(`$p = if (Get-Command docker -ErrorAction SilentlyContinue) { 'installed' } else { 'absent' }
 $v = if ($p -eq 'installed') { docker info --format "{{.ServerVersion}}" 2>$null } else { '' }
-Write-Output ("dockerpresent=" + $p); Write-Output ("docker=" + $v)`))
+Write-Output ("dockerpresent=" + $p); Write-Output ("docker=" + $v)`), 4096)
+		if err != nil {
+			return DockerProbeResult{}
+		}
 		verdict, version := "", ""
 		for _, line := range strings.Split(out, "\n") {
 			k, v, ok := strings.Cut(strings.TrimSpace(line), "=")
@@ -1202,19 +1261,10 @@ Write-Output ("dockerpresent=" + $p); Write-Output ("docker=" + $v)`))
 		presence := windowsDockerPresence(verdict, version)
 		return DockerProbeResult{Known: presence != dockerUnknown, Installed: presence == dockerInstalled, Version: version}
 	}
-	out, _ := RunCmd(client, linuxDockerProbe)
+	out, _, err := runCmdContext(ctx, client, linuxDockerProbe, 4096)
+	if err != nil {
+		return DockerProbeResult{}
+	}
 	presence, version := parseDockerProbe(out)
 	return DockerProbeResult{Known: presence != dockerUnknown, Installed: presence == dockerInstalled, Version: version}
-}
-
-// RunDockerCmd runs a docker command, falling back to sudo docker if needed.
-func RunDockerCmd(client *ssh.Client, args string) (string, error) {
-	out, err := RunCmd(client, "docker "+args)
-	if err != nil {
-		out, err = RunCmd(client, "sudo docker "+args)
-		if err != nil {
-			return "", err
-		}
-	}
-	return out, nil
 }

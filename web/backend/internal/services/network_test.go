@@ -16,22 +16,22 @@ import (
 func TestNetworkUnknownNeverRecoversAnIncident(t *testing.T) {
 	check := models.NetworkCheck{LossThreshold: 10, Latest: &models.NetworkSample{ThresholdExceeded: true}}
 	unknown := models.NetworkSample{Status: "error"}
-	if transition := networkTransition(check, &unknown); transition != "" || !unknown.ThresholdExceeded {
+	if transition := models.NetworkSampleTransition(check, &unknown); transition != "" || !unknown.ThresholdExceeded {
 		t.Fatalf("unknown recovered: %s %+v", transition, unknown)
 	}
 	five := 5
 	loss := 0.0
 	healthy := models.NetworkSample{Sent: &five, Received: &five, LossPercent: &loss}
-	if transition := networkTransition(check, &healthy); transition != "resolved" {
+	if transition := models.NetworkSampleTransition(check, &healthy); transition != "resolved" {
 		t.Fatal(transition)
 	}
 	check.Latest = &healthy
 	bad := ParseNetworkPing("5 packets transmitted, 0 received")
-	if transition := networkTransition(check, &bad); transition != "firing" {
+	if transition := models.NetworkSampleTransition(check, &bad); transition != "firing" {
 		t.Fatal(transition)
 	}
 	check.Latest = &bad
-	if transition := networkTransition(check, &bad); transition != "" {
+	if transition := models.NetworkSampleTransition(check, &bad); transition != "" {
 		t.Fatal("duplicate notification")
 	}
 }

@@ -38,11 +38,16 @@ func TestSharedWindowsProbeDeliveryRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(script) != windowsMetricsScript {
+	if string(script) != windowsWebMetricsScript {
 		t.Fatal("script changed in delivery")
 	}
-	if !strings.Contains(string(script), "$raw2 = Get-CimInstance Win32_PerfRawData_PerfOS_Processor") || !strings.Contains(string(script), "dockerpresent=") {
+	if !strings.Contains(string(script), "$raw2 = Get-CimInstance Win32_PerfRawData_PerfOS_Processor") || !strings.Contains(string(script), "memtotal=") {
 		t.Fatal("missing canonical probes")
+	}
+	for _, expensive := range []string{"docker info", "Get-Process", "Win32_NetworkAdapterConfiguration", "ident=", "proc="} {
+		if strings.Contains(string(script), expensive) {
+			t.Fatalf("web probe includes %s", expensive)
+		}
 	}
 }
 

@@ -1,3 +1,4 @@
+import { apiError } from '../utils/apiError';
 import React, { useState } from 'react';
 import { App, Button, Modal, Segmented, Space, Tag, Typography } from 'antd';
 import {
@@ -19,11 +20,6 @@ interface Props {
   onClear: () => void;
   /** Called after any mutation so the dashboard can refetch. */
   onChanged: () => void;
-}
-
-function apiError(err: unknown, fallback: string): string {
-  const detail = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
-  return detail || fallback;
 }
 
 const INVENTORY_COLUMNS = [

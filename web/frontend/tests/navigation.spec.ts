@@ -147,13 +147,17 @@ test('loading a new page keeps the navigation and header available', async ({ pa
   await page.goto('/credentials');
   await expect(page.getByRole('heading', { name: 'Credentials', exact: true })).toBeVisible();
   let release!: () => void;
+  let settingsRequested = false;
   const gate = new Promise<void>(resolve => { release = resolve; });
   await page.route(/\/assets\/Settings-[^/]+\.js$/, async route => {
+    settingsRequested = true;
     await gate;
     await route.continue();
   });
   await page.getByRole('menuitem', { name: /Settings$/ }).click();
-  await expect(page.getByRole('status', { name: 'Loading...', exact: true })).toBeVisible();
+  await expect.poll(() => settingsRequested).toBe(true);
+  // Router transitions retain the previous page while its replacement loads.
+  await expect(page.getByRole('heading', { name: 'Credentials', exact: true })).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'Navigation', exact: true })).toBeVisible();
   await expect(page.getByRole('banner')).toBeVisible();
   release();

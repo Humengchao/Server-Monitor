@@ -3,6 +3,7 @@ import { Select, Space, Button, Input, App, Tag } from 'antd';
 import { PlusOutlined, KeyOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { credentialsApi, Credential } from '../api/credentials';
+import type { SSHAuthMethod } from '../api/servers';
 
 interface Props {
   value?: string;
@@ -20,6 +21,8 @@ export default function CredentialSelect({ value, onChange, serverType }: Props)
   const [newUsername, setNewUsername] = useState('root');
   const [newPassword, setNewPassword] = useState('');
   const [newKey, setNewKey] = useState('');
+  const [authMethod, setAuthMethod] = useState<SSHAuthMethod>('password');
+  const usePassword = serverType === 'windows' || authMethod === 'password';
   const [creating, setCreating] = useState(false);
 
   const loadCreds = async () => {
@@ -41,14 +44,15 @@ export default function CredentialSelect({ value, onChange, serverType }: Props)
   }, []);
 
   const handleCreate = async () => {
-    if (!newName.trim()) return;
+    if (creating || !newName.trim() || !(usePassword ? newPassword : newKey.trim())) return;
     setCreating(true);
     try {
       const res = await credentialsApi.create({
         name: newName.trim(),
         ssh_username: newUsername.trim() || 'root',
-        ssh_password: newPassword,
-        ssh_key: serverType === 'windows' ? undefined : newKey,
+        ssh_auth_method: usePassword ? 'password' : 'key',
+        ssh_password: usePassword ? newPassword : undefined,
+        ssh_key: usePassword ? undefined : newKey,
         credential_type: serverType || 'linux',
       });
       setCreds((prev) => [res.data, ...prev]);
@@ -57,6 +61,7 @@ export default function CredentialSelect({ value, onChange, serverType }: Props)
       setNewUsername('root');
       setNewPassword('');
       setNewKey('');
+      setAuthMethod('password');
       setShowNew(false);
       message.success(t('credential.created'));
     } catch {
@@ -93,13 +98,14 @@ export default function CredentialSelect({ value, onChange, serverType }: Props)
                   onChange={(e) => setNewUsername(e.target.value)}
                   placeholder={t(serverType === 'windows' ? 'credential.usernamePlaceholder' : 'credential.sshUsernameInlinePlaceholder')}
                 />
-                <Input.Password
+                {serverType !== 'windows' && <Select size="small" aria-label={t('ssh.authMethod')} value={authMethod} onChange={setAuthMethod} options={[{ value: 'password', label: t('ssh.passwordAuth') }, { value: 'key', label: t('ssh.keyAuth') }]} />}
+                {usePassword && <Input.Password
                   size="small"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   placeholder={t(serverType === 'windows' ? 'credential.passwordPlaceholder' : 'credential.sshPasswordInlinePlaceholder')}
-                />
-                {serverType !== 'windows' && <Input.TextArea
+                />}
+                {!usePassword && <Input.TextArea
                   size="small"
                   rows={2}
                   value={newKey}
@@ -108,7 +114,7 @@ export default function CredentialSelect({ value, onChange, serverType }: Props)
                   style={{ fontSize: 12 }}
                 />}
                 <Space>
-                  <Button size="small" type="primary" loading={creating} disabled={!newName.trim() || (serverType === 'windows' && !newPassword.trim())} onClick={handleCreate}>{t('common.create')}</Button>
+                  <Button size="small" type="primary" loading={creating} disabled={!newName.trim() || !(usePassword ? newPassword : newKey.trim())} onClick={handleCreate}>{t('common.create')}</Button>
                   <Button size="small" disabled={creating} onClick={() => setShowNew(false)}>{t('common.cancel')}</Button>
                 </Space>
               </Space>

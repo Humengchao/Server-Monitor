@@ -140,8 +140,8 @@ func TestAIReadPolicyBlocksSecretsAndPathAliases(t *testing.T) {
 func TestAIConfigPolicyDistinguishesDeclarativeConfigurationFromExecution(t *testing.T) {
 	normal := "server { listen 8080; server_name example.com; root /var/www/html; access_log /var/log/nginx/access.log; location / { proxy_pass http://127.0.0.1:3000; proxy_set_header Host $host; } }\n"
 	action := prepareAITest(t, "linux", "write_file", aiWriteFile{Path: "/etc/nginx/conf.d/app.conf", Content: normal, ExpectedRevision: "missing"})
-	if action.RequiresApproval {
-		t.Fatal("normal declarative configuration requires approval")
+	if !action.RequiresApproval {
+		t.Fatal("configuration writes must be approved even when declarative")
 	}
 	for _, content := range []string{"load_module /tmp/evil.so;", "http { server { content_by_lua_block { os.execute('rm -rf /') } } }", "access_log /etc/crontab;", "pid /etc/shadow;", "server { root /; }", "include /tmp/unsafe.conf;", "perl_require /tmp/unsafe.pl;", "server { access_log /var/log/nginx/../../etc/shadow; }", "server { root /var/www/..; }", "server { root /var/www/$arg_path; }", "access_log /var/log/nginx/$arg_path;", "server { listen unix:/etc/app/socket; }", "server { listen 8080;", "server { listen 8080; }}", "root /var/www/html {}", "# remove the existing site\n"} {
 		action := prepareAITest(t, "linux", "write_file", aiWriteFile{Path: "/etc/nginx/conf.d/app.conf", Content: content, ExpectedRevision: "missing"})
@@ -592,9 +592,10 @@ func TestAIAutomaticConfigReplacementCannotRemoveUnreviewedSecurityControls(t *t
 		t.Fatal(err)
 	}
 	action := prepareAITest(t, "linux", "write_file", aiWriteFile{Path: filename, Content: "server { listen 8080; root /var/www/html; }\n", ExpectedRevision: FileRevision([]byte(secured))})
-	if action.RequiresApproval {
-		t.Fatal("fixture must exercise a new configuration that appears harmless in isolation")
+	if !action.RequiresApproval {
+		t.Fatal("replacement of existing access controls must require exact approval")
 	}
+	action.ApprovalMode = "readonly"
 	if result, err := ExecuteAIAction(context.Background(), server, action); err == nil || result.Unknown || result.BackupPath != "" {
 		t.Fatalf("removed original access controls without approval: %+v %v", result, err)
 	}
@@ -692,16 +693,18 @@ func TestAIExecutableTextAllowsReadsAndFullyAutomaticWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	read := prepareAITest(t, "linux", "read_file", aiReadFile{Path: filename})
-	read.ApprovalMode = "readonly"
+	read.ApprovalMode = "standard" // The caller has approved exporting this exact file.
 	if result, err := ExecuteAIAction(context.Background(), server, read); err != nil || !strings.Contains(result.Output, "listen 8080") {
 		t.Errorf("reading executable text was mistaken for executing it: %+v %v", result, err)
 	}
 	write := prepareAITest(t, "linux", "write_file", aiWriteFile{Path: filename, Content: strings.Replace(original, "8080", "8081", 1), ExpectedRevision: FileRevision([]byte(original))})
 	write.ApprovalMode = "standard"
+	write.RequiresApproval = false // Cannot turn a prepared approval into an automatic action.
 	if result, err := ExecuteAIAction(context.Background(), server, write); err == nil || result.BackupPath != "" {
 		t.Fatalf("standard task changed an executable file without review: %+v %v", result, err)
 	}
 	write.ApprovalMode = "automatic"
+	write.RequiresApproval = true
 	if result, err := ExecuteAIAction(context.Background(), server, write); err != nil || result.BackupPath == "" {
 		t.Errorf("fully automatic task could not perform its authorized file action: %+v %v", result, err)
 	}
@@ -758,6 +761,7 @@ func aiSFTPServer(t *testing.T, serve ...func(ssh.Channel)) *models.Server {
 	if err != nil {
 		t.Fatal(err)
 	}
+	recordTestSSHHostKey(t, listener.Addr().String(), signer)
 	var active sync.Map
 	var dials atomic.Int32
 	t.Cleanup(func() {

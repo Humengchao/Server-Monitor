@@ -1,16 +1,12 @@
 package services
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"math"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
-
-	"golang.org/x/crypto/ssh"
 )
 
 // Docker commands are run over SSH, so both their wall-clock duration and the
@@ -38,30 +34,6 @@ type DockerContainerStats struct {
 	BlockIOAvailable bool
 	DiskUsage        int64
 	StatsAvailable   bool
-}
-
-// RunDockerCmdBounded runs a non-interactive Docker command with a timeout and
-// output cap. It retries with passwordless sudo when the current SSH user does
-// not have permission to talk to the Docker daemon. Keeping sudo non-
-// interactive is important: a password prompt must never hold an API request
-// open until the SSH server closes the channel.
-func RunDockerCmdBounded(client *ssh.Client, args string, timeout time.Duration, limit int) (string, bool, error) {
-	out, truncated, err := RunCmdBounded(client, "docker "+args, timeout, limit)
-	if err == nil {
-		return out, truncated, nil
-	}
-	// A timeout is a transport/remote execution failure, not a permissions
-	// failure. Retrying the same command through sudo would double the wait and
-	// can outlive the HTTP request without improving the result.
-	// Truncated output also cannot be repaired by executing the command again.
-	if truncated || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-		return out, truncated, err
-	}
-	out, truncated, sudoErr := RunCmdBounded(client, "sudo -n docker "+args, timeout, limit)
-	if sudoErr != nil {
-		return out, truncated, sudoErr
-	}
-	return out, truncated, nil
 }
 
 type dockerStatsRow struct {

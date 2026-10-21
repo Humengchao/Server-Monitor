@@ -1,3 +1,4 @@
+import { apiError } from '../utils/apiError';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, App, Button, Card, Empty, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tabs, Tag, Typography } from 'antd';
 import { DeleteOutlined, EditOutlined, ExperimentOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
@@ -16,7 +17,6 @@ const docs: Partial<Record<NotificationType, string>> = {
   telegram: 'https://core.telegram.org/bots/api#sendmessage', wecom: 'https://developer.work.weixin.qq.com/document/path/91770',
   dingtalk: 'https://open.dingtalk.com/document/robots/customize-robot-security-settings',
 };
-function errorText(error: unknown, fallback: string) { return (error as { response?: { data?: { error?: string } } })?.response?.data?.error || fallback; }
 
 export default function Notifications() {
   const { t, i18n } = useTranslation('notifications');
@@ -67,7 +67,7 @@ export default function Notifications() {
     if (!mounted.current || busyRef.current) return false;
     busyRef.current = true; setBusy(true); request.current?.abort();
     try { await action(); if (mounted.current && success) message.success(success); return true; }
-    catch (error) { if (mounted.current) message.error(errorText(error, t('failed'))); return false; }
+    catch (error) { if (mounted.current) message.error(apiError(error, t('failed'))); return false; }
     finally { busyRef.current = false; if (mounted.current) { setBusy(false); void loadRef.current(); } }
   };
   const edit = (channel?: NotificationChannel) => {

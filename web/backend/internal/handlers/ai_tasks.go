@@ -188,6 +188,7 @@ func (h *AITaskHandler) Decide(c *gin.Context) {
 		aiTaskError(c, err)
 		return
 	}
+	h.worker.Wake()
 	c.JSON(200, task)
 }
 func (h *AITaskHandler) Message(c *gin.Context) {

@@ -1,3 +1,4 @@
+import { apiError } from '../utils/apiError';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert, App, Button, Card, Col, Empty, Form, Input, InputNumber, Modal, Row, Segmented, Select,
@@ -41,10 +42,6 @@ interface RuleFormValues {
 }
 
 /** Reads the human-readable error the API returns, falling back to a label. */
-function apiError(err: unknown, fallback: string): string {
-  const detail = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
-  return detail || fallback;
-}
 
 function formatDuration(seconds: number, t: Translate): string {
   if (seconds < 60) return t('alerts.durationSeconds', { count: seconds });

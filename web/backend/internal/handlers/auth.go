@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -8,9 +10,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"server-monitor/internal/config"
 	"server-monitor/internal/models"
+	"server-monitor/internal/services"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -197,9 +201,9 @@ func (h *AuthHandler) LoginHistory(c *gin.Context) {
 	})
 }
 
-// ChangePassword rotates the caller's password and signs every other session
-// out. The caller keeps working: the replacement token is minted with exactly
-// the revocation cutoff as its issue time.
+// ChangePassword rotates the password and revokes old tokens and terminals.
+// The replacement carries the new database session version; its standard JWT
+// timestamps use the application's clock just like ordinary login tokens.
 func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	userID := c.MustGet("user_id").(uuid.UUID)
 	var req ChangePasswordRequest
@@ -207,7 +211,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if len(req.NewPassword) < minPasswordLength {
+	if utf8.RuneCountInString(req.NewPassword) < minPasswordLength {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": fmt.Sprintf("the new password must be at least %d characters", minPasswordLength)})
 		return
@@ -241,14 +245,20 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to hash password"})
 		return
 	}
-	validAfter, err := models.UpdateUserPassword(db.Raw, userID, string(hash))
+	validAfter, err := models.UpdateUserPassword(db.Raw, userID, string(hash), user.PasswordHash)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusConflict, gin.H{"error": "password changed concurrently; sign in again"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update password"})
 		return
 	}
+	services.RevokeUserTerminalSessions(userID, validAfter)
 
 	user.PasswordHash = string(hash)
-	token, err := h.generateToken(user, validAfter)
+	user.TokensValidAfter = validAfter
+	token, err := h.generateToken(user, time.Now())
 	if err != nil {
 		// The password did change; the caller just has to sign in again.
 		c.JSON(http.StatusOK, gin.H{"message": "password updated", "reauth_required": true})
@@ -257,14 +267,15 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "password updated", "token": token})
 }
 
-// generateToken mints a JWT. issuedAt is explicit so ChangePassword can align
-// it with the revocation cutoff it just wrote.
+// generateToken keeps the token lifetime separate from the exact database
+// session version, avoiding second-resolution revocation and clock-skew races.
 func (h *AuthHandler) generateToken(user *models.User, issuedAt time.Time) (string, error) {
 	claims := jwt.MapClaims{
-		"user_id":  user.ID.String(),
-		"username": user.Username,
-		"iat":      issuedAt.Unix(),
-		"exp":      issuedAt.Add(tokenTTL).Unix(),
+		"user_id":         user.ID.String(),
+		"username":        user.Username,
+		"iat":             issuedAt.Unix(),
+		"exp":             issuedAt.Add(tokenTTL).Unix(),
+		"session_version": strconv.FormatInt(user.TokensValidAfter.UnixMicro(), 10),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(h.cfg.JWTSecret))

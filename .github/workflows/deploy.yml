@@ -43,11 +43,14 @@ jobs:
       - name: Report backend failures
         if: failure()
         run: node shared/scripts/ci-errors.mjs "$RUNNER_TEMP/go-tests.log"
+      - name: Check Go vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+        working-directory: web/backend
       - run: bash web/scripts/deploy_test.sh
       - name: Test Agent installation lifecycle in an isolated container
         run: docker run --rm -e AGENT_INSTALL_TEST_CONTAINER=1 -v "$PWD/web/backend/agent-assets:/assets:ro" ubuntu:24.04 bash /assets/install_test.sh
       - run: node shared/scripts/generate-probes.mjs --check
-      - run: npm ci && npm run lint && npm run build && npx playwright install --with-deps chromium && npm run test:smoke
+      - run: npm ci && npm audit --audit-level=moderate && npm run lint && npm run build && npx playwright install --with-deps chromium && npm run test:smoke
         working-directory: web/frontend
       - uses: actions/upload-artifact@v4
         if: failure()
@@ -138,13 +141,21 @@ jobs:
       GHCR_USER: ${{ github.actor }}
     steps:
       - uses: actions/checkout@v4
+      - name: Require a trusted deployment identity
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+          DEPLOY_HOST_FINGERPRINT: ${{ secrets.DEPLOY_HOST_FINGERPRINT }}
+        run: |
+          test -n "$DEPLOY_KEY" || { echo 'Configure DEPLOY_KEY before deployment'; exit 1; }
+          [[ "$DEPLOY_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]+$ ]] || { echo 'Configure a verified DEPLOY_HOST_FINGERPRINT before deployment'; exit 1; }
       - name: Release exact commit
         id: release
         uses: appleboy/ssh-action@v1.2.1
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
-          password: ${{ secrets.DEPLOY_PASSWORD }}
+          key: ${{ secrets.DEPLOY_KEY }}
+          fingerprint: ${{ secrets.DEPLOY_HOST_FINGERPRINT }}
           command_timeout: 20m
           envs: DEPLOY_SHA,DEPLOY_REPOSITORY,GHCR_PAT,GHCR_USER
           script: |
@@ -172,7 +183,8 @@ jobs:
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
-          password: ${{ secrets.DEPLOY_PASSWORD }}
+          key: ${{ secrets.DEPLOY_KEY }}
+          fingerprint: ${{ secrets.DEPLOY_HOST_FINGERPRINT }}
           command_timeout: 10m
           envs: DEPLOY_SHA
           script: bash /opt/server-monitor/deploy-runner.sh rollback "$DEPLOY_SHA"

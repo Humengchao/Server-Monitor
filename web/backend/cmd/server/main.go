@@ -41,6 +41,10 @@ func main() {
 	if err != nil {
 		exitWithError(exitConfigError, "Config error", err)
 	}
+	services.ConfigureSSHHostKeyPolicy(cfg.SSHAllowUnverifiedHostKeys)
+	if cfg.SSHAllowUnverifiedHostKeys {
+		log.Print("WARNING: SSH_ALLOW_UNVERIFIED_HOST_KEYS is enabled for migration; unpinned SSH endpoints are not authenticated")
+	}
 
 	db, err := database.Connect(cfg.DatabaseURL)
 	if err != nil {
@@ -48,7 +52,7 @@ func main() {
 	}
 	defer db.Close()
 
-	// Configure connection pool (default is only 2 max open conns)
+	// Bound concurrent database work and retain a small idle pool.
 	db.SetMaxOpenConns(25)
 	db.SetMaxIdleConns(10)
 	db.SetConnMaxLifetime(5 * time.Minute)

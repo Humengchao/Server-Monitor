@@ -91,6 +91,7 @@ type CreateServerRequest struct {
 	SSHUsername       string     `json:"ssh_username"`
 	SSHPassword       string     `json:"ssh_password"`
 	SSHKey            string     `json:"ssh_key"`
+	SSHAuthMethod     string     `json:"ssh_auth_method"`
 	SSHHostKey        string     `json:"ssh_host_key"`
 	CredentialID      *uuid.UUID `json:"credential_id"`
 	ServerType        string     `json:"server_type"`
@@ -115,11 +116,14 @@ type UpdateServerRequest struct {
 	SSHUsername       string          `json:"ssh_username"`
 	SSHPassword       string          `json:"ssh_password"`
 	SSHKey            string          `json:"ssh_key"`
-	SSHHostKey        string          `json:"ssh_host_key"`
+	SSHAuthMethod     string          `json:"ssh_auth_method"`
+	ClearSSHPassword  bool            `json:"clear_ssh_password"`
+	ClearSSHKey       bool            `json:"clear_ssh_key"`
+	SSHHostKey        *string         `json:"ssh_host_key"`
 	CredentialID      *uuid.UUID      `json:"credential_id"`
 	ServerType        string          `json:"server_type"`
 	ExpiresAt         *time.Time      `json:"expires_at"`
-	Notes             string          `json:"notes"`
+	Notes             *string         `json:"notes"`
 	BillingPrice      float64         `json:"billing_price"`
 	BillingCurrency   string          `json:"billing_currency"`
 	BillingCycle      string          `json:"billing_cycle"`
@@ -290,7 +294,12 @@ func (h *ServerHandler) Create(c *gin.Context) {
 	}
 	if serverType == "windows" {
 		req.SSHKey = ""
-		req.SSHHostKey = ""
+	}
+	if req.SSHHostKey != "" {
+		if err := services.ValidateSSHHostKey(req.SSHHostKey); err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
 	}
 	req.Name, req.Host, req.SSHUsername, req.Port, req.ServerType = name, host, username, port, serverType
 	if req.BillingCurrency == "" {
@@ -304,10 +313,12 @@ func (h *ServerHandler) Create(c *gin.Context) {
 		// Enrollment establishes machine identity; no SSH secret is needed.
 	} else if req.CredentialID != nil {
 		credential, err := models.GetCredentialByID(db, *req.CredentialID, userID)
-		if err != nil || credential.CredType != req.ServerType {
+		if err != nil || credential.CredType != req.ServerType || credential.SSHAuthMethod == "" || req.ServerType == "windows" && !credential.HasPassword {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid credential"})
 			return
 		}
+		req.SSHPassword, req.SSHKey = "", ""
+		req.SSHAuthMethod = credential.SSHAuthMethod
 	} else if req.ServerType == "windows" && strings.TrimSpace(req.SSHPassword) == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Windows password is required"})
 		return
@@ -325,6 +336,7 @@ func (h *ServerHandler) Create(c *gin.Context) {
 		SSHUsername:     req.SSHUsername,
 		SSHPassword:     req.SSHPassword,
 		SSHKey:          req.SSHKey,
+		SSHAuthMethod:   req.SSHAuthMethod,
 		SSHHostKey:      req.SSHHostKey,
 		CredentialID:    req.CredentialID,
 		ServerType:      req.ServerType,
@@ -336,7 +348,11 @@ func (h *ServerHandler) Create(c *gin.Context) {
 		TrafficLimit:    req.TrafficLimit,
 		PublicLocation:  req.PublicLocation,
 	}
-	if err := models.CreateServer(db, s); err != nil {
+	if err := models.CreateServer(db, s, models.SSHAuthUpdate{Method: req.SSHAuthMethod}); err != nil {
+		if errors.Is(err, models.ErrSSHAuthentication) {
+			c.JSON(400, gin.H{"error": "selected SSH authentication requires a password or key"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create server"})
 		return
 	}
@@ -380,7 +396,8 @@ func (h *ServerHandler) Update(c *gin.Context) {
 		req.ServerType = actualPlatform
 		req.SSHPassword = ""
 		req.SSHKey = ""
-		req.SSHHostKey = ""
+		emptyKey := ""
+		req.SSHHostKey = &emptyKey
 		req.CredentialID = nil
 		if req.Host == "" {
 			req.Host = "agent"
@@ -416,7 +433,12 @@ func (h *ServerHandler) Update(c *gin.Context) {
 	}
 	if serverType == "windows" {
 		req.SSHKey = ""
-		req.SSHHostKey = ""
+	}
+	if req.SSHHostKey != nil && *req.SSHHostKey != "" {
+		if err := services.ValidateSSHHostKey(*req.SSHHostKey); err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
 	}
 	req.Name, req.Host, req.SSHUsername, req.Port, req.ServerType = name, host, username, port, serverType
 	if req.BillingCurrency == "" {
@@ -432,20 +454,6 @@ func (h *ServerHandler) Update(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid credential"})
 			return
 		}
-	} else if req.SSHPassword == "" && strings.TrimSpace(req.SSHKey) == "" {
-		hasDirectAuth, err := models.ServerHasDirectSSHAuth(db.Raw, id, userID)
-		if err == sql.ErrNoRows {
-			c.JSON(http.StatusNotFound, gin.H{"error": "server not found"})
-			return
-		}
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to validate SSH authentication"})
-			return
-		}
-		if !hasDirectAuth {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "SSH password or key is required when removing a credential"})
-			return
-		}
 	}
 	s := &models.Server{
 		ID:              id,
@@ -456,18 +464,20 @@ func (h *ServerHandler) Update(c *gin.Context) {
 		SSHUsername:     req.SSHUsername,
 		SSHPassword:     req.SSHPassword,
 		SSHKey:          req.SSHKey,
-		SSHHostKey:      req.SSHHostKey,
 		CredentialID:    req.CredentialID,
 		ServerType:      req.ServerType,
 		ExpiresAt:       req.ExpiresAt,
-		Notes:           req.Notes,
 		BillingPrice:    req.BillingPrice,
 		BillingCurrency: req.BillingCurrency,
 		BillingCycle:    req.BillingCycle,
 		TrafficLimit:    req.TrafficLimit,
 		PublicLocation:  req.PublicLocation,
 	}
-	if err := models.UpdateServerWithExpiryExpectation(c.Request.Context(), db, s, expected, models.ServerOptions{IsPublic: req.IsPublic, MonitoringEnabled: req.MonitoringEnabled, AutoRenewEnabled: req.AutoRenewEnabled}); err != nil {
+	if err := models.UpdateServerWithExpiryExpectation(c.Request.Context(), db, s, expected, models.ServerOptions{IsPublic: req.IsPublic, MonitoringEnabled: req.MonitoringEnabled, AutoRenewEnabled: req.AutoRenewEnabled, Notes: req.Notes, SSHHostKey: req.SSHHostKey, Authentication: models.SSHAuthUpdate{Method: req.SSHAuthMethod, ClearPassword: req.ClearSSHPassword, ClearKey: req.ClearSSHKey}}); err != nil {
+		if errors.Is(err, models.ErrSSHAuthentication) {
+			c.JSON(400, gin.H{"error": "selected SSH authentication requires a password or key; Windows requires a password"})
+			return
+		}
 		if errors.Is(err, models.ErrServerExpiryChanged) {
 			c.JSON(http.StatusConflict, gin.H{"error": "server expiry changed; reload before saving", "error_code": "expiry_changed"})
 			return

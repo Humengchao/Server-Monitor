@@ -1,9 +1,10 @@
 package handlers
 
 import (
+	"context"
+	"database/sql"
 	"net/http"
 	"strconv"
-	"sync"
 	"time"
 
 	"server-monitor/internal/models"
@@ -38,18 +39,12 @@ type ServerUptimeResult struct {
 	Windows  []UptimeWindowResult `json:"windows"`
 }
 
-type uptimeCacheEntry struct {
-	payload gin.H
-	expires time.Time
-}
-
 type UptimeHandler struct {
-	mu    sync.Mutex
-	cache map[uuid.UUID]uptimeCacheEntry
+	cache *services.RequestCache[gin.H]
 }
 
 func NewUptimeHandler() *UptimeHandler {
-	return &UptimeHandler{cache: make(map[uuid.UUID]uptimeCacheEntry)}
+	return &UptimeHandler{cache: services.NewRequestCache[gin.H](2)}
 }
 
 // windowBounds computes each window's clamped start and the bucket expectation
@@ -75,20 +70,24 @@ func windowBounds(now, createdAt time.Time) []UptimeWindowResult {
 func (h *UptimeHandler) Fleet(c *gin.Context) {
 	userID := c.MustGet("user_id").(uuid.UUID)
 
-	h.mu.Lock()
-	if entry, ok := h.cache[userID]; ok && time.Now().Before(entry.expires) {
-		payload := entry.payload
-		h.mu.Unlock()
-		c.JSON(http.StatusOK, payload)
+	db := c.MustGet("db").(*models.DB)
+	payload, err := h.cache.Get(c.Request.Context(), userID.String(), fleetUptimeCacheTTL, func(ctx context.Context) (gin.H, error) {
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		return loadFleetUptime(ctx, db.Raw, userID)
+	})
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "failed to load availability"})
 		return
 	}
-	h.mu.Unlock()
+	c.JSON(http.StatusOK, payload)
+}
 
+func loadFleetUptime(ctx context.Context, db *sql.DB, userID uuid.UUID) (gin.H, error) {
 	now := time.Now().UTC()
 	end1m := services.TierEnd(now, 60)
 	end15m := services.TierEnd(now, models.DailyStripBucketSeconds)
-	db := c.MustGet("db").(*models.DB)
-	counts, err := models.GetFleetUptimeCounts(db.Raw, userID, models.UptimeCensusRange{
+	counts, err := models.GetFleetUptimeCountsContext(ctx, db, userID, models.UptimeCensusRange{
 		Since24h: end1m.Add(-24 * time.Hour),
 		Since7d:  end1m.Add(-7 * 24 * time.Hour),
 		Until1m:  end1m,
@@ -96,8 +95,7 @@ func (h *UptimeHandler) Fleet(c *gin.Context) {
 		Until15m: end15m,
 	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load availability"})
-		return
+		return nil, err
 	}
 
 	servers := make([]ServerUptimeResult, 0, len(counts))
@@ -124,11 +122,7 @@ func (h *UptimeHandler) Fleet(c *gin.Context) {
 		"generated_at": now,
 	}
 
-	h.mu.Lock()
-	h.cache[userID] = uptimeCacheEntry{payload: payload, expires: time.Now().Add(fleetUptimeCacheTTL)}
-	h.mu.Unlock()
-
-	c.JSON(http.StatusOK, payload)
+	return payload, nil
 }
 
 // Detail returns one server's availability plus a daily strip and the outage

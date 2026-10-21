@@ -103,13 +103,6 @@ func (err *sshCommandTimeoutError) Error() string {
 
 func (*sshCommandTimeoutError) Unwrap() error { return context.DeadlineExceeded }
 
-// RunBatchCommand executes cmd on every server concurrently and returns one
-// result per server, in the same order as the input. Individual failures never
-// abort the batch: a host that is unreachable simply reports its error.
-func RunBatchCommand(cache *SSHConnCache, servers []*models.Server, cmd string) []BatchResult {
-	return RunBatchCommandContext(context.Background(), cache, servers, cmd)
-}
-
 func RunBatchCommandContext(ctx context.Context, cache *SSHConnCache, servers []*models.Server, cmd string) []BatchResult {
 	return runBatch(ctx, servers, func(ctx context.Context, s *models.Server) BatchResult {
 		started := time.Now()

@@ -1,4 +1,4 @@
-FROM golang:1.22-alpine AS builder
+FROM golang:1.26.10-alpine AS builder
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
@@ -10,7 +10,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-s -w -X main.versi
     && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags "-s -w -X main.version=${BUILD_VERSION}" -o agent-assets/server-monitor-agent-windows-amd64.exe ./cmd/agent \
     && CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -ldflags "-s -w -X main.version=${BUILD_VERSION}" -o agent-assets/server-monitor-agent-windows-arm64.exe ./cmd/agent
 
-FROM alpine:3.19
+FROM alpine:3.24
 # ping (from iputils-ping) needs raw sockets. Hand just CAP_NET_RAW to the
 # binary — stripping any setuid bit the package may ship — so the server
 # process itself can run as an unprivileged user.

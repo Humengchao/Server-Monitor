@@ -70,6 +70,36 @@ func MergeNotificationConfig(kind string, old models.NotificationConfig, patch m
 	if err := ValidateNotificationConfig(kind, &result); err != nil {
 		return old, err
 	}
+	// Retained secrets are bound to the endpoint/account where supplied.
+	explicit := func(field string) bool {
+		for _, name := range clear {
+			if name == field {
+				return true
+			}
+		}
+		var value string
+		return json.Unmarshal(patch[field], &value) == nil && value != ""
+	}
+	bound := func(secret, field string, changed bool) error {
+		if secret != "" && changed && !explicit(field) {
+			return fmt.Errorf("destination changed; provide %s again or explicitly clear it", field)
+		}
+		return nil
+	}
+	var boundErr error
+	switch kind {
+	case "email":
+		previous := old
+		_ = ValidateNotificationConfig(kind, &previous)
+		boundErr = bound(old.Password, "password", !strings.EqualFold(previous.SMTPHost, result.SMTPHost) || previous.SMTPPort != result.SMTPPort || previous.TLSMode != result.TLSMode || previous.Username != result.Username)
+	case "webhook":
+		boundErr = bound(old.BearerToken, "bearer_token", old.WebhookURL != result.WebhookURL)
+	case "dingtalk":
+		boundErr = bound(old.Secret, "secret", old.WebhookURL != result.WebhookURL)
+	}
+	if boundErr != nil {
+		return old, boundErr
+	}
 	return result, nil
 }
 
@@ -96,6 +126,9 @@ func ValidateNotificationConfig(kind string, c *models.NotificationConfig) error
 		u, err := url.Parse(c.WebhookURL)
 		if err != nil || u.Hostname() == "" || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil || u.Fragment != "" {
 			return errors.New("a valid HTTP(S) webhook URL without userinfo or fragment is required")
+		}
+		if kind == "webhook" && c.BearerToken != "" && u.Scheme != "https" {
+			return errors.New("webhooks with bearer tokens require HTTPS")
 		}
 		if kind == "wecom" && (u.Scheme != "https" || u.Host != "qyapi.weixin.qq.com" || u.Path != "/cgi-bin/webhook/send" || u.Query().Get("key") == "") {
 			return errors.New("use the enterprise WeChat group robot webhook URL")

@@ -1,3 +1,4 @@
+import { apiError } from '../utils/apiError';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, App, Button, Collapse, Input, Modal, Space, Tag, Typography } from 'antd';
 import {
@@ -29,11 +30,6 @@ function detectRisk(command: string): string | null {
     if (pattern.test(normalized)) return key;
   }
   return null;
-}
-
-function apiError(err: unknown, fallback: string): string {
-  const detail = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
-  return detail || fallback;
 }
 
 /**

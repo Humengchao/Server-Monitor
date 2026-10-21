@@ -1,6 +1,7 @@
 package models
 
 import (
+	"context"
 	"database/sql"
 	"time"
 
@@ -38,7 +39,7 @@ type UptimeCensusRange struct {
 //
 // Both queries are pure index range scans: server_metrics_1m and
 // server_metrics_15m are keyed on (server_id, recorded_at), so counting a
-// window never touches the heap. Reading the 30-day figure from the coarser
+// window can use an index-only scan when visibility permits. Reading the 30-day figure from the coarser
 // tier keeps that count at ~2880 entries per server instead of ~43200.
 //
 // Each lower bound is raised to the server's creation time, because a host's
@@ -46,7 +47,11 @@ type UptimeCensusRange struct {
 // *before* it was created. Counting that row against a window that starts at the
 // first boundary after creation inflates a new server past 100%.
 func GetFleetUptimeCounts(db *sql.DB, userID uuid.UUID, r UptimeCensusRange) ([]UptimeCounts, error) {
-	rows, err := db.Query(
+	return GetFleetUptimeCountsContext(context.Background(), db, userID, r)
+}
+
+func GetFleetUptimeCountsContext(ctx context.Context, db *sql.DB, userID uuid.UUID, r UptimeCensusRange) ([]UptimeCounts, error) {
+	rows, err := db.QueryContext(ctx,
 		`SELECT s.id, s.created_at,
 			COUNT(m.recorded_at) FILTER (WHERE m.recorded_at >= GREATEST($2, s.created_at)) AS minute_24h,
 			COUNT(m.recorded_at) AS minute_7d
@@ -76,7 +81,7 @@ func GetFleetUptimeCounts(db *sql.DB, userID uuid.UUID, r UptimeCensusRange) ([]
 		return nil, err
 	}
 
-	quarterRows, err := db.Query(
+	quarterRows, err := db.QueryContext(ctx,
 		`SELECT s.id, COUNT(m.recorded_at)
 		 FROM servers s
 		 LEFT JOIN server_metrics_15m m

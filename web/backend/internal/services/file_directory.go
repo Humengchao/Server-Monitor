@@ -2,7 +2,6 @@ package services
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -261,40 +260,37 @@ func readDirectoryPage(reader io.Reader, writer io.Writer, directory string, off
 			}
 		}
 	}
+	for index, entry := range entries {
+		if !entry.IsSymlink {
+			continue
+		}
+		kind, payload, statErr := protocol.send(17, protocolString(entry.Path))
+		if statErr != nil {
+			return RemoteFileList{}, statErr
+		}
+		if kind != 105 {
+			continue
+		}
+		packet := append(protocolString(entry.Name), protocolString("")...)
+		packet = append(packet, payload...)
+		attrs := attributeReader{Reader: bytes.NewReader(packet)}
+		target := attrs.entry(canonical)
+		if attrs.err != nil {
+			return RemoteFileList{}, attrs.err
+		}
+		target.IsSymlink = true
+		entries[index] = target
+	}
 	return pageResult(canonical, entries, offset, limit), nil
 }
 func (store *sftpFiles) Page(directory string, offset, limit int) (RemoteFileList, error) {
 	if store.transport == nil {
 		return RemoteFileList{}, errors.New("SSH transport required")
 	}
-	session, err := newSSHSession(store.context, store.transport)
+	stream, err := openSFTPStream(store.context, store.transport)
 	if err != nil {
 		return RemoteFileList{}, err
 	}
-	defer session.Close()
-	stop := context.AfterFunc(store.context, func() { _ = session.Close() })
-	defer stop()
-	input, err := session.StdinPipe()
-	if err != nil {
-		return RemoteFileList{}, err
-	}
-	output, err := session.StdoutPipe()
-	if err != nil {
-		return RemoteFileList{}, err
-	}
-	if err = session.RequestSubsystem("sftp"); err != nil {
-		return RemoteFileList{}, err
-	}
-	result, err := readDirectoryPage(output, input, directory, offset, limit)
-	if err == nil {
-		for index, entry := range result.Entries {
-			if entry.IsSymlink {
-				if info, statErr := store.client.Stat(entry.Path); statErr == nil {
-					result.Entries[index] = fileEntry(entry.Path, info)
-					result.Entries[index].IsSymlink = true
-				}
-			}
-		}
-	}
-	return result, err
+	defer stream.Close()
+	return readDirectoryPage(stream, stream, directory, offset, limit)
 }

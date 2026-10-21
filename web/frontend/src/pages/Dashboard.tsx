@@ -1,3 +1,4 @@
+import { apiError } from '../utils/apiError';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Row, Col, Button, Modal, Form, Input, Select, Segmented, Tooltip,
@@ -45,11 +46,6 @@ type StatusFilter = 'all' | ServerStatus;
 type FocusFilter = 'all' | 'alerts' | 'resource' | 'expiry' | 'issues';
 type SortKey = FleetSort;
 type ViewMode = 'grid' | 'list';
-
-function apiError(err: unknown, fallback: string): string {
-  const detail = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
-  return detail || fallback;
-}
 
 // ipwho.is supports HTTPS on the free tier; the previous ip-api.com endpoint
 // was HTTP-only and got blocked as mixed content on HTTPS deployments.
@@ -233,35 +229,39 @@ export default function Dashboard() {
   const handleSubmit = async (values: ServerFormValues) => {
     setSavingServer(true);
     try {
-      const payload = buildServerPayload(values, { editing: !!editingServer, credentialId: selectedCredential, notes: editingServer?.notes || '' });
+      const payload = buildServerPayload(values, { editing: !!editingServer, credentialId: selectedCredential });
       if (editingServer) {
         await serversApi.update(editingServer.id, { ...payload, expected_expires_at: editingExpiryRef.current });
         await serversApi.setTags(editingServer.id, tagValues);
         message.success(t('server.updated'));
       } else {
         const res = await serversApi.create(payload);
-        if (payload.connection_mode === 'agent') {
-          if (!activeRef.current) return;
-          setModalOpen(false);
-          setPendingAgent(res.data);
-          form.resetFields();
-          setTagValues([]);
-          setSelectedCredential(undefined);
-          setEditingServer(null);
-          message.success(t('server.added'));
-          // Once creation succeeds, failures in optional tags or enrollment
-          // must not send the user back through server creation a second time.
-          if (tagValues.length > 0) {
-            try { await serversApi.setTags(res.data.id, tagValues); }
-            catch (failure) { if (activeRef.current) message.error(apiError(failure, t('server.operationFailed'))); }
-          }
-          if (activeRef.current) void loadServers();
-          return;
-        }
-        if (tagValues.length > 0) {
-          await serversApi.setTags(res.data.id, tagValues);
-        }
+        if (!activeRef.current) return;
+        setModalOpen(false);
+        if (payload.connection_mode === 'agent') setPendingAgent(res.data);
+        form.resetFields();
+        setTagValues([]);
+        setSelectedCredential(undefined);
+        setEditingServer(null);
         message.success(t('server.added'));
+        // Creation is already committed. A tag retry must target that same ID.
+        if (tagValues.length > 0) {
+          const saveTags = async () => {
+            try {
+              await serversApi.setTags(res.data.id, tagValues);
+              if (activeRef.current) { notification.destroy(`server-tags-${res.data.id}`); void loadServers(false); }
+            } catch {
+              if (activeRef.current) notification.warning({
+                key: `server-tags-${res.data.id}`, title: t('server.tagsSaveFailed'),
+                description: res.data.name, duration: 0,
+                actions: <Button onClick={() => { void saveTags(); }}>{t('common.refresh')}</Button>,
+              });
+            }
+          };
+          await saveTags();
+        }
+        if (activeRef.current) void loadServers();
+        return;
       }
       setModalOpen(false);
       form.resetFields();
@@ -693,6 +693,7 @@ export default function Dashboard() {
         <ServerForm
           form={form}
           editing={!!editingServer}
+          savedAuthMethod={editingServer && !editingServer.credential_id ? editingServer.ssh_auth_method || 'password' : undefined}
           credentialId={selectedCredential}
           onCredentialChange={setSelectedCredential}
           tagIds={tagValues}

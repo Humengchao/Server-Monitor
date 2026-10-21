@@ -57,7 +57,6 @@ func (c *control) sendContext(ctx context.Context, m Message) error {
 type pendingConnection struct {
 	agent   uuid.UUID
 	control *control
-	secret  string
 	data    chan *WSConn
 	failure chan error
 }
@@ -282,7 +281,7 @@ func (h *Hub) Dial(ctx context.Context, agentID uuid.UUID) (*ssh.Client, net.Con
 		h.mu.Unlock()
 		return nil, nil, ErrBusy
 	}
-	p := &pendingConnection{agent: agentID, control: c, secret: secret, data: make(chan *WSConn, 1), failure: make(chan error, 1)}
+	p := &pendingConnection{agent: agentID, control: c, data: make(chan *WSConn, 1), failure: make(chan error, 1)}
 	h.pending[id] = p
 	h.mu.Unlock()
 	transferred := false

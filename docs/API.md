@@ -193,6 +193,8 @@ POST /api/servers
 Agent 模式可直接发送 `{"connection_mode":"agent"}` 创建待接入记录，无需填写以上名称、地址或 SSH 字段。
 创建后使用返回的服务器 `id` 生成安装命令，首次登记自动补齐留空的名称；详见本文“Agent 登记与连接”及 [Agent 指南](agent.md)。
 
+SSH 请求可显式提供 `ssh_auth_method: "password" | "key"`；Windows 当前使用 password。`ssh_host_key` 接受经独立可信渠道核验的单条 SSH authorized-key 格式公钥，Windows 也保留此值；默认未配置主机公钥时不建立 SSH 连接。
+
 **响应**: `201` 返回创建的 Server 对象
 
 ---
@@ -203,7 +205,7 @@ Agent 模式可直接发送 `{"connection_mode":"agent"}` 创建待接入记录�
 PUT /api/servers/:id
 ```
 
-**请求体** (全部字段可选):
+**请求体**（配置更新需提交名称及对应连接字段；下例省略计费和显示设置）:
 
 ```json
 {
@@ -217,6 +219,10 @@ PUT /api/servers/:id
 ```
 
 **响应**: `200` 返回更新后的 Server 对象
+
+认证字段更新语义同样适用于凭据库：空的 `ssh_password` / `ssh_key` 默认保留已有值；`clear_ssh_password` / `clear_ssh_key` 为 true 时明确清除，不可同时提交对应的新值。显式选择 `ssh_auth_method` 会清除另一种认证材料；最终必须有可用的所选认证材料，验证和更新在同一事务中完成。Linux 仅密钥凭据切换成 Windows 时，必须同时提供密码，或此前已有密码。
+
+未提交 `notes` 或 `ssh_host_key` 时保留当前值；显式空字符串用于清空。页面常规配置更新不提交备注，备注编辑使用独立 `PATCH /servers/:id/notes`，避免覆盖另一页面刚保存的备注。清空主机公钥后，默认 SSH 策略会拒绝连接，直到重新固定可信公钥。
 
 ---
 
@@ -1141,13 +1147,14 @@ ws.onopen = () => ws.send('ls -la\n');
 
 ### Token 失效
 
-Token 本身是无状态的 JWT（HS256，有效期 72 小时），但 `users.tokens_valid_after` 提供了一个吊销时间点：鉴权中间件会拒绝 `iat` 早于该时间的 Token。修改密码时把它推到当前时刻，就实现了「改密码即登出其他设备」。
+Token 使用 HS256，有效期 72 小时，必须包含 `exp`、`iat` 和字符串类型的 `session_version`。`session_version` 是数据库 `users.tokens_valid_after` 的微秒值；每次认证核对精确版本，改密码时单调推进版本，使旧 Token 立即失效。
 
-代价是每个已认证请求多一次按主键的查询——这是无状态方案能支持吊销的唯一办法。几点实现细节：
+每个已认证请求执行一次按用户主键查询。实现细节：
 
-- 吊销时间点截断到整秒，因为 JWT 的 `iat` 精度就是秒；否则刚签发的 Token 会被自己的吊销点判定为过期。
-- 修改密码接口返回的新 Token，其 `iat` 精确等于写入的吊销时间点，所以调用方的会话不会被自己的操作切断。
-- 本次改动之前签发的 Token 不含 `iat`，会被放行直到自然过期，升级不会强制所有人重新登录。
+- 会话版本保留微秒精度，不依赖 `iat` 的秒级精度，连续改密不会留下同秒旧 Token。
+- 改密接口使用密码哈希比较保护并发更新，并返回携带新版本的 Token；`iat` 使用应用时钟。
+- 缺失必需声明的历史 Token 被拒绝，本次升级需要重新登录。
+- 旧版本 SSH/Docker 终端在改密时关闭；长连接到 Token 有效期也会关闭。
 
 ### 数据隔离
 

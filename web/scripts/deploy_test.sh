@@ -84,8 +84,16 @@ JWT_SECRET=do-not-change
 }
 deploy() { bash "$script" deploy "$MOCK_SHA" ghcr.io/example/server-monitor; }
 new_case healthy
+mkdir -p "$DEPLOY_ROOT/releases/legacy"
+printf 'legacy secret snapshot\n' > "$DEPLOY_ROOT/releases/legacy/previous.yml"
+chmod 644 "$DEPLOY_ROOT/web/.env" "$DEPLOY_ROOT/releases/legacy/previous.yml"
 deploy
 check cmp "$DEPLOY_ROOT/web/.env" "$DEPLOY_ROOT/shared/.env"
+if [[ $(uname -s) = Linux ]]; then
+  check test "$(stat -c '%a' "$DEPLOY_ROOT/web/.env")" = 600
+  check test "$(stat -c '%a' "$DEPLOY_ROOT/shared/.env")" = 600
+  check test "$(stat -c '%a' "$DEPLOY_ROOT/releases/legacy/previous.yml")" = 600
+fi
 check test "$(readlink "$DEPLOY_ROOT/current")" = "$DEPLOY_ROOT/releases/$MOCK_SHA"
 check test "$(cat "$MOCK_STATE")" = candidate
 check grep -q "archive $MOCK_SHA" "$MOCK_LOG"

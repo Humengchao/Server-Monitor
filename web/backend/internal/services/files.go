@@ -153,54 +153,34 @@ func SaveRemoteText(store RemoteFiles, filename, content, revision string) error
 type sftpFiles struct {
 	transport *ssh.Client
 	client    *sftp.Client
-	session   *ssh.Session
 	context   context.Context
-	stop      func() bool
 	windows   bool
 }
 
 func NewSFTPFiles(ctx context.Context, client *ssh.Client, serverType string) (RemoteFiles, error) {
-	session, err := newSSHSession(ctx, client)
+	stream, err := openSFTPStream(ctx, client)
 	if err != nil {
 		return nil, err
 	}
-	stop := context.AfterFunc(ctx, func() { _ = session.Close() })
-	failed := true
-	defer func() {
-		if failed {
-			stop()
-			_ = session.Close()
-		}
-	}()
-	input, err := session.StdinPipe()
+	remote, err := sftp.NewClientPipe(stream, stream)
 	if err != nil {
+		_ = stream.Close()
 		return nil, err
 	}
-	output, err := session.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	session.Stderr = io.Discard
-	if err := session.RequestSubsystem("sftp"); err != nil {
-		return nil, err
-	}
-	remote, err := sftp.NewClientPipe(output, input)
-	if err != nil {
-		return nil, err
-	}
-	failed = false
-	return &sftpFiles{transport: client, client: remote, session: session, context: ctx, stop: stop, windows: serverType == "windows"}, nil
+	return &sftpFiles{transport: client, client: remote, context: ctx, windows: serverType == "windows"}, nil
+}
+
+// Directory pages speak the bounded SFTP protocol directly, so they need no
+// second initialized SFTP client on the same SSH connection.
+func NewSFTPDirectoryFiles(ctx context.Context, client *ssh.Client, serverType string) RemoteFiles {
+	return &sftpFiles{transport: client, context: ctx, windows: serverType == "windows"}
 }
 
 func (store *sftpFiles) Close() error {
-	if store.stop != nil {
-		store.stop()
+	if store.client != nil {
+		return store.client.Close()
 	}
-	err := store.client.Close()
-	if store.session != nil {
-		_ = store.session.Close()
-	}
-	return err
+	return nil
 }
 
 func (store *sftpFiles) List(directory string) (RemoteFileList, error) {

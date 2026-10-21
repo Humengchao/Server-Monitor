@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '../api/config';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Alert, Button, Input, Skeleton } from 'antd';
@@ -95,8 +96,7 @@ interface PublicStatusResponse {
   privacy: { anonymized: boolean; hidden_fields: string[] };
 }
 
-const apiBase = (import.meta.env.VITE_API_URL || `${window.location.origin}/api`).replace(/\/$/, '');
-const apiURL = `${apiBase}/public/status`;
+const apiURL = new URL('public/status', API_BASE_URL).href;
 const STATUS_REQUEST_TIMEOUT_MS = 15000;
 
 // The shared helper defaults to 2 fraction digits below GB; this page has

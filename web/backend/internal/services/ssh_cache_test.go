@@ -17,6 +17,13 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+var testSSHHostKeys sync.Map
+
+func recordTestSSHHostKey(t *testing.T, address string, signer ssh.Signer) {
+	testSSHHostKeys.Store(address, string(ssh.MarshalAuthorizedKey(signer.PublicKey())))
+	t.Cleanup(func() { testSSHHostKeys.Delete(address) })
+}
+
 const testSSHPassword = "cache-test-secret"
 
 // startTestSSHServer runs a minimal in-memory SSH server that accepts the
@@ -53,6 +60,7 @@ func startTestSSHServerWithHandshake(t *testing.T, beforeHandshake func()) (addr
 		t.Fatalf("listen: %v", err)
 	}
 	t.Cleanup(func() { ln.Close() })
+	recordTestSSHHostKey(t, ln.Addr().String(), signer)
 
 	var count atomic.Int32
 	go func() {
@@ -93,7 +101,10 @@ func testCacheServer(t *testing.T, addr string) *models.Server {
 	if err != nil {
 		t.Fatalf("parse test server port: %v", err)
 	}
+	key, _ := testSSHHostKeys.Load(addr)
+	hostKey, _ := key.(string)
 	return &models.Server{
+		SSHHostKey:  hostKey,
 		ID:          uuid.New(),
 		Host:        host,
 		Port:        port,
@@ -141,7 +152,7 @@ func TestSSHConnCacheRedialsOnFingerprintChange(t *testing.T) {
 	}
 	// The server test config accepts only one password, so change a
 	// non-authentication field that still alters the fingerprint.
-	server.SSHHostKey = ""
+	// Preserve the verified host key while changing the account.
 	server.SSHUsername = "deploy"
 	second, err := cache.Get(server)
 	if err != nil {

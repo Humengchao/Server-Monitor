@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -542,7 +541,4 @@ func ConfigurationImported(ctx context.Context, db *sql.DB, user, id uuid.UUID) 
 	var exists bool
 	err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM configuration_imports WHERE user_id=$1 AND backup_id=$2)`, user, id).Scan(&exists)
 	return exists, err
-}
-func BackupValidationError(err error) error {
-	return fmt.Errorf("configuration backup is invalid: %w", err)
 }

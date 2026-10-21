@@ -1,3 +1,4 @@
+import { formatDateTime } from '../utils/format';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Card, Empty, Input, Select, Space, Spin, Tag, Typography } from 'antd';
 import { useLocation, useSearchParams } from 'react-router-dom';
@@ -15,7 +16,7 @@ function localTime(value: string) {
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 19);
 }
 export default function Logs() {
-  const { t } = useTranslation('networkLogs');
+  const { t, i18n } = useTranslation('networkLogs');
   const [params, setParams] = useSearchParams();
   const { key: navigation } = useLocation();
   const [servers, setServers] = useState<Server[]>([]);
@@ -113,7 +114,7 @@ export default function Logs() {
       {visibleResult?.partial && <Alert type="warning" showIcon title={t(visibleResult.reason || 'command_failed', { defaultValue: visibleResult.reason })} />}
       {trimmed && <Alert type="info" title={t('bufferLimit')} />}
       {!query.server ? <Empty description={t('noServer')} /> : !visibleEntries.length && !loading ? <Empty description={t('noLogs')} /> : <div className="logs-output" role="region" aria-label={t('logs')} tabIndex={0} aria-busy={loading}>
-        {visibleEntries.map(entry => <div key={entry.id} className="host-log-entry"><Space wrap><time>{new Date(entry.time).toLocaleString()}</time><Tag color={entry.stream === 'stderr' ? 'orange' : undefined}>{entry.stream}</Tag>{entry.unit && <Typography.Text code>{entry.unit}</Typography.Text>}{entry.priority && <Tag>{entry.priority}</Tag>}</Space><pre>{entry.message}</pre></div>)}
+        {visibleEntries.map(entry => <div key={entry.id} className="host-log-entry"><Space wrap><time>{formatDateTime(entry.time, i18n.language)}</time><Tag color={entry.stream === 'stderr' ? 'orange' : undefined}>{entry.stream}</Tag>{entry.unit && <Typography.Text code>{entry.unit}</Typography.Text>}{entry.priority && <Tag>{entry.priority}</Tag>}</Space><pre>{entry.message}</pre></div>)}
       </div>}
       {loading && <Spin />}
     </Card>

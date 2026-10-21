@@ -1,9 +1,13 @@
 package middleware
 
 import (
+	"database/sql"
+	"errors"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"server-monitor/internal/config"
 	"server-monitor/internal/models"
@@ -71,11 +75,15 @@ func extractBearerToken(c *gin.Context) string {
 }
 
 func parseToken(c *gin.Context, tokenString string, cfg *config.Config) {
+	if len(tokenString) > 8192 {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+		return
+	}
 	// Tokens are always issued with HS256; restricting accepted algorithms
 	// closes the door on algorithm-confusion attacks.
 	token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
 		return []byte(cfg.JWTSecret), nil
-	}, jwt.WithValidMethods([]string{"HS256"}))
+	}, jwt.WithValidMethods([]string{"HS256"}), jwt.WithExpirationRequired(), jwt.WithIssuedAt())
 	if err != nil || !token.Valid {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 		return
@@ -85,13 +93,19 @@ func parseToken(c *gin.Context, tokenString string, cfg *config.Config) {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token claims"})
 		return
 	}
+	issuedAt, issuedErr := claims.GetIssuedAt()
+	expiresAt, expiresErr := claims.GetExpirationTime()
+	if issuedErr != nil || expiresErr != nil || issuedAt == nil || expiresAt == nil || issuedAt.Unix() <= 0 || !expiresAt.After(issuedAt.Time) {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token claims"})
+		return
+	}
 	userIDClaim, ok := claims["user_id"].(string)
 	if !ok {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token claims"})
 		return
 	}
 	userID, err := uuid.Parse(userIDClaim)
-	if err != nil {
+	if err != nil || userID == uuid.Nil {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid user id in token"})
 		return
 	}
@@ -101,12 +115,12 @@ func parseToken(c *gin.Context, tokenString string, cfg *config.Config) {
 	username, _ := claims["username"].(string)
 	c.Set("user_id", userID)
 	c.Set("username", username)
+	c.Set("token_issued_at", issuedAt.Time)
+	c.Set("token_expires_at", expiresAt.Time)
 }
 
-// tokenIssuedAfterCutoff rejects tokens minted before the user's last password
-// change. This is the one piece of server-side state in an otherwise stateless
-// scheme, and it costs a primary-key lookup per request — the price of being
-// able to sign other devices out at all.
+// tokenIssuedAfterCutoff requires the exact password/session version. An iat
+// comparison alone cannot distinguish changes within the same second.
 func tokenIssuedAfterCutoff(c *gin.Context, userID uuid.UUID, claims jwt.MapClaims) bool {
 	raw, exists := c.Get("db")
 	db, ok := raw.(*models.DB)
@@ -114,27 +128,28 @@ func tokenIssuedAfterCutoff(c *gin.Context, userID uuid.UUID, claims jwt.MapClai
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "database unavailable"})
 		return false
 	}
-	validAfter, err := models.GetTokensValidAfter(db.Raw, userID)
+	version, ok := claims["session_version"].(string)
+	versionMicros, parseErr := strconv.ParseInt(version, 10, 64)
+	if !ok || parseErr != nil || versionMicros < 0 {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "session expired, please sign in again"})
+		return false
+	}
+	validAfter, err := models.GetTokensValidAfterContext(c.Request.Context(), db.Raw, userID)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid session"})
+			return false
+		}
 		// Fail closed on identity, but not with 401: the client treats that as
 		// "log out", and a database blip must not sign everyone out.
 		log.Printf("auth: read token cutoff for %s: %v", userID, err)
 		c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "authentication temporarily unavailable"})
 		return false
 	}
-	if validAfter.IsZero() {
-		return true
-	}
-	issuedAt, err := claims.GetIssuedAt()
-	if err != nil || issuedAt == nil {
-		// Tokens minted before "iat" was added carry no issue time. They expire
-		// within the normal 72-hour window, so accept them until then rather
-		// than forcing every user to log in again on upgrade.
-		return true
-	}
-	if issuedAt.Time.Before(validAfter) {
+	if versionMicros != validAfter.UnixMicro() {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "session expired, please sign in again"})
 		return false
 	}
+	c.Set("token_session_version", time.UnixMicro(versionMicros))
 	return true
 }

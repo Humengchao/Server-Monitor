@@ -275,7 +275,7 @@ func (e *AlertEngine) releaseStale(live map[alertKey]struct{}, now time.Time) {
 func EvaluateRule(rule models.AlertRule, snap models.AlertSnapshot, now time.Time) (float64, AlertState) {
 	age := now.Sub(snap.RecordedAt)
 	if !snap.HasMetrics {
-		age = staleFloor + offlineFloor
+		age = max(time.Duration(0), now.Sub(snap.CreatedAt))
 	}
 
 	if rule.Metric == models.AlertMetricOffline {
@@ -289,7 +289,7 @@ func EvaluateRule(rule models.AlertRule, snap models.AlertSnapshot, now time.Tim
 	// A threshold rule cannot judge a host that stopped reporting. Once the gap
 	// exceeds the staleness window, treat the alert as resolved rather than
 	// leaving it stuck open forever.
-	if age >= staleFloor {
+	if !snap.HasMetrics || age >= staleFloor {
 		return 0, AlertClear
 	}
 

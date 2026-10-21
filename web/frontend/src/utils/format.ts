@@ -137,10 +137,3 @@ export function monthlyCost(price: number, cycle: string): number {
   if (!Number.isFinite(price) || price <= 0) return 0;
   return price / months;
 }
-
-export const CURRENCY_SYMBOLS: Record<string, string> = { CNY: '¥', USD: '$', EUR: '€' };
-
-export function formatCurrency(amount: number, currency: string): string {
-  const symbol = CURRENCY_SYMBOLS[currency] || '';
-  return `${symbol}${amount.toFixed(2)}`;
-}

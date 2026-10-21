@@ -1,3 +1,4 @@
+import { networkChartRows } from '../utils/networkChart';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, App, Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography } from 'antd';
 import { Line, LineChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
@@ -8,13 +9,14 @@ import type { Server } from '../api/servers';
 import { networkApi } from '../api/network';
 import type { NetworkCheck, NetworkCheckInput, NetworkHistory } from '../api/network';
 import { usePolling } from '../hooks/usePolling';
+import { formatDateTime, formatTime } from '../utils/format';
 import '../i18n/networkLogs';
 import './Operations.css';
 
 const number = (value: number | null | undefined, suffix = '') => value == null ? '—' : `${value.toFixed(2)}${suffix}`;
 const colors = ['#4f7cff', '#18b690', '#e8944a', '#d9639b'];
 export default function Network() {
-  const { t } = useTranslation('networkLogs');
+  const { t, i18n } = useTranslation('networkLogs');
   const { message } = App.useApp();
   const [params] = useSearchParams();
   const target = params.get('server') || '';
@@ -90,14 +92,7 @@ export default function Network() {
     catch { if (!controller.signal.aborted) message.error(t('failed')); }
     finally { actions.current.delete(controller); if (mounted.current) setBusy(null); }
   };
-  const chart = useMemo(() => {
-    const rows = new Map<number, Record<string, number | null>>();
-    for (const [id, result] of Object.entries(history)) for (const sample of result.samples) {
-      const time = Math.floor(Date.parse(sample.recorded_at) / 60000) * 60000;
-      const row = rows.get(time) || { time }; row[id] = sample.avg_ms; rows.set(time, row);
-    }
-    return [...rows.values()].sort((a, b) => a.time! - b.time!);
-  }, [history]);
+  const chart = useMemo(() => networkChartRows(history), [history]);
   return <div className="operations-page network-page">
     <div className="page-heading"><div><Typography.Title level={2}>{t('network')}</Typography.Title><Typography.Text type="secondary">{t('networkHint')}</Typography.Text></div><Space><Button onClick={() => { void load(); }}>{t('refresh')}</Button><Button type="primary" onClick={() => open('new')}>{t('add')}</Button></Space></div>
     {error && <Alert type="warning" title={t('failed')} showIcon />}
@@ -111,14 +106,14 @@ export default function Network() {
       { title: t('avg'), render: (_, check) => number(check.latest?.avg_ms, ' ms') },
       { title: t('minmax'), render: (_, check) => `${number(check.latest?.min_ms)} / ${number(check.latest?.max_ms)} ms` },
       { title: t('mdev'), render: (_, check) => number(check.latest?.mdev_ms, ' ms') },
-      { title: t('time'), render: (_, check) => check.latest ? new Date(check.latest.recorded_at).toLocaleTimeString() : '—' },
+      { title: t('time'), render: (_, check) => check.latest ? formatTime(check.latest.recorded_at, i18n.language) : '—' },
       { title: '', render: (_, check) => <Space><Button size="small" disabled={paused(check) || !!busy} loading={busy === check.id} onClick={() => { void run(check.id); }}>{t('run')}</Button><Button size="small" onClick={() => open(check)}>{t('edit')}</Button><Popconfirm title={t('confirm')} onConfirm={async () => { try { await networkApi.delete(check.id); await load(); } catch { message.error(t('failed')); } }}><Button size="small" danger>{t('remove')}</Button></Popconfirm></Space> },
     ]} /></Card>
     <Card title={t('compare')} style={{ marginTop: 20 }}><div className="network-comparison-controls"><Select mode="multiple" maxCount={4} aria-label={t('chooseChecks')} placeholder={t('chooseChecks')} value={selected} onChange={ids => setSelection({ target, ids })} options={checks.map(check => ({ value: check.id, label: `${check.name} · ${serverName(check.source_server_id)}` }))} /><Select aria-label={t('timeRange')} value={hours} onChange={setHours} options={[{ value: 1, label: t('hour') }, { value: 24, label: t('day') }, { value: 168, label: t('week') }]} /></div>
       <Typography.Paragraph type="secondary">{t('historyHint')}</Typography.Paragraph>
       {historyError && <Alert type="warning" title={t('failed')} />}
       {Object.values(history).some(value => value.truncated) && <Alert type="info" title={t('partialHistory')} />}
-      <ResponsiveContainer width="100%" height={260}><LineChart data={chart}><CartesianGrid stroke="var(--border)" strokeDasharray="3 3" /><XAxis dataKey="time" type="number" domain={['dataMin', 'dataMax']} tick={{ fill: 'var(--muted)' }} tickFormatter={value => new Date(value).toLocaleTimeString()} /><YAxis unit=" ms" tick={{ fill: 'var(--muted)' }} /><Tooltip contentStyle={{ background: 'var(--surface)', borderColor: 'var(--border)', color: 'var(--text)', borderRadius: 8 }} labelFormatter={value => new Date(Number(value)).toLocaleString()} /><Legend />{selected.map((id, index) => <Line key={id} name={checks.find(check => check.id === id)?.name || id} dataKey={id} stroke={colors[index]} dot={false} connectNulls={false} isAnimationActive={false} />)}</LineChart></ResponsiveContainer>
+      <ResponsiveContainer width="100%" height={260}><LineChart data={chart}><CartesianGrid stroke="var(--border)" strokeDasharray="3 3" /><XAxis dataKey="time" type="number" domain={['dataMin', 'dataMax']} tick={{ fill: 'var(--muted)' }} tickFormatter={value => formatTime(value, i18n.language)} /><YAxis unit=" ms" tick={{ fill: 'var(--muted)' }} /><Tooltip contentStyle={{ background: 'var(--surface)', borderColor: 'var(--border)', color: 'var(--text)', borderRadius: 8 }} labelFormatter={value => formatDateTime(Number(value), i18n.language)} /><Legend />{selected.map((id, index) => <Line key={id} name={checks.find(check => check.id === id)?.name || id} dataKey={id} stroke={colors[index]} dot={false} connectNulls={false} isAnimationActive={false} />)}</LineChart></ResponsiveContainer>
       <Table rowKey="id" scroll={{ x: 700 }} pagination={false} dataSource={selected.map(id => ({ id, name: checks.find(check => check.id === id)?.name, ...history[id]?.summary }))} columns={[
         { title: t('name'), dataIndex: 'name' }, { title: t('sent'), render: (_, row) => row.sent == null ? '—' : `${row.sent} / ${row.received}` },
         { title: t('loss'), render: (_, row) => number(row.loss_percent, '%') }, { title: t('avg'), render: (_, row) => number(row.avg_ms, ' ms') },
@@ -126,7 +121,7 @@ export default function Network() {
       ]} />
       <Typography.Title level={4}>{t('history')}</Typography.Title>
       <Table rowKey="key" scroll={{ x: 900 }} pagination={{ pageSize: 20 }} dataSource={selected.flatMap(id => (history[id]?.samples || []).map(sample => ({ ...sample, key: `${id}:${sample.recorded_at}`, name: checks.find(check => check.id === id)?.name })))} columns={[
-        { title: t('name'), dataIndex: 'name' }, { title: t('time'), render: (_, sample) => new Date(sample.recorded_at).toLocaleString() },
+        { title: t('name'), dataIndex: 'name' }, { title: t('time'), render: (_, sample) => formatDateTime(sample.recorded_at, i18n.language) },
         { title: t('status'), render: (_, sample) => t(sample.status === 'loss' ? 'lossState' : sample.status) },
         { title: t('sent'), render: (_, sample) => sample.sent == null ? '—' : `${sample.sent} / ${sample.received}` },
         { title: t('loss'), render: (_, sample) => number(sample.loss_percent, '%') }, { title: t('avg'), render: (_, sample) => number(sample.avg_ms, ' ms') },

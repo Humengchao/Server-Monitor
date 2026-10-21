@@ -2,6 +2,8 @@ package services
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -62,16 +64,28 @@ func TestTerminalSessionWritesBinaryChunks(t *testing.T) {
 	}
 }
 
+func silentHandshakeKey(t *testing.T) string {
+	_, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := ssh.NewSignerFromKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(ssh.MarshalAuthorizedKey(signer.PublicKey()))
+}
+
 func TestDialSSHClientConnTimesOutSilentHandshake(t *testing.T) {
 	const timeout = 100 * time.Millisecond
 	testSilentSSHHandshake(t, timeout, func(host string, port int) (*ssh.Client, net.Conn, error) {
-		return dialSSHClientConn(host, port, "root", testSSHPassword, "", "", timeout)
+		return dialSSHClientConn(host, port, "root", testSSHPassword, "", silentHandshakeKey(t), timeout)
 	})
 }
 
 func TestDialSSHTimesOutSilentHandshake(t *testing.T) {
 	testSilentSSHHandshake(t, sshDialTimeout, func(host string, port int) (*ssh.Client, net.Conn, error) {
-		client, err := DialSSH(host, port, "root", testSSHPassword, "", "")
+		client, err := DialSSH(host, port, "root", testSSHPassword, "", silentHandshakeKey(t))
 		return client, nil, err
 	})
 }
@@ -129,7 +143,7 @@ func testSilentSSHHandshake(t *testing.T, timeout time.Duration, dial func(strin
 func TestDialSSHClientConnClearsHandshakeDeadline(t *testing.T) {
 	addr, _ := startTestSSHServer(t)
 	server := testCacheServer(t, addr)
-	client, _, err := dialSSHClientConn(server.Host, server.Port, server.SSHUsername, server.SSHPassword, "", "", 200*time.Millisecond)
+	client, _, err := dialSSHClientConn(server.Host, server.Port, server.SSHUsername, server.SSHPassword, "", server.SSHHostKey, 200*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +157,7 @@ func TestDialSSHClientConnClearsHandshakeDeadline(t *testing.T) {
 func TestDialSSHConnects(t *testing.T) {
 	addr, _ := startTestSSHServer(t)
 	server := testCacheServer(t, addr)
-	client, err := DialSSH(server.Host, server.Port, server.SSHUsername, server.SSHPassword, "", "")
+	client, err := DialSSH(server.Host, server.Port, server.SSHUsername, server.SSHPassword, "", server.SSHHostKey)
 	if err != nil {
 		t.Fatal(err)
 	}

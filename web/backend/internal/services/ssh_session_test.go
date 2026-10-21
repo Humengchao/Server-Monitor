@@ -78,6 +78,7 @@ func startSessionTestSSHServerWithControls(t *testing.T, silent, pauseReads *ato
 	if err != nil {
 		t.Fatal(err)
 	}
+	recordTestSSHHostKey(t, listener.Addr().String(), signer)
 	channels := make(chan ssh.NewChannel, 16)
 	stopped, accepted := make(chan struct{}), make(chan struct{})
 	var connections sync.Map
@@ -340,14 +341,16 @@ func TestDockerBoundedTimeoutIncludesChannelCreationAndSkipsRetry(t *testing.T) 
 	}
 	result := make(chan error, 1)
 	go func() {
-		_, _, err := RunDockerCmdBounded(client, "ps", 100*time.Millisecond, 1024)
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		_, err := RunDockerContext(ctx, client, "ps", 1024)
 		result <- err
 	}()
 	incoming := awaitSessionChannel(t, channels)
 	select {
 	case err := <-result:
-		if !errors.Is(err, context.DeadlineExceeded) || err.Error() != "timed out after 100ms" {
-			t.Fatalf("error = %v, want typed timeout with the existing API message", err)
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("error = %v, want typed context timeout", err)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("bounded command did not time out during channel creation")
@@ -454,7 +457,7 @@ func TestDockerContextRetainsFallbackAndOutputLimit(t *testing.T) {
 	defer cancel()
 	result := make(chan error, 1)
 	go func() {
-		output, err := RunDockerContext(ctx, client, "ps", 4)
+		output, err := RunDockerContext(ctx, client, "ps", 128)
 		if err == nil || err.Error() != "docker output limit exceeded" || output != "" {
 			result <- fmt.Errorf("output=%q error=%v, want output limit error", output, err)
 			return
@@ -473,8 +476,11 @@ func TestDockerContextRetainsFallbackAndOutputLimit(t *testing.T) {
 		}
 		_ = request.Reply(true, nil)
 		status := uint32(1)
+		if !strings.HasPrefix(expected, "sudo") {
+			_, _ = channel.Stderr().Write([]byte("permission denied connecting to docker daemon socket docker.sock"))
+		}
 		if strings.HasPrefix(expected, "sudo") {
-			_, _ = channel.Write([]byte("too much output"))
+			_, _ = channel.Write([]byte(strings.Repeat("x", 129)))
 			status = 0
 		}
 		_, _ = channel.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{status}))
@@ -504,7 +510,7 @@ func TestDockerOutputLimitDoesNotRepeatCommandWithSudo(t *testing.T) {
 						return
 					}
 				} else {
-					output, truncated, err := RunDockerCmdBounded(client, "ps", time.Second, 4)
+					output, truncated, err := RunCmdBounded(client, "docker ps", time.Second, 4)
 					var exit *ssh.ExitError
 					if !truncated || output != "too " || !errors.As(err, &exit) {
 						result <- fmt.Errorf("output=%q truncated=%v err=%v", output, truncated, err)

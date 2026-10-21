@@ -17,6 +17,7 @@ func snapshot(mutate func(*models.AlertSnapshot)) models.AlertSnapshot {
 		ServerID:   uuid.New(),
 		UserID:     uuid.New(),
 		ServerName: "web-01",
+		CreatedAt:  time.Now().Add(-24 * time.Hour),
 		DiskTotal:  100 * 1024 * 1024 * 1024,
 		HasMetrics: true,
 		CPUPercent: 10,

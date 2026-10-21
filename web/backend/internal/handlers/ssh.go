@@ -51,6 +51,11 @@ func (h *SSHHandler) Handle(c *gin.Context) {
 		return
 	}
 	defer conn.Close()
+	unregister, err := registerTerminal(c, func() { _ = conn.Close(); _ = client.Close() })
+	if err != nil {
+		return
+	}
+	defer unregister()
 
 	ts, err := services.NewTerminalSession(conn, client)
 	if err != nil {

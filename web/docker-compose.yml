@@ -8,7 +8,7 @@ services:
     image: ${BACKEND_IMAGE}
     restart: unless-stopped
     ports:
-      - "19527:19527"
+      - "127.0.0.1:19527:19527"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:19527/api/health"]
       interval: 10s
@@ -37,6 +37,7 @@ services:
       ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-true}
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
       AI_ALLOW_PRIVATE_ENDPOINTS: ${AI_ALLOW_PRIVATE_ENDPOINTS:-false}
+      SSH_ALLOW_UNVERIFIED_HOST_KEYS: ${SSH_ALLOW_UNVERIFIED_HOST_KEYS:-false}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     logging:
@@ -55,7 +56,7 @@ services:
       retries: 3
       start_period: 15s
     ports:
-      - "19080:80"
+      - "127.0.0.1:19080:80"
     environment:
       DOMAIN: ${DOMAIN}
       VIRTUAL_HOST: ${DOMAIN}

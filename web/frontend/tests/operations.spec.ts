@@ -69,6 +69,7 @@ for (const platform of ['linux', 'windows'] as const) {
     const dialog = page.getByRole('dialog');
     await dialog.getByLabel(en['server.host'], { exact: true }).fill('198.51.100.77');
     await dialog.getByLabel(en['server.sshPassword'], { exact: true }).fill('do-not-send');
+    await choose(page, en['ssh.authMethod'], en['ssh.keyAuth']);
     await dialog.getByLabel(en['server.sshKey'], { exact: true }).fill('do-not-send-key');
     await choose(page, 'Connection method', 'Install Agent');
     if (platform === 'windows') await choose(page, en['server.type'], 'Windows');
@@ -148,8 +149,9 @@ test('changing server platform clears hidden SSH secrets and paused private serv
   await page.goto('/servers/new-agent');
   await page.locator('.detail-actions').getByRole('button', { name: en['common.edit'] }).click();
   const dialog = page.getByRole('dialog');
-  await dialog.getByLabel(en['server.sshKey'], { exact: true }).fill('stale-linux-key');
   await dialog.getByLabel(en['server.sshPassword'], { exact: true }).fill('stale-linux-password');
+  await choose(page, en['ssh.authMethod'], en['ssh.keyAuth']);
+  await dialog.getByLabel(en['server.sshKey'], { exact: true }).fill('stale-linux-key');
   await choose(page, en['server.type'], 'Windows');
   await expect(dialog.getByLabel(en['server.password'], { exact: true })).toHaveValue('');
   await dialog.getByLabel(en['server.username'], { exact: true }).fill('Administrator');
@@ -160,7 +162,7 @@ test('changing server platform clears hidden SSH secrets and paused private serv
   await expect.poll(() => state.updated.length).toBe(1);
   expect(state.updated[0]).toMatchObject({ monitoring_enabled: true, is_public: true, auto_renew_enabled: false, ssh_password: 'new-windows-password', ssh_username: 'Administrator' });
   expect(state.updated[0]).not.toHaveProperty('ssh_key');
-  expect(state.updated[0]).not.toHaveProperty('ssh_host_key');
+  expect(state.updated[0].ssh_host_key).toBe('');
   expect(errors).toEqual([]);
 });
 

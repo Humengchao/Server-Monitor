@@ -60,7 +60,7 @@ func OpenAlertEventWithNotification(ctx context.Context, db *sql.DB, event *Aler
 	if err = enqueueAlertNotification(ctx, tx, id, event.UserID, event.RuleID, event.ServerID, notification); err != nil {
 		return 0, err
 	}
-	return id, tx.Commit()
+	return id, commitNotificationWork(tx, db)
 }
 
 func ResolveAlertEventWithNotification(ctx context.Context, db *sql.DB, ruleID, serverID uuid.UUID, at time.Time, notification *AlertNotification) (bool, error) {
@@ -82,7 +82,7 @@ func ResolveAlertEventWithNotification(ctx context.Context, db *sql.DB, ruleID, 
 	if err = enqueueAlertNotification(ctx, tx, id, userID, ruleID, serverID, notification); err != nil {
 		return false, err
 	}
-	return true, tx.Commit()
+	return true, commitNotificationWork(tx, db)
 }
 
 type PendingWebhook struct {

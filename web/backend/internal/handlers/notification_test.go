@@ -53,6 +53,24 @@ func TestNotificationAPIKeepsSecretsAndEnforcesOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := "/channels/" + channel.ID.String()
+	// A valid session may edit settings without knowing stored secrets, but it
+	// cannot move those secrets to a different destination for exfiltration.
+	webhook := request("POST", "/channels", `{"name":"hook","type":"webhook","config":{"webhook_url":"https://original.example/notify","bearer_token":"STORED_TOKEN"}}`, false)
+	if webhook.Code != 201 {
+		t.Fatal(webhook.Code, webhook.Body.String())
+	}
+	var hook models.PublicNotificationChannel
+	if err := json.Unmarshal(webhook.Body.Bytes(), &hook); err != nil {
+		t.Fatal(err)
+	}
+	moved := request("PUT", "/channels/"+hook.ID.String(), `{"config":{"webhook_url":"https://new.example/notify","bearer_token":""}}`, false)
+	if moved.Code != 400 || strings.Contains(moved.Body.String(), "STORED_TOKEN") {
+		t.Fatal("destination change retained credential", moved.Code, moved.Body.String())
+	}
+	unchanged, err := models.GetNotificationChannel(context.Background(), db, hook.ID, user)
+	if err != nil || unchanged.Config.WebhookURL != "https://original.example/notify" || unchanged.Config.BearerToken != "STORED_TOKEN" {
+		t.Fatal("rejected update changed stored configuration", err)
+	}
 	response = request("PUT", path, `{"name":"renamed","config":{"bot_token":"","chat_id":"-1002"}}`, false)
 	if response.Code != 200 {
 		t.Fatal(response.Code, response.Body.String())

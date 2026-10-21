@@ -79,6 +79,7 @@ type AlertEvent struct {
 // AlertSnapshot is one server's current state as seen by the alert engine.
 // It intentionally carries no connection details or secrets.
 type AlertSnapshot struct {
+	CreatedAt  time.Time
 	ServerID   uuid.UUID
 	UserID     uuid.UUID
 	ServerName string
@@ -235,7 +236,7 @@ func scanAlertRules(rows *sql.Rows) ([]AlertRule, error) {
 // by the engine to evaluate rules without one query per server.
 func GetAlertSnapshots(db *sql.DB) ([]AlertSnapshot, error) {
 	rows, err := db.Query(
-		`SELECT s.id, s.user_id, s.name, COALESCE(s.disk_total_bytes, 0),
+		`SELECT s.id, s.user_id, s.name, s.created_at, COALESCE(s.disk_total_bytes, 0),
 		 lm.server_id IS NOT NULL,
 		 COALESCE(lm.cpu_percent, 0), COALESCE(lm.memory_used, 0), COALESCE(lm.memory_total, 0),
 		 COALESCE(lm.disk_used_bytes, 0), COALESCE(lm.load_1, 0), COALESCE(lm.latency_ms, 0),
@@ -249,7 +250,7 @@ func GetAlertSnapshots(db *sql.DB) ([]AlertSnapshot, error) {
 	var snapshots []AlertSnapshot
 	for rows.Next() {
 		var s AlertSnapshot
-		if err := rows.Scan(&s.ServerID, &s.UserID, &s.ServerName, &s.DiskTotal, &s.HasMetrics,
+		if err := rows.Scan(&s.ServerID, &s.UserID, &s.ServerName, &s.CreatedAt, &s.DiskTotal, &s.HasMetrics,
 			&s.CPUPercent, &s.MemoryUsed, &s.MemTotal, &s.DiskUsed, &s.Load1, &s.LatencyMS, &s.RecordedAt); err != nil {
 			return nil, err
 		}

@@ -298,7 +298,11 @@ func InsertNetworkSampleWithNotification(ctx context.Context, db *DB, check Netw
 			return sample, err
 		}
 	}
-	return sample, tx.Commit()
+	err = tx.Commit()
+	if err == nil && transition != "" {
+		signalNotificationWork(db.Raw)
+	}
+	return sample, err
 }
 
 func networkNotificationMessage(check NetworkCheck, sample NetworkSample, transition string) string {

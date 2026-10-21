@@ -23,9 +23,21 @@
 
 全新部署必须由运维预先创建 `shared/.env`；缺少时流水线明确失败，不会生成默认开启注册的配置。数据库、域名反向代理及外部 Docker `proxy` 网络也须事先准备。要求 Linux、Bash、git、tar、curl、flock，以及支持多份 --env-file、up --wait 的 Docker Compose v2。
 
-配置键：POSTGRES_HOST/PORT/USER/PASSWORD/DB/SSLMODE、JWT_SECRET、ENCRYPTION_KEY、DOMAIN，以及 ALLOW_REGISTRATION、TRUSTED_PROXIES、POLL_INTERVAL、ALERT_INTERVAL、ALLOW_PRIVATE_WEBHOOKS。数据库地址须可从容器访问；远端数据库通常应配置 POSTGRES_SSLMODE=require。首次建好账户后建议 ALLOW_REGISTRATION=false。**保留现有 ENCRYPTION_KEY/JWT_SECRET；不要为升级重新生成密钥。**
+配置键：POSTGRES_HOST/PORT/USER/PASSWORD/DB/SSLMODE、JWT_SECRET、ENCRYPTION_KEY、DOMAIN，以及 ALLOW_REGISTRATION、TRUSTED_PROXIES、POLL_INTERVAL、ALERT_INTERVAL、ALLOW_PRIVATE_WEBHOOKS。数据库地址须可从容器访问；远端数据库通常应配置 POSTGRES_SSLMODE=require。首次建好账户后建议 ALLOW_REGISTRATION=false。**保留现有 ENCRYPTION_KEY；不要直接替换，否则历史凭证无法解密。JWT_SECRET 则必须是独立生成的强随机秘密，至少 32 字节，弱密钥将拒绝启动。**
 
-GitHub Secrets 只保留部署连接与验收所需：DEPLOY_HOST、DEPLOY_USER、DEPLOY_PASSWORD、DOMAIN（HTTPS 冒烟域名）和私有镜像所需 GHCR_PAT。服务器 shared/.env 的 DOMAIN 应与该 Secret 一致。旧数据库/应用密钥 Secrets 不再自动写入服务器；修改 GitHub Secret 不会自动修改持久配置。
+GitHub Secrets 只保留部署连接与验收所需：DEPLOY_HOST、DEPLOY_USER、DEPLOY_KEY（专用部署私钥）、DEPLOY_HOST_FINGERPRINT（独立可信渠道核验的 SHA256 指纹）、DOMAIN（HTTPS 冒烟域名）和私有镜像所需 GHCR_PAT。缺少密钥或指纹时流水线在连接前失败；部署和回滚都校验同一指纹，不再使用 DEPLOY_PASSWORD。服务器 shared/.env 的 DOMAIN 应与该 Secret 一致。旧数据库/应用密钥 Secrets 不再自动写入服务器；修改 GitHub Secret 不会自动修改持久配置。
+
+## 2026-10 安全迁移
+
+本次升级会要求用户重新登录：JWT 必须携带有效期限、签发时间及数据库会话版本；改密码会撤销旧 token 并关闭旧终端。弱 JWT_SECRET、公开样例或与 ENCRYPTION_KEY 相同的值不能启动。先在受保护的配置文件中换成独立随机签名密钥，再部署；不要把秘密放入日志或提交到仓库。
+
+SSH 默认要求预先固定可信主机公钥，Windows 密码登录也一样。通过已有可信 known_hosts 或主机控制台取得并核对公钥后，填写服务器的主机密钥字段。不要把未经验证的即时 ssh-keyscan 结果自动当作可信密钥。确需分阶段迁移时，可以明确设置 `SSH_ALLOW_UNVERIFIED_HOST_KEYS=true` 暂时保留旧行为，日志会告警；完成固定后关闭该例外。它只用于迁移，不提供主机身份保护。
+
+Compose 的 19080 / 19527 现在仅绑定宿主机 loopback；域名 HTTPS 入口仍经 Docker `proxy` 网络访问前端。更新前确认外层代理已连到该网络。项目没有管理共用 PostgreSQL 实例的 Compose；数据库公网端口应在核对其他应用、备份和管理连接后，单独改为私有网络、VPN 或来源白名单，不能在应用升级中盲目关闭。
+
+发布脚本会收紧原 `web/.env` 和发布配置快照的权限。文件权限修复不能撤销历史已读出的秘密：数据库账号密码及 JWT 密钥应在独立维护窗口轮换；ENCRYPTION_KEY 若需轮换，必须先制定完整重加密、备份恢复和回滚步骤，禁止直接修改环境变量。SSH/API 等外部凭证轮换需要各服务的授权渠道。
+
+AI 标准模式下，普通文件读取先逐文件审批，只有少量公开系统标识文件自动读取；Redis/ACL 等凭据文件禁止进入模型。配置文件写入需审批，包括 Nginx 上游改变。通知目的地身份改变必须重新提供秘密或明确清除；携带 Bearer Token 的 webhook 只允许 HTTPS。
 
 运维修改 shared/.env 后，若要立即应用当前版本：
 

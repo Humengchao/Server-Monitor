@@ -108,7 +108,8 @@ test('adding a Windows host keeps the dialog buttons on screen and sends only Wi
   await expect(serverType).toHaveAttribute('aria-expanded', 'false');
   await expect(dialog.getByLabel(en['server.sshPort'])).toHaveCount(0);
   await expect(dialog.getByLabel(en['server.sshKey'])).toHaveCount(0);
-  await expect(dialog.getByLabel(en['server.sshHostKey'])).toHaveCount(0);
+  await expect(dialog.getByLabel(en['server.sshHostKey'])).toBeVisible();
+  await dialog.getByLabel(en['server.sshHostKey']).fill('ssh-ed25519 trusted-windows-host-key');
   await dialog.getByLabel(en['server.username']).fill('Administrator');
   await dialog.getByLabel(en['server.password']).fill('secret');
   await ok.click();
@@ -116,7 +117,7 @@ test('adding a Windows host keeps the dialog buttons on screen and sends only Wi
   expect(state.created[0]).toMatchObject({ name: 'win-01', host: '198.51.100.7', server_type: 'windows', ssh_username: 'Administrator', ssh_password: 'secret', credential_id: null, is_public: true });
   expect(state.created[0].port).toBeUndefined();
   expect(state.created[0].ssh_key).toBeUndefined();
-  expect(state.created[0].ssh_host_key).toBeUndefined();
+  expect(state.created[0].ssh_host_key).toBe('ssh-ed25519 trusted-windows-host-key');
   expect(state.created[0]).not.toHaveProperty('expected_expires_at');
   await expect(dialog).toBeHidden();
   expect(state.errors).toEqual([]);

@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -73,7 +72,7 @@ func TestServerCreateDefaultsPublicAndHonorsExplicitPrivate(t *testing.T) {
 			if err != nil || stored.IsPublic != !explicitPrivate {
 				t.Fatalf("stored visibility for %s: %+v %v", name, stored, err)
 			}
-			public, err := models.GetPublicServerMetrics(db.Raw, time.Now().Add(-30*24*time.Hour), time.Now())
+			public, err := models.GetPublicServerMetricsContext(context.Background(), db.Raw)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -111,7 +110,7 @@ func TestServerVisibilityAndAgentConfigurationThroughHTTP(t *testing.T) {
 		t.Fatalf("agent auth: %+v %v", stored, err)
 	}
 	publicNames := func() string {
-		items, err := models.GetPublicServerMetrics(db.Raw, time.Now().Add(-30*24*time.Hour), time.Now())
+		items, err := models.GetPublicServerMetricsContext(context.Background(), db.Raw)
 		if err != nil {
 			t.Fatal(err)
 		}

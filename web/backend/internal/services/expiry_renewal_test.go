@@ -139,8 +139,8 @@ func TestExpiryRenewalConcurrentSchedulersAndStaleEditor(t *testing.T) {
 	if changes.Load() != 1 {
 		t.Fatalf("got %d renewals", changes.Load())
 	}
-	server := &models.Server{ID: candidate.ServerID, UserID: candidate.UserID, Name: "stale edit", Host: "192.0.2.1", SSHUsername: "root", ServerType: "linux", ExpiresAt: &candidate.ExpiresAt}
-	wrapper := &models.DB{Raw: db}
+	server := &models.Server{ID: candidate.ServerID, UserID: candidate.UserID, Name: "stale edit", Host: "192.0.2.1", SSHUsername: "root", SSHPassword: "fixture-password", ServerType: "linux", ExpiresAt: &candidate.ExpiresAt}
+	wrapper := &models.DB{Raw: db, EncryptionKey: "0123456789abcdef0123456789abcdef"}
 	if err := models.UpdateServerWithExpiryExpectation(context.Background(), wrapper, server, &models.ExpiryExpectation{ExpiresAt: &candidate.ExpiresAt}); !errors.Is(err, models.ErrServerExpiryChanged) {
 		t.Fatalf("stale editor overwrote renewal: %v", err)
 	}

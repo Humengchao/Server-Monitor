@@ -233,25 +233,3 @@ func setAlertRuleChannels(ctx context.Context, tx *sql.Tx, ruleID, userID uuid.U
         AND NOT EXISTS(SELECT 1 FROM alert_rule_channels rc WHERE rc.rule_id=$1 AND rc.channel_id=notification_deliveries.channel_id)`, ruleID, userID)
 	return err
 }
-
-// NotificationChannelBackup is plaintext only inside the caller's encrypted
-// backup envelope. It is intentionally a distinct type from API DTOs.
-type NotificationChannelBackup struct {
-	ID      uuid.UUID          `json:"id"`
-	Name    string             `json:"name"`
-	Type    string             `json:"type"`
-	Enabled bool               `json:"enabled"`
-	Config  NotificationConfig `json:"config"`
-}
-
-func ExportNotificationChannels(ctx context.Context, db *DB, userID uuid.UUID) ([]NotificationChannelBackup, error) {
-	channels, err := ListNotificationChannels(ctx, db, userID)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]NotificationChannelBackup, 0, len(channels))
-	for _, c := range channels {
-		result = append(result, NotificationChannelBackup{c.ID, c.Name, c.Type, c.Enabled, c.Config})
-	}
-	return result, nil
-}

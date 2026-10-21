@@ -7,7 +7,6 @@ interface AuthState {
   user: { id: string; username: string } | null;
   setAuth: (token: string, user: { id: string; username: string }) => void;
   logout: () => void;
-  isLoggedIn: () => boolean;
 }
 
 // Corrupted localStorage must not crash the whole app at module load time.
@@ -19,7 +18,7 @@ function readStoredUser(): AuthState['user'] {
   }
 }
 
-export const useAuthStore = create<AuthState>((set, get) => ({
+export const useAuthStore = create<AuthState>((set) => ({
   token: localStorage.getItem('token'),
   expired: false,
   expire: () => { localStorage.removeItem('token'); localStorage.removeItem('user'); set({ expired: true }); },
@@ -34,5 +33,4 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     localStorage.removeItem('user');
     set({ token: null, user: null, expired: false });
   },
-  isLoggedIn: () => !!get().token,
 }));

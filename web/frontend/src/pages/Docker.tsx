@@ -452,6 +452,22 @@ export default function Docker() {
   const loadGenerationRef = useRef(0);
   const mountedRef = useRef(false);
 
+  const loadStats = useCallback((serverId: string) => {
+    const key = 'stats:' + serverId;
+    if (!mountedRef.current || !activeKeysRef.current.includes(serverId) || requestsRef.current.has(key)) return;
+    const generation = loadGenerationRef.current;
+    const controller = new AbortController();
+    requestsRef.current.set(key, controller);
+    setServers(previous => previous.map(item => item.server.id === serverId ? { ...item, statsLoading: true, statsError: false } : item));
+    void queueStats(() => serversApi.getContainerStats(serverId, controller.signal), controller.signal).then(stats => {
+      if (generation !== loadGenerationRef.current || controller.signal.aborted) return;
+      setServers(previous => previous.map(item => item.server.id === serverId ? { ...item, containers: mergeStats(item.containers, stats.data || []), statsLoading: false } : item));
+    }).catch(() => {
+      if (generation !== loadGenerationRef.current || controller.signal.aborted) return;
+      setServers(previous => previous.map(item => item.server.id === serverId ? { ...item, statsLoading: false, statsError: true } : item));
+    }).finally(() => { if (requestsRef.current.get(key) === controller) requestsRef.current.delete(key); });
+  }, []);
+
   const loadContainers = useCallback(async (serverId: string, showLoading = true) => {
     if (!mountedRef.current || requestsRef.current.has(serverId)) return;
     const controller = new AbortController();
@@ -463,26 +479,15 @@ export default function Docker() {
     try {
       const response = await serversApi.getContainers(serverId, controller.signal);
       if (generation !== loadGenerationRef.current || controller.signal.aborted) return;
-      const pendingStats = requestsRef.current.get('stats:' + serverId);
       setServers((previous) => previous.map((item) => item.server.id === serverId ? { ...item, containers: mergeStats(response.data || [], item.containers), loading: false, loaded: true, error: false } : item));
-      if (pendingStats && !pendingStats.signal.aborted) return;
-      setServers((previous) => previous.map((item) => item.server.id === serverId ? { ...item, statsLoading: true, statsError: false } : item));
-      const statsController = new AbortController();
-      requestsRef.current.set('stats:' + serverId, statsController);
-      void queueStats(() => serversApi.getContainerStats(serverId, statsController.signal), statsController.signal).then((stats) => {
-        if (generation !== loadGenerationRef.current || statsController.signal.aborted) return;
-        setServers(previous => previous.map(item => item.server.id === serverId ? { ...item, containers: mergeStats(item.containers, stats.data || []), statsLoading: false } : item));
-      }).catch(() => {
-        if (generation !== loadGenerationRef.current || statsController.signal.aborted) return;
-        setServers(previous => previous.map(item => item.server.id === serverId ? { ...item, statsLoading: false, statsError: true } : item));
-      }).finally(() => { if (requestsRef.current.get('stats:' + serverId) === statsController) requestsRef.current.delete('stats:' + serverId); });
+      loadStats(serverId);
     } catch {
       if (generation !== loadGenerationRef.current || controller.signal.aborted) return;
       setServers((previous) => previous.map((item) => item.server.id === serverId ? { ...item, loading: false, error: true } : item));
     } finally {
       if (requestsRef.current.get(serverId) === controller) requestsRef.current.delete(serverId);
     }
-  }, []);
+  }, [loadStats]);
 
   const loadServers = useCallback(async () => {
     if (!mountedRef.current) return;
@@ -537,6 +542,7 @@ export default function Docker() {
       requestsRef.current.get(serverId)?.abort();
       requestsRef.current.delete(serverId);
       requestsRef.current.get('stats:' + serverId)?.abort();
+      requestsRef.current.delete('stats:' + serverId);
       void loadContainers(serverId);
     } catch {
       if (!mountedRef.current || generation !== loadGenerationRef.current) return;
@@ -730,14 +736,23 @@ export default function Docker() {
 
   const handleCollapseChange = (keys: string | string[]) => {
     const keyArr = Array.isArray(keys) ? keys : [keys];
+    const previousKeys = activeKeysRef.current;
     activeKeysRef.current = keyArr;
     setActiveKeys(keyArr);
+    for (const [key, controller] of requestsRef.current) {
+      if (key.startsWith('stats:') && !keyArr.includes(key.slice(6))) {
+        controller.abort(); requestsRef.current.delete(key);
+      }
+    }
+    setServers(previous => previous.map(item => !keyArr.includes(item.server.id) && item.statsLoading ? { ...item, statsLoading: false } : item));
     for (const key of keyArr) {
       const sd = servers.find((s) => s.server.id === key);
       // loaded distinguishes "fetched, genuinely empty" from "never fetched",
       // so servers without containers aren't re-queried on every toggle.
       if (sd && !sd.loaded && !sd.loading) {
-        loadContainers(key);
+        void loadContainers(key);
+      } else if (sd?.loaded && !previousKeys.includes(key)) {
+        loadStats(key);
       }
     }
   };

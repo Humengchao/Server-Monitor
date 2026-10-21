@@ -43,6 +43,9 @@ func SetupFeatures(db *sql.DB, cfg *config.Config, sshCache *services.SSHConnCac
 		// keep them out of the access log entirely.
 		Skip: func(c *gin.Context) bool {
 			path := c.Request.URL.Path
+			if path == "/api/ready" && c.Writer.Status() < 400 {
+				return true
+			}
 			return strings.HasPrefix(path, "/api/ssh/") || strings.HasPrefix(path, "/api/ws/") || strings.HasPrefix(path, "/api/agent/")
 		},
 	}), gin.Recovery())

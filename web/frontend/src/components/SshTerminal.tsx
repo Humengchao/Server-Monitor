@@ -7,6 +7,7 @@ import { Button, Space, App } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { DarkModeContext } from '../contexts/DarkModeContext';
+import { API_BASE_URL, websocketURL } from '../api/config';
 import '@xterm/xterm/css/xterm.css';
 
 interface Props {
@@ -96,11 +97,10 @@ export default function SshTerminal({ serverId }: Props) {
     ro.observe(host);
 
     const token = localStorage.getItem('token');
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     // The JWT rides in the subprotocol list (backend echoes "bearer") instead
     // of the query string, so it never lands in gin/nginx access logs.
     const ws = new WebSocket(
-      `${wsProtocol}//${window.location.host}/api/ssh/${serverId}`,
+      websocketURL(`ssh/${serverId}`, API_BASE_URL),
       token ? ['bearer', token] : undefined,
     );
     // Keep SSH output as bytes: xterm preserves UTF-8 sequences split across

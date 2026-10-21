@@ -26,21 +26,14 @@ func StartNotificationDispatcher(db *models.DB, sender *NotificationSender) *Not
 	d := &NotificationDispatcher{db: db, sender: sender, cancel: cancel, done: make(chan struct{})}
 	go func() {
 		defer close(d.done)
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				d.deliver(ctx)
-			}
-		}
+		wake, unsubscribe := models.SubscribeNotificationWork(db.Raw)
+		defer unsubscribe()
+		runIdleQueue(ctx, wake, d.deliver)
 	}()
 	return d
 }
 func (d *NotificationDispatcher) Stop() { d.stopOnce.Do(d.cancel); <-d.done }
-func (d *NotificationDispatcher) deliver(ctx context.Context) {
+func (d *NotificationDispatcher) deliver(ctx context.Context) bool {
 	query, cancel := context.WithTimeout(ctx, 10*time.Second)
 	items, err := models.ClaimNotifications(query, d.db, 4)
 	cancel()
@@ -48,7 +41,7 @@ func (d *NotificationDispatcher) deliver(ctx context.Context) {
 		if ctx.Err() == nil {
 			log.Printf("notifications: queue claim failed")
 		}
-		return
+		return false
 	}
 	var group sync.WaitGroup
 	for _, item := range items {
@@ -87,4 +80,5 @@ func (d *NotificationDispatcher) deliver(ctx context.Context) {
 		}(item)
 	}
 	group.Wait()
+	return len(items) > 0
 }

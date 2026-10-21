@@ -12,6 +12,7 @@ export interface Server {
   port: number;
   ssh_username: string;
   ssh_host_key?: string;
+  ssh_auth_method?: SSHAuthMethod;
   credential_id?: string | null;
   credential_name?: string;
   server_type: string;
@@ -131,23 +132,41 @@ export interface BatchExecResponse {
 /** Mirrors services.BatchMaxTargets on the backend. */
 export const BATCH_MAX_TARGETS = 50;
 
-export interface MetricPoint {
-  cpu_percent: number;
-  load_1: number;
-  load_5: number;
-  load_15: number;
-  memory_used: number;
-  memory_total: number;
-  disk_used: number;
-  network_rx_bytes: number;
-  network_tx_bytes: number;
-  network_rx_total_bytes: number;
-  network_tx_total_bytes: number;
-  disk_rx_bytes: number;
-  disk_tx_bytes: number;
-  uptime_seconds: number;
-  latency_ms: number;
-  recorded_at: string;
+export type MetricPoint = LatestMetrics;
+export type SSHAuthMethod = 'password' | 'key';
+
+export interface SSHAuthInput {
+  ssh_auth_method?: SSHAuthMethod;
+  ssh_password?: string;
+  ssh_key?: string;
+  clear_ssh_password?: boolean;
+  clear_ssh_key?: boolean;
+}
+
+export interface ServerInput extends SSHAuthInput {
+  connection_mode?: 'ssh' | 'agent';
+  is_public?: boolean;
+  monitoring_enabled?: boolean;
+  auto_renew_enabled?: boolean;
+  name: string;
+  host: string;
+  port?: number;
+  ssh_username?: string;
+  ssh_host_key?: string;
+  credential_id?: string | null;
+  expires_at?: string | null;
+  billing_price?: number;
+  billing_currency?: string;
+  billing_cycle?: string;
+  traffic_limit_bytes?: number;
+  public_location?: string;
+  notes?: string;
+  server_type?: string;
+}
+
+export interface ServerUpdateInput extends ServerInput {
+  /** Expiry observed when the edit form opened; null guards an unset date. */
+  expected_expires_at?: string | null;
 }
 
 export const serversApi = {
@@ -156,53 +175,9 @@ export const serversApi = {
   get: (id: string, signal?: AbortSignal) =>
     client.get<Server>(`/servers/${id}`, { signal }),
 
-  create: (data: {
-    connection_mode?: 'ssh' | 'agent';
-    is_public?: boolean;
-    monitoring_enabled?: boolean;
-    auto_renew_enabled?: boolean;
-    name: string;
-    host: string;
-    port?: number;
-    ssh_username?: string;
-    ssh_password?: string;
-    ssh_key?: string;
-    ssh_host_key?: string;
-    credential_id?: string | null;
-    expires_at?: string | null;
-    billing_price?: number;
-    billing_currency?: string;
-    billing_cycle?: string;
-    traffic_limit_bytes?: number;
-    public_location?: string;
-    notes?: string;
-    server_type?: string;
-  }) => client.post<Server>('/servers', data),
+  create: (data: ServerInput) => client.post<Server>('/servers', data),
 
-  update: (id: string, data: {
-    connection_mode?: 'ssh' | 'agent';
-    is_public?: boolean;
-    monitoring_enabled?: boolean;
-    auto_renew_enabled?: boolean;
-    name: string;
-    host: string;
-    port?: number;
-    ssh_username?: string;
-    ssh_password?: string;
-    ssh_key?: string;
-    ssh_host_key?: string;
-    credential_id?: string | null;
-    expires_at?: string | null;
-    /** Expiry observed when the edit form opened; null guards an unset date. */
-    expected_expires_at?: string | null;
-    billing_price?: number;
-    billing_currency?: string;
-    billing_cycle?: string;
-    traffic_limit_bytes?: number;
-    public_location?: string;
-    notes?: string;
-    server_type?: string;
-  }) => client.put<Server>(`/servers/${id}`, data),
+  update: (id: string, data: ServerUpdateInput) => client.put<Server>(`/servers/${id}`, data),
 
   delete: (id: string) => client.delete(`/servers/${id}`),
 
@@ -237,8 +212,6 @@ export const serversApi = {
   killProcess: (id: string, pid: number, force = false) =>
     client.delete(`/servers/${id}/processes/${pid}`, { params: force ? { force: 1 } : undefined }),
 
-  checkDocker: (id: string) =>
-    client.get<{ installed: boolean; version?: string }>(`/servers/${id}/docker/check`, { timeout: 20000 }),
   /** Asks the host directly and updates the stored flag — the recovery path for a
    *  server whose Docker flag was lost to a transient probe failure. */
   redetectDocker: (id: string) =>

@@ -1,3 +1,4 @@
+import { apiError } from '../utils/apiError';
 import React, { useEffect, useState, useCallback, useMemo, Suspense, lazy, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
@@ -53,11 +54,6 @@ interface NotesDraft {
   serverId: string;
   value: string;
   savedValue: string;
-}
-
-function apiError(err: unknown, fallback: string): string {
-  const detail = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
-  return detail || fallback;
 }
 
 function getPresetRange(key: PresetKey): TimeRange {
@@ -228,7 +224,7 @@ export default function ServerDetail() {
     if (!server) return;
     setSavingServer(true);
     try {
-      const payload = buildServerPayload(values, { editing: true, credentialId: selectedCredential, notes: server.notes || '' });
+      const payload = buildServerPayload(values, { editing: true, credentialId: selectedCredential });
       await serversApi.update(server.id, { ...payload, expected_expires_at: editingExpiryRef.current });
       await serversApi.setTags(server.id, tagValues);
       message.success(t('server.updated'));
@@ -611,6 +607,7 @@ export default function ServerDetail() {
         <ServerForm
           form={form}
           editing
+          savedAuthMethod={!server.credential_id ? server.ssh_auth_method || 'password' : undefined}
           credentialId={selectedCredential}
           onCredentialChange={setSelectedCredential}
           tagIds={tagValues}

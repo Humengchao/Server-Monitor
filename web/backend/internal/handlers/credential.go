@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -23,14 +24,18 @@ type CreateCredentialRequest struct {
 	SSHPassword    string `json:"ssh_password"`
 	SSHKey         string `json:"ssh_key"`
 	CredentialType string `json:"credential_type"`
+	SSHAuthMethod  string `json:"ssh_auth_method"`
 }
 
 type UpdateCredentialRequest struct {
-	Name           string `json:"name" binding:"required"`
-	SSHUsername    string `json:"ssh_username" binding:"required"`
-	SSHPassword    string `json:"ssh_password"`
-	SSHKey         string `json:"ssh_key"`
-	CredentialType string `json:"credential_type"`
+	Name             string `json:"name" binding:"required"`
+	SSHUsername      string `json:"ssh_username" binding:"required"`
+	SSHPassword      string `json:"ssh_password"`
+	SSHKey           string `json:"ssh_key"`
+	CredentialType   string `json:"credential_type"`
+	SSHAuthMethod    string `json:"ssh_auth_method"`
+	ClearSSHPassword bool   `json:"clear_ssh_password"`
+	ClearSSHKey      bool   `json:"clear_ssh_key"`
 }
 
 func normalizeCredentialFields(name, username, credentialType string) (string, string, string, error) {
@@ -106,7 +111,11 @@ func (h *CredentialHandler) Create(c *gin.Context) {
 		SSHKey:      req.SSHKey,
 		CredType:    req.CredentialType,
 	}
-	if err := models.CreateCredential(db, cred); err != nil {
+	if err := models.CreateCredential(db, cred, models.SSHAuthUpdate{Method: req.SSHAuthMethod}); err != nil {
+		if errors.Is(err, models.ErrSSHAuthentication) {
+			c.JSON(400, gin.H{"error": "selected SSH authentication requires a password or key"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create credential"})
 		return
 	}
@@ -141,7 +150,11 @@ func (h *CredentialHandler) Update(c *gin.Context) {
 		SSHKey:      req.SSHKey,
 		CredType:    req.CredentialType,
 	}
-	if err := models.UpdateCredential(db, cred); err != nil {
+	if err := models.UpdateCredential(db, cred, models.SSHAuthUpdate{Method: req.SSHAuthMethod, ClearPassword: req.ClearSSHPassword, ClearKey: req.ClearSSHKey}); err != nil {
+		if errors.Is(err, models.ErrSSHAuthentication) {
+			c.JSON(400, gin.H{"error": "selected SSH authentication requires a password or key; Windows requires a password"})
+			return
+		}
 		if err == sql.ErrNoRows {
 			c.JSON(http.StatusNotFound, gin.H{"error": "credential not found"})
 			return

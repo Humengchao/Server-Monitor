@@ -16,6 +16,10 @@ web/backend/cmd/server/server
 # Node
 web/frontend/node_modules/
 web/frontend/dist/
+web/frontend/test-results*/
+web/frontend/playwright-report/
+web/frontend/.review-*-dist/
+web/frontend/.tour/
 
 # macOS app (SwiftPM)
 macos/.build/

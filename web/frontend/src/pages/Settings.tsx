@@ -1,3 +1,4 @@
+import { apiError } from '../utils/apiError';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   App, Alert, Button, Card, ColorPicker, Col, Form, Input, Modal, Popconfirm, Row, Space, Table, Tag as AntTag, Typography,
@@ -15,11 +16,6 @@ interface PasswordFormValues {
   current_password: string;
   new_password: string;
   confirm_password: string;
-}
-
-function apiError(err: unknown, fallback: string): string {
-  const detail = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
-  return detail || fallback;
 }
 
 export default function Settings() {

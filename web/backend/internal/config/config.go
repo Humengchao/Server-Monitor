@@ -3,7 +3,6 @@ package config
 import (
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"strconv"
@@ -30,6 +29,8 @@ type Config struct {
 	// alerting pipeline to reach the server's private network.
 	AllowPrivateWebhooks    bool
 	AIAllowPrivateEndpoints bool
+	// Migration-only escape hatch. The default requires a trusted, pinned key.
+	SSHAllowUnverifiedHostKeys bool
 	// AllowRegistration gates POST /api/auth/register. On by default so existing
 	// deployments keep their behavior; set ALLOW_REGISTRATION=false to close
 	// signup once the initial accounts exist.
@@ -56,11 +57,8 @@ func Load() (*Config, error) {
 	if !ok {
 		return nil, errors.New("JWT_SECRET is required")
 	}
-	if len(jwtSecret) < 32 {
-		// Warn but don't refuse: existing deployments with short secrets must
-		// keep booting. Anything under 32 bytes is below the HS256 key size
-		// recommended by RFC 7518 and is realistically brute-forceable.
-		log.Printf("WARNING: JWT_SECRET is only %d bytes long; tokens signed with a key this small are weak. Use at least 32 random bytes (e.g. `openssl rand -base64 48`)", len(jwtSecret))
+	if err := validateJWTSecret(jwtSecret); err != nil {
+		return nil, err
 	}
 	encKey, ok := os.LookupEnv("ENCRYPTION_KEY")
 	if !ok {
@@ -68,6 +66,9 @@ func Load() (*Config, error) {
 	}
 	if len(encKey) != 32 {
 		return nil, errors.New("ENCRYPTION_KEY must be exactly 32 bytes")
+	}
+	if jwtSecret == encKey {
+		return nil, errors.New("JWT_SECRET must be independent of ENCRYPTION_KEY")
 	}
 	pollInterval, err := loadInterval("POLL_INTERVAL", 3)
 	if err != nil {
@@ -93,29 +94,51 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	unverifiedHostKeys, err := loadBoolDefault("SSH_ALLOW_UNVERIFIED_HOST_KEYS", false)
+	if err != nil {
+		return nil, err
+	}
 	expiryTimezone, err := time.LoadLocation(getEnv("EXPIRY_TIMEZONE", "Asia/Shanghai"))
 	if err != nil {
 		return nil, fmt.Errorf("EXPIRY_TIMEZONE: %w", err)
 	}
 	return &Config{
-		PublicURL:               strings.TrimRight(os.Getenv("PUBLIC_URL"), "/"),
-		AgentAssetsDir:          getEnv("AGENT_ASSETS_DIR", "/app/agent-assets"),
-		DatabaseURL:             dbURL,
-		JWTSecret:               jwtSecret,
-		EncryptionKey:           encKey,
-		ServerPort:              getEnv("SERVER_PORT", "8080"),
-		TLSCertFile:             os.Getenv("TLS_CERT_FILE"),
-		TLSKeyFile:              os.Getenv("TLS_KEY_FILE"),
-		CORSOrigin:              getEnv("CORS_ORIGIN", "http://localhost:5173"),
-		PollInterval:            pollInterval,
-		AlertInterval:           alertInterval,
-		TrustedProxies:          trustedProxies,
-		AllowPrivateWebhooks:    strings.EqualFold(strings.TrimSpace(os.Getenv("ALLOW_PRIVATE_WEBHOOKS")), "true"),
-		AIAllowPrivateEndpoints: aiPrivateEndpoints,
-		AllowRegistration:       allowRegistration,
-		AutoRenewExpiry:         autoRenewExpiry,
-		ExpiryTimezone:          expiryTimezone,
+		PublicURL:                  strings.TrimRight(os.Getenv("PUBLIC_URL"), "/"),
+		AgentAssetsDir:             getEnv("AGENT_ASSETS_DIR", "/app/agent-assets"),
+		DatabaseURL:                dbURL,
+		JWTSecret:                  jwtSecret,
+		EncryptionKey:              encKey,
+		ServerPort:                 getEnv("SERVER_PORT", "8080"),
+		TLSCertFile:                os.Getenv("TLS_CERT_FILE"),
+		TLSKeyFile:                 os.Getenv("TLS_KEY_FILE"),
+		CORSOrigin:                 getEnv("CORS_ORIGIN", "http://localhost:5173"),
+		PollInterval:               pollInterval,
+		AlertInterval:              alertInterval,
+		TrustedProxies:             trustedProxies,
+		AllowPrivateWebhooks:       strings.EqualFold(strings.TrimSpace(os.Getenv("ALLOW_PRIVATE_WEBHOOKS")), "true"),
+		AIAllowPrivateEndpoints:    aiPrivateEndpoints,
+		SSHAllowUnverifiedHostKeys: unverifiedHostKeys,
+		AllowRegistration:          allowRegistration,
+		AutoRenewExpiry:            autoRenewExpiry,
+		ExpiryTimezone:             expiryTimezone,
 	}, nil
+}
+
+func validateJWTSecret(secret string) error {
+	invalid := errors.New("JWT_SECRET must be at least 32 random bytes; generate a new independent secret instead of using a public example")
+	if len(secret) < 32 || strings.TrimSpace(secret) != secret {
+		return invalid
+	}
+	lower := strings.ToLower(secret)
+	for _, marker := range []string{"change-me", "changeme", "your-secret", "replace-me", "0123456789abcdef", "abcdefghijklmnopqrstuvwxyz"} {
+		if strings.Contains(lower, marker) {
+			return invalid
+		}
+	}
+	if strings.Trim(secret, string(secret[0])) == "" {
+		return invalid
+	}
+	return nil
 }
 
 // loadBoolDefault parses a boolean switch. Empty keeps the fallback; accepted

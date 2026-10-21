@@ -1,3 +1,4 @@
+import { apiError } from '../utils/apiError';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, App, Button, Empty, Form, Input, Modal, Space, Switch, Tabs, Tag, Typography } from 'antd';
 import { ApiOutlined, BookOutlined, DeleteOutlined, EditOutlined, ExperimentOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
@@ -5,8 +6,6 @@ import { useTranslation } from 'react-i18next';
 import { aiApi } from '../api/ai';
 import type { AIPlugin, AIPluginInput, AISkill, AISkillInput } from '../api/ai';
 import AIMarkdown from './AIMarkdown';
-
-function errorText(error: unknown, fallback: string) { return (error as { response?: { data?: { error?: string } } })?.response?.data?.error || fallback; }
 
 export default function AIExtensions({ skills, plugins, onChanged, onClose }: { skills: AISkill[]; plugins: AIPlugin[]; onChanged: () => Promise<void>; onClose: () => void }) {
   const { t } = useTranslation('ai');
@@ -32,7 +31,7 @@ export default function AIExtensions({ skills, plugins, onChanged, onClose }: { 
     if (request.current || !mounted.current) return false;
     const controller = new AbortController(); request.current = controller; setBusy(true);
     try { await operation(controller.signal); if (!mounted.current || controller.signal.aborted) return false; message.success(success); await onChanged(); return mounted.current && !controller.signal.aborted; }
-    catch (error) { if (mounted.current && !controller.signal.aborted) message.error(errorText(error, t('operationFailed'))); return false; }
+    catch (error) { if (mounted.current && !controller.signal.aborted) message.error(apiError(error, t('operationFailed'))); return false; }
     finally { if (request.current === controller) request.current = null; if (mounted.current) setBusy(false); }
   };
   const editSkill = (value: AISkill | 'new') => { importGeneration.current++; skillForm.resetFields(); setSkill(value); setPreview(false); skillForm.setFieldsValue(value === 'new' ? { name: '', description: '', content: '' } : value); };

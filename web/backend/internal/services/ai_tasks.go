@@ -54,6 +54,7 @@ type AITaskWorker struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
 	done     chan struct{}
+	wake     chan struct{}
 	workers  sync.WaitGroup
 	complete func(context.Context, models.AIProvider, []AIMessage, []AIToolDefinition) (AICompletion, error)
 	execute  func(context.Context, *models.Server, AIAction) (AIActionResult, error)
@@ -64,53 +65,81 @@ type AITaskWorker struct {
 func NewAITaskWorker(db *models.DB, client *AIClient) *AITaskWorker {
 	ctx, cancel := context.WithCancel(context.Background())
 	mcp := NewAIMCPClient(client)
-	return &AITaskWorker{db: db, client: client, ctx: ctx, cancel: cancel, done: make(chan struct{}), complete: client.Complete, execute: ExecuteAIAction, mcpList: mcp.ListTools, mcpCall: mcp.CallTool}
+	return &AITaskWorker{db: db, client: client, ctx: ctx, cancel: cancel, done: make(chan struct{}), wake: make(chan struct{}, 1), complete: client.Complete, execute: ExecuteAIAction, mcpList: mcp.ListTools, mcpCall: mcp.CallTool}
 }
 func (w *AITaskWorker) Start() { go w.loop() }
 func (w *AITaskWorker) Stop()  { w.cancel(); <-w.done }
+func (w *AITaskWorker) Wake() {
+	if w == nil {
+		return
+	}
+	select {
+	case w.wake <- struct{}{}:
+	default:
+	}
+}
 func (w *AITaskWorker) loop() {
 	defer close(w.done)
 	defer w.workers.Wait()
 	slots := make(chan struct{}, 2)
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	leases := time.NewTicker(5 * time.Second)
+	defer leases.Stop()
+	delay := time.Second
 	for {
 		select {
 		case <-w.ctx.Done():
 			return
-		case <-ticker.C:
+		case <-leases.C:
 			ctx, cancel := context.WithTimeout(w.ctx, 5*time.Second)
 			err := models.ExpireAILeases(ctx, w.db.Raw)
 			cancel()
 			if err != nil {
-				continue
+				log.Print("AI lease recovery failed")
 			}
-			for i := 0; i < 2; i++ {
-				acquired := false
-				select {
-				case slots <- struct{}{}:
-					acquired = true
-				default:
-				}
-				if !acquired {
-					break
-				}
-				// A claimed worker owns exactly one slot until it stops.
-				claimCtx, claimCancel := context.WithTimeout(w.ctx, 5*time.Second)
-				worker := uuid.NewString()
-				task, err := models.ClaimAITask(claimCtx, w.db.Raw, worker)
-				claimCancel()
-				if err != nil {
-					<-slots
-					if !errors.Is(err, sql.ErrNoRows) && w.ctx.Err() == nil {
-						log.Print("AI task claim failed")
-					}
-					break
-				}
-				w.workers.Add(1)
-				go func(t models.AITask) { defer w.workers.Done(); defer func() { <-slots }(); w.run(t) }(task)
-			}
+			continue
+		case <-w.wake:
+			delay = time.Second
+		case <-timer.C:
 		}
+		if w.ctx.Err() != nil {
+			return
+		}
+		claimed := false
+		for i := 0; i < 2; i++ {
+			acquired := false
+			select {
+			case slots <- struct{}{}:
+				acquired = true
+			default:
+			}
+			if !acquired {
+				claimed = true // Busy workers should drain queued work promptly.
+				break
+			}
+			// A claimed worker owns exactly one slot until it stops.
+			claimCtx, claimCancel := context.WithTimeout(w.ctx, 5*time.Second)
+			worker := uuid.NewString()
+			task, err := models.ClaimAITask(claimCtx, w.db.Raw, worker)
+			claimCancel()
+			if err != nil {
+				<-slots
+				if !errors.Is(err, sql.ErrNoRows) && w.ctx.Err() == nil {
+					log.Print("AI task claim failed")
+				}
+				break
+			}
+			claimed = true
+			w.workers.Add(1)
+			go func(t models.AITask) { defer w.workers.Done(); defer func() { <-slots; w.Wake() }(); w.run(t) }(task)
+		}
+		if claimed {
+			delay = time.Second
+		} else {
+			delay = min(2*delay, 5*time.Second)
+		}
+		timer.Reset(delay)
 	}
 }
 
@@ -577,6 +606,9 @@ func (w *AITaskWorker) Create(ctx context.Context, user, serverID, providerID, r
 	task := models.AITask{Scope: selection.Scope, UserID: user, ServerID: server.ID, ServerName: server.Name, ServerType: server.ServerType, ProviderID: p.ID, ProviderName: p.Name, Model: p.Model, RequestID: request, Prompt: prompt, TargetFingerprint: AITargetFingerprint(server), ProviderFingerprint: AIProviderFingerprint(p), Messages: messages, ApprovalMode: selection.ApprovalMode, Options: rawOptions}
 	_, _ = task.DecodeOptions()
 	err = models.CreateAITask(ctx, w.db.Raw, &task)
+	if err == nil {
+		w.Wake()
+	}
 	return task, err
 }
 
@@ -599,5 +631,9 @@ func (w *AITaskWorker) Continue(ctx context.Context, user, id, request uuid.UUID
 	if aiKnownSecret(message, server, provider, pluginSecrets(plugins)...) {
 		return models.AITask{}, ErrAISecretInput
 	}
-	return models.ContinueAITask(ctx, w.db.Raw, id, user, request, message)
+	task, err = models.ContinueAITask(ctx, w.db.Raw, id, user, request, message)
+	if err == nil {
+		w.Wake()
+	}
+	return task, err
 }

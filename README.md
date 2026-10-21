@@ -153,7 +153,8 @@ Web 新增主机/容器文件浏览、UTF-8 文本编辑及上传下载；Docker
 ### 认证与授权
 
 - 基于 **JWT（HS256）** 的无状态认证，Token 有效期 72 小时
-- **修改密码会立即吊销该账号此前签发的全部 Token**：用户表记录一个失效时间点，鉴权时拒绝 `iat` 更早的 Token。发起修改的那个会话会收到新签发的 Token，不会被自己的操作切断
+- **修改密码会立即吊销旧会话并关闭旧 SSH/Docker 终端**：Token 必须包含 `exp`、`iat` 和与数据库一致的精确 `session_version`，同一秒内改密也能撤销旧 Token。发起修改的页面收到新 Token。
+- SSH 默认要求固定通过可信渠道核验的主机公钥，Windows 密码登录同样校验；部署迁移步骤见 [发布文档](docs/web-deployment.md)。
 - 所有 API 请求通过 Bearer Token 认证，WebSocket 通过子协议传递 Token，避免令牌进入 URL 和访问日志
 - 所有受保护的管理 API 查询强制按 `user_id` 过滤，**用户之间数据完全隔离**；公开探针使用独立的最小化数据模型，公开真实服务器名称与健康指标，不返回连接信息、凭据、备注和数据库 ID
 
@@ -174,7 +175,7 @@ Web 新增主机/容器文件浏览、UTF-8 文本编辑及上传下载；Docker
 
 - Docker 镜像基于 **Alpine Linux 最小化构建**，减少攻击面
 - 后端容器内进程以 **非 root 用户** 运行，仅 `ping` 二进制携带 `CAP_NET_RAW` 能力用于延迟探测
-- 敏感配置（数据库密码、JWT 密钥、加密密钥）通过 **GitHub Secrets** 管理，不写入代码
+- 应用敏感配置保存在服务器权限为 0600 的 `shared/.env`；GitHub Secrets 仅保存部署身份、主机指纹和镜像访问凭据，不写入代码
 - 数据库使用 `ON DELETE CASCADE` 外键约束，确保数据一致性
 
 ---
@@ -233,7 +234,8 @@ npm install && npm run dev
 |---|---|---|
 | `DEPLOY_HOST` | 服务器 IP 或域名 | `1.2.3.4` |
 | `DEPLOY_USER` | SSH 登录用户名 | `root` |
-| `DEPLOY_PASSWORD` | SSH 登录密码 | - |
+| `DEPLOY_KEY` | 专用部署 SSH 私钥 | - |
+| `DEPLOY_HOST_FINGERPRINT` | 独立可信渠道核验的 SSH 主机指纹 | `SHA256:...` |
 | `DOMAIN` | 网站域名 | `svr.hmchxd.com` |
 | `GHCR_PAT` | GitHub 个人访问令牌（read:packages 权限） | 见下方说明 |
 

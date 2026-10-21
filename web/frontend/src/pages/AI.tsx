@@ -1,3 +1,4 @@
+import { apiError } from '../utils/apiError';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, App, AutoComplete, Button, Drawer, Empty, Form, Input, Modal, Select, Space, Spin, Switch, Tag, Typography } from 'antd';
 import { ApiOutlined, BellOutlined, CheckOutlined, CloseOutlined, CloudServerOutlined, CodeOutlined, DashboardOutlined, DeleteOutlined, EditOutlined, ExperimentOutlined, HistoryOutlined, KeyOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SafetyCertificateOutlined, SendOutlined, SettingOutlined, StopOutlined } from '@ant-design/icons';
@@ -9,7 +10,7 @@ import { serversApi } from '../api/servers';
 import type { Server } from '../api/servers';
 import { usePolling } from '../hooks/usePolling';
 import { useMediaQuery } from '../hooks/useMediaQuery';
-import { formatDateTime } from '../utils/format';
+import { formatDateTime, formatTime, formatDate } from '../utils/format';
 import AIMarkdown from '../components/AIMarkdown';
 import AIExtensions from '../components/AIExtensions';
 import '../i18n/ai';
@@ -24,11 +25,10 @@ const providerPresets: Record<AIProviderKind, { name: string; base_url: string; 
   zhipu: { name: 'Zhipu / 智谱', base_url: 'https://open.bigmodel.cn/api/paas/v4', model: '' }, siliconflow: { name: 'SiliconFlow', base_url: 'https://api.siliconflow.cn/v1', model: '' },
   gemini: { name: 'Gemini', base_url: 'https://generativelanguage.googleapis.com/v1beta/openai', model: '' }, cpa: { name: 'CPA / API proxy', base_url: '', model: '' }, compatible: { name: 'Compatible API', base_url: '', model: '' },
 };
-function errorText(error: unknown, fallback: string): string { return (error as { response?: { data?: { error?: string } } })?.response?.data?.error || fallback; }
 function argumentsText(action: AIAction) { return JSON.stringify(action.arguments, null, 2); }
 
 function ProviderSettings({ providers, onChanged, onClose }: { providers: AIProvider[]; onChanged: () => Promise<void>; onClose: () => void }) {
-  const { t } = useTranslation('ai');
+  const { t, i18n } = useTranslation('ai');
   const { message, modal } = App.useApp();
   const [editing, setEditing] = useState<AIProvider | 'new' | null>(null);
   const [busy, setBusy] = useState(false);
@@ -54,7 +54,7 @@ function ProviderSettings({ providers, onChanged, onClose }: { providers: AIProv
     try {
       const result = saved ? await aiApi.models(editing.id, controller.signal) : await aiApi.previewModels({ kind: values.kind, base_url: values.base_url?.trim(), api_key: values.api_key }, controller.signal);
       if (mounted.current && !controller.signal.aborted) setCatalog(result.data);
-    } catch (error) { if (mounted.current && !controller.signal.aborted) setModelError(errorText(error, t('modelsFailed'))); }
+    } catch (error) { if (mounted.current && !controller.signal.aborted) setModelError(apiError(error, t('modelsFailed'))); }
     finally { if (modelRequest.current === controller) { modelRequest.current = null; if (mounted.current) setModelsLoading(false); } }
   }, [editing, form, t]);
   useEffect(() => {
@@ -74,7 +74,7 @@ function ProviderSettings({ providers, onChanged, onClose }: { providers: AIProv
       await operation(controller.signal);
       if (!mounted.current || controller.signal.aborted) return false;
       message.success(success); await onChanged(); return true;
-    } catch (error) { if (!controller.signal.aborted && mounted.current) message.error(errorText(error, t('operationFailed'))); return false; }
+    } catch (error) { if (!controller.signal.aborted && mounted.current) message.error(apiError(error, t('operationFailed'))); return false; }
     finally { if (request.current === controller) request.current = null; if (mounted.current) setBusy(false); }
   };
   const edit = (provider: AIProvider | 'new') => {
@@ -116,7 +116,7 @@ function ProviderSettings({ providers, onChanged, onClose }: { providers: AIProv
       <Form.Item name="base_url" label={t('baseURL')} rules={[{ required: true, message: t('required') }, { validator: (_, value) => { try { const url = new URL(value); return url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash ? Promise.resolve() : Promise.reject(new Error(t('invalidURL'))); } catch { return Promise.reject(new Error(t('invalidURL'))); } } }]}><Input autoComplete="off" maxLength={2048} /></Form.Item>
       <Typography.Paragraph className="ai-provider-compatibility" type="secondary">{t('proxyHint')}</Typography.Paragraph>
       <Form.Item name="model" label={t('model')} rules={[{ required: true, whitespace: true, message: t('required') }]}><AutoComplete options={(catalog?.models || []).map(model => ({ value: model.id }))} filterOption={(input, option) => String(option?.value).toLowerCase().includes(input.toLowerCase())}><Input autoComplete="off" maxLength={128} placeholder={t('modelPlaceholder')} /></AutoComplete></Form.Item>
-      <div className="ai-model-catalog"><Button size="small" aria-label={t('refreshModels')} icon={<ReloadOutlined spin={modelsLoading} />} disabled={busy || modelsLoading} onClick={() => { void refreshModels(); }}>{t('refreshModels')}</Button><span>{catalog ? t('modelsUpdated', { count: catalog.models.length, time: new Date(catalog.fetched_at).toLocaleTimeString() }) : t('modelsHint')}</span></div>
+      <div className="ai-model-catalog"><Button size="small" aria-label={t('refreshModels')} icon={<ReloadOutlined spin={modelsLoading} />} disabled={busy || modelsLoading} onClick={() => { void refreshModels(); }}>{t('refreshModels')}</Button><span>{catalog ? t('modelsUpdated', { count: catalog.models.length, time: formatTime(catalog.fetched_at, i18n.language) }) : t('modelsHint')}</span></div>
       {modelError && <Alert className="ai-model-error" type="warning" showIcon title={t('modelsFailed')} description={modelError} />}
       <Form.Item name="api_key" label={t('apiKey')} dependencies={['base_url']} extra={editing !== 'new' && editing?.has_api_key ? t('endpointKey') : undefined} rules={[{ required: needsKey, message: t('required') }]}>
         <Input.Password autoComplete="new-password" maxLength={4096} placeholder={editing !== 'new' && editing?.has_api_key ? t('keyKept') : undefined} />
@@ -300,8 +300,8 @@ export default function AI() {
       const retryDeferred = !!retry && (status === 408 || status === 429);
       if (status == null || status >= 500 || retryDeferred) {
         const pending = value; setUncertainSubmissions(previous => ({ ...previous, [pending.workspace]: pending }));
-        if (retryDeferred) message.error(errorText(error, t('operationFailed')), 8);
-      } else { clearUncertain(value.workspace); message.error(errorText(error, t('operationFailed')), 8); }
+        if (retryDeferred) message.error(apiError(error, t('operationFailed')), 8);
+      } else { clearUncertain(value.workspace); message.error(apiError(error, t('operationFailed')), 8); }
     } finally {
       if (mutation.current === controller) mutation.current = null;
       if (mounted.current) {
@@ -317,7 +317,7 @@ export default function AI() {
     const controller = new AbortController(); mutation.current = controller; setActionBusy(true);
     detailRequest.current?.abort(); detailRequest.current = null;
     try { await operation(controller.signal); if (!mounted.current || controller.signal.aborted) return false; if (success) message.success(success); return true; }
-    catch (error) { if (!controller.signal.aborted && mounted.current) message.error(errorText(error, t('operationFailed'))); return false; }
+    catch (error) { if (!controller.signal.aborted && mounted.current) message.error(apiError(error, t('operationFailed'))); return false; }
     finally { if (mutation.current === controller) mutation.current = null; if (mounted.current) { setActionBusy(false); await refreshRef.current.readTask(); await refreshRef.current.readHistory(); } }
   };
   const decide = (action: AIAction, decision: 'approve' | 'reject') => {
@@ -345,7 +345,7 @@ export default function AI() {
   }, [current]);
   const historyPanel = <aside className="ai-sidebar" aria-label={t('history')}><header><span><HistoryOutlined />{t('history')}</span><Button type="text" size="small" icon={<PlusOutlined />} aria-label={t('newTask')} disabled={submitting} onClick={freshTask} /></header>
         {historyError && <Alert type="warning" title={t('loadFailed')} action={<Button size="small" onClick={() => { void readHistory(); }}>{t('retry')}</Button>} />}
-        <div className="ai-history-list">{rows.map(task => <button key={task.id} type="button" className={`ai-history-item${task.id === taskId ? ' selected' : ''}`} aria-current={task.id === taskId ? 'page' : undefined} disabled={submitting} onClick={() => selectTask(task.id)}><strong>{task.prompt}</strong><span>{task.scope === 'fleet' ? t('fleetTarget') : task.server_name}</span><footer><Tag color={statusColors[task.status]}>{t(task.status)}</Tag><time>{new Date(task.created_at).toLocaleDateString(i18n.language)}</time></footer></button>)}{!rows.length && <div className="ai-history-empty"><HistoryOutlined /><span>{t('noHistory')}</span></div>}</div>
+        <div className="ai-history-list">{rows.map(task => <button key={task.id} type="button" className={`ai-history-item${task.id === taskId ? ' selected' : ''}`} aria-current={task.id === taskId ? 'page' : undefined} disabled={submitting} onClick={() => selectTask(task.id)}><strong>{task.prompt}</strong><span>{task.scope === 'fleet' ? t('fleetTarget') : task.server_name}</span><footer><Tag color={statusColors[task.status]}>{t(task.status)}</Tag><time>{formatDate(task.created_at, i18n.language)}</time></footer></button>)}{!rows.length && <div className="ai-history-empty"><HistoryOutlined /><span>{t('noHistory')}</span></div>}</div>
         <div className="ai-history-paging"><Button size="small" disabled={!page.previous.length} onClick={() => setPage(value => ({ cursor: value.previous[value.previous.length - 1], previous: value.previous.slice(0, -1) }))}>{t('previous')}</Button><Button size="small" disabled={history?.page !== page || !history.next} onClick={() => { if (history?.next) setPage({ cursor: history.next, previous: [...page.previous, page.cursor] }); }}>{t('next')}</Button></div>
       </aside>;
   return <div className="ai-page">
@@ -372,7 +372,7 @@ export default function AI() {
           {currentTask && ['cancel_requested', 'canceled', 'interrupted'].includes(currentTask.status) && <Alert type="info" showIcon title={t(currentTask.status === 'canceled' ? 'canceledHint' : 'cancelHint')} />}
           {current && <div className="ai-timeline">{timeline.map(item => item.action ? <ActionCard key={item.key} action={item.action} task={current.task} canDecide={current.task.status === 'awaiting_approval'} busy={actionBusy || submitting} onDecision={decide} /> : item.event && <article key={item.key} className={`ai-event ai-event-${item.event.kind}`}><header><span>{item.event.kind === 'assistant' && <RobotOutlined />}{t(item.event.kind)}</span><time>{formatDateTime(item.event.created_at, i18n.language)}</time></header>{item.event.kind === 'assistant' ? <AIMarkdown>{item.event.content}</AIMarkdown> : <div>{item.event.content}</div>}</article>)}{!timeline.length && <p className="ai-event-waiting">{t('noEvents')}</p>}</div>}
         </div>
-        {currentTask && <div className="ai-task-usage"><span>{t('tokens')}: {t('inputTokens')} {currentTask.prompt_tokens.toLocaleString()} · {t('outputTokens')} {currentTask.completion_tokens.toLocaleString()}</span><span>{t('updated', { time: new Date(currentTask.updated_at).toLocaleTimeString(i18n.language) })}</span></div>}
+        {currentTask && <div className="ai-task-usage"><span>{t('tokens')}: {t('inputTokens')} {currentTask.prompt_tokens.toLocaleString()} · {t('outputTokens')} {currentTask.completion_tokens.toLocaleString()}</span><span>{t('updated', { time: formatTime(currentTask.updated_at, i18n.language) })}</span></div>}
         <div className="ai-composer">
           {uncertain && <Alert type="warning" showIcon title={t('submitUncertain')} action={<Button disabled={submitting} loading={submitting} aria-label={t('retrySubmission')} onClick={() => { void send(uncertain); }}>{t('retrySubmission')}</Button>} />}
           {(!taskId || canFollowup) ? <><Input.TextArea aria-label={t('taskPrompt')} value={uncertain?.prompt ?? prompt} onChange={event => setPrompt(event.target.value)} placeholder={t(taskId ? 'followupPlaceholder' : selectedScope === 'fleet' ? 'fleetPlaceholder' : 'placeholder')} autoSize={{ minRows: 2, maxRows: 3 }} maxLength={16000} disabled={submitting || !!uncertain} /><div className="ai-composer-footer"><p><SafetyCertificateOutlined />{currentTask ? t(currentTask.scope === 'fleet' ? 'shareFleetSelected' : 'shareSelected', { server: currentTask.server_name, provider: currentTask.provider_name }) : selectedScope === 'fleet' && chosenProvider ? t('shareFleetSelected', { provider: chosenProvider.name }) : chosenServer && chosenProvider ? t('shareSelected', { server: chosenServer.name, provider: chosenProvider.name }) : t('shareHint')}</p><Button type="primary" icon={<SendOutlined />} aria-label={t(taskId ? 'followup' : 'submit')} aria-busy={submitting} loading={submitting} disabled={submitting || actionBusy || !!uncertain || !prompt.trim() || (!taskId && ((selectedScope === 'server' && !chosenServer) || !chosenProvider?.enabled || !chosenProvider.has_api_key || extensionsUnavailable))} onClick={() => { void send(); }}>{t(taskId ? 'followup' : 'submit')}</Button></div></> : currentTask ? <p className="ai-composer-state">{t(activeStatuses.includes(currentTask.status) ? currentTask.status === 'awaiting_input' ? 'waiting' : 'working' : 'readOnly')}</p> : null}

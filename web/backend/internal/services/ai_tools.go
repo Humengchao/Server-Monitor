@@ -86,8 +86,8 @@ func AITools() []AIToolDefinition {
 		definition("inspect_server", "Read OS, current user, installed package managers and service-manager availability on the selected server. No arguments or server identifiers.", map[string]any{}),
 		definition("install_packages", "Install named packages from the configured package-manager repositories on the selected server. Package IDs only: no options, URLs or local files. refresh updates Linux repository indexes; an empty package list is only valid with refresh. Uses the connection's privileges without automatic sudo.", map[string]any{"manager": enum("apt", "dnf", "yum", "apk", "zypper", "winget", "choco"), "packages": map[string]any{"type": "array", "items": property("string", "Exact repository package ID"), "maxItems": 32}, "refresh": property("boolean", "Refresh Linux indexes before installing")}, "manager", "packages"),
 		definition("manage_service", "Inspect or manage one exact service on the selected server. Stop/disable and security or remote-access services require explicit approval. Windows has no reload equivalent.", map[string]any{"name": property("string", "Exact service name"), "action": enum("status", "start", "stop", "restart", "reload", "enable", "disable")}, "name", "action"),
-		definition("read_file", "Read one UTF-8 regular text file up to 24 KiB and return content plus SHA-256 revision. Secret files and symlinks are refused; some paths require approval. Never use this to retrieve credentials.", map[string]any{"path": property("string", "Absolute file path on this server")}, "path"),
-		definition("write_file", "Save one UTF-8 text file up to 24 KiB. Supply the exact SHA-256 revision from read_file, or 'missing' only to create a new file. Existing contents are backed up before atomic replacement. Scripts, privileged startup/security configuration and unrecognized executable configuration require approval.", map[string]any{"path": property("string", "Absolute file path"), "content": property("string", "Complete new UTF-8 text"), "expected_revision": property("string", "SHA-256 of current contents, or missing for a new file")}, "path", "content", "expected_revision"),
+		definition("read_file", "Read one UTF-8 regular text file up to 24 KiB and return content plus SHA-256 revision. Secret files and symlinks are refused. Only public OS identity files may be read automatically; other files require specific approval to send their contents to the model provider. Never use this to retrieve credentials.", map[string]any{"path": property("string", "Absolute file path on this server")}, "path"),
+		definition("write_file", "Save one UTF-8 text file up to 24 KiB. Supply the exact SHA-256 revision from read_file, or 'missing' only to create a new file. Existing contents are backed up before atomic replacement. All file writes require exact-action approval in standard mode, including declarative server configuration.", map[string]any{"path": property("string", "Absolute file path"), "content": property("string", "Complete new UTF-8 text"), "expected_revision": property("string", "SHA-256 of current contents, or missing for a new file")}, "path", "content", "expected_revision"),
 		definition("run_command", "Escape hatch for one command on the selected server. Only a narrow fully parsed set of diagnostic and typed package/service commands runs automatically. Shell operators, encoded scripts, unknown programs/options and destructive actions require exact approval. A timeout or lost connection can leave an unknown outcome: never automatically retry mutations.", map[string]any{"command": property("string", "Exact command to execute"), "timeout_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": 300}}, "command"),
 	}
 }
@@ -168,9 +168,9 @@ func PrepareAIAction(server *models.Server, call AIToolCall) (AIAction, error) {
 			return action, errors.New("reading credential or private security files into AI context is not allowed")
 		}
 		action.Summary = "Read text file " + clean
-		if aiSpecialPath(clean) {
+		if !aiPublicDiagnosticFile(clean, server.ServerType) {
 			action.RequiresApproval = true
-			action.RiskReason = "This path can expose process memory, runtime state, or privileged system information"
+			action.RiskReason = "Reading this file sends its contents to the model provider; approve this exact file only after checking it contains no private data"
 		}
 	case "write_file":
 		var args aiWriteFile
@@ -203,9 +203,6 @@ func PrepareAIAction(server *models.Server, call AIToolCall) (AIAction, error) {
 		action.RiskReason = "This file's execution or security effect cannot be verified automatically"
 		if aiSecretPath(clean) || aiSecurityOrStartupPath(clean) {
 			action.RiskReason = "This changes credentials, access controls, executable code, or system startup behavior"
-		} else if aiSafeConfiguration(clean, args.Content, server.ServerType) {
-			action.RequiresApproval = false
-			action.RiskReason = ""
 		}
 	case "run_command":
 		var args aiCommand
@@ -409,9 +406,6 @@ func executeAIFile(ctx context.Context, client *ssh.Client, server *models.Serve
 		}
 		if aiContainsSecrets(string(current)) {
 			return result, errors.New("existing file contains credentials; refusing an AI rewrite")
-		}
-		if action.ApprovalMode != "automatic" && !action.RequiresApproval && !aiSafeConfiguration(filename, string(current), server.ServerType) {
-			return result, errors.New("existing configuration contains unverified or security directives; preserve them so the replacement receives approval, or use an explicitly reviewed command")
 		}
 		if err := ctx.Err(); err != nil {
 			return result, err

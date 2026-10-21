@@ -151,7 +151,8 @@ Enter multi-select from the dashboard toolbar; both the card and list views beco
 ### Authentication & Authorization
 
 - Stateless authentication based on **JWT (HS256)** with a 72-hour token expiry
-- **Changing a password immediately revokes every token issued to that account beforehand**: the user row carries a cutoff timestamp and authentication rejects any token with an earlier `iat`. The session that made the change receives a freshly issued token, so it is not cut off by its own action
+- **Changing a password revokes old sessions and closes their SSH/Docker terminals**. Tokens require `exp`, `iat`, and an exact database `session_version`, including password changes within the same second. The initiating page receives a new token.
+- SSH requires a host public key verified through a trusted channel, including Windows password authentication. See the [deployment migration guide](docs/web-deployment.md).
 - All API requests are authenticated via Bearer Token; WebSocket connections carry the token in a subprotocol to keep it out of URLs and access logs
 - All protected management API queries are strictly filtered by `user_id` for tenant isolation; the public probe uses a separate minimal data model that publishes real server names and health metrics while omitting connection details, credentials, notes, and database IDs
 
@@ -172,7 +173,7 @@ Enter multi-select from the dashboard toolbar; both the card and list views beco
 
 - Docker images are based on **minimal Alpine Linux builds** to reduce the attack surface
 - The backend container process runs as a **non-root user**; only the `ping` binary carries `CAP_NET_RAW` for latency probes
-- Sensitive configuration (database credentials, JWT secret, encryption key) is managed via **GitHub Secrets**, never committed to code
+- Application secrets are kept in the server's mode-0600 `shared/.env`; GitHub Secrets contain only the deployment identity, host fingerprint and image registry credentials
 - Database uses `ON DELETE CASCADE` foreign key constraints to ensure data consistency
 
 ---
@@ -231,7 +232,8 @@ Add the following secrets in **Settings -> Secrets and variables -> actions**:
 |---|---|---|
 | `DEPLOY_HOST` | Server IP or domain | `1.2.3.4` |
 | `DEPLOY_USER` | SSH login username | `root` |
-| `DEPLOY_PASSWORD` | SSH login password | - |
+| `DEPLOY_KEY` | Dedicated deployment SSH private key | - |
+| `DEPLOY_HOST_FINGERPRINT` | SSH host fingerprint verified through a trusted channel | `SHA256:...` |
 | `DOMAIN` | Website domain name | `svr.hmchxd.com` |
 | `GHCR_PAT` | GitHub personal access token (read:packages scope) | See note below |
 

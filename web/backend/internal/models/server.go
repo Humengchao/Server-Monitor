@@ -31,6 +31,7 @@ type Server struct {
 	SSHUsername       string     `json:"ssh_username"`
 	SSHPassword       string     `json:"-"`
 	SSHKey            string     `json:"-"`
+	SSHAuthMethod     string     `json:"ssh_auth_method"`
 	SSHHostKey        string     `json:"ssh_host_key,omitempty"`
 	CredentialID      *uuid.UUID `json:"credential_id,omitempty"`
 	CredentialName    string     `json:"credential_name,omitempty"`
@@ -76,7 +77,7 @@ type LatestMetrics struct {
 	RecordedAt     time.Time `json:"recorded_at"`
 }
 
-func CreateServer(db *DB, s *Server) error {
+func CreateServer(db *DB, s *Server, auth ...SSHAuthUpdate) error {
 	s.ID = uuid.New()
 	if s.ConnectionMode == "agent" && s.AgentAutoName {
 		s.Name = "Agent " + s.ID.String()[:8]
@@ -86,6 +87,18 @@ func CreateServer(db *DB, s *Server) error {
 		s.IsPublic = true
 		s.MonitoringEnabled = true
 		s.AutoRenewEnabled = true
+	}
+	if s.ConnectionMode != "agent" && s.CredentialID == nil {
+		var update SSHAuthUpdate
+		if len(auth) > 0 {
+			update = auth[0]
+		}
+		var err error
+		s.SSHPassword, s.SSHKey, err = mergeSSHAuthentication("", "", s.SSHPassword, s.SSHKey, s.ServerType, update)
+		if err != nil {
+			return err
+		}
+		s.SSHAuthMethod = EffectiveSSHAuthMethod(s.SSHPassword, s.SSHKey)
 	}
 	encPassword, err := crypto.Encrypt(s.SSHPassword, db.EncryptionKey)
 	if err != nil {
@@ -123,7 +136,10 @@ const serverSummarySelect = `SELECT s.connection_mode,s.is_public,s.monitoring_e
 	 COALESCE(sm.network_rx_bytes, 0), COALESCE(sm.network_tx_bytes, 0),
 	 COALESCE(sm.network_rx_total_bytes, 0), COALESCE(sm.network_tx_total_bytes, 0),
 	 COALESCE(sm.disk_rx_bytes, 0), COALESCE(sm.disk_tx_bytes, 0),
-	 COALESCE(sm.uptime_seconds, 0), COALESCE(sm.latency_ms, 0), sm.recorded_at
+	 COALESCE(sm.uptime_seconds, 0), COALESCE(sm.latency_ms, 0), sm.recorded_at,
+	 CASE WHEN s.connection_mode='agent' THEN ''
+	 WHEN COALESCE(CASE WHEN s.credential_id IS NULL THEN s.ssh_password ELSE c.ssh_password END,'')<>'' THEN 'password'
+	 WHEN COALESCE(CASE WHEN s.credential_id IS NULL THEN s.ssh_key ELSE c.ssh_key END,'')<>'' THEN 'key' ELSE '' END
 	 FROM servers s
 	 LEFT JOIN credentials c ON c.id = s.credential_id AND c.user_id = s.user_id
 	 LEFT JOIN server_latest_metrics sm ON sm.server_id = s.id`
@@ -148,7 +164,7 @@ func scanServerSummaries(rows *sql.Rows) ([]Server, error) {
 			&m.CPUPercent, &m.Load1, &m.Load5, &m.Load15, &m.MemoryUsed, &m.MemoryTotal, &m.DiskUsed,
 			&m.NetworkRxBytes, &m.NetworkTxBytes,
 			&m.NetworkRxTotal, &m.NetworkTxTotal,
-			&m.DiskRxBytes, &m.DiskTxBytes, &m.UptimeSeconds, &m.LatencyMS, &recordedAt); err != nil {
+			&m.DiskRxBytes, &m.DiskTxBytes, &m.UptimeSeconds, &m.LatencyMS, &recordedAt, &s.SSHAuthMethod); err != nil {
 			return nil, err
 		}
 		if expiresAt.Valid {
@@ -280,11 +296,8 @@ func GetServerByIDAndUserContext(ctx context.Context, db *DB, id, userID uuid.UU
 	if err := s.ResolveCredentialsContext(ctx, db); err != nil {
 		return nil, fmt.Errorf("resolve credentials for server %s: %w", s.Name, err)
 	}
+	s.SSHAuthMethod = EffectiveSSHAuthMethod(s.SSHPassword, s.SSHKey)
 	return s, nil
-}
-
-func UpdateServer(db *DB, s *Server) error {
-	return UpdateServerWithExpiryExpectation(context.Background(), db, s, nil)
 }
 
 var ErrServerExpiryChanged = errors.New("server expiry changed")
@@ -297,6 +310,9 @@ type ServerOptions struct {
 	IsPublic          *bool
 	MonitoringEnabled *bool
 	AutoRenewEnabled  *bool
+	Notes             *string
+	SSHHostKey        *string
+	Authentication    SSHAuthUpdate
 }
 
 func UpdateServerWithExpiryExpectation(ctx context.Context, db *DB, s *Server, expected *ExpiryExpectation, options ...ServerOptions) error {
@@ -305,23 +321,70 @@ func UpdateServerWithExpiryExpectation(ctx context.Context, db *DB, s *Server, e
 		return err
 	}
 	defer tx.Rollback()
+	var current sql.NullTime
+	var oldPassword, oldKey, oldNotes, oldHostKey, connectionMode string
+	if err := tx.QueryRowContext(ctx, `SELECT expires_at,COALESCE(ssh_password,''),COALESCE(ssh_key,''),COALESCE(notes,''),COALESCE(ssh_host_key,''),connection_mode FROM servers WHERE id=$1 AND user_id=$2 FOR UPDATE`, s.ID, s.UserID).Scan(&current, &oldPassword, &oldKey, &oldNotes, &oldHostKey, &connectionMode); err != nil {
+		return err
+	}
 	if expected != nil {
-		var current sql.NullTime
-		if err := tx.QueryRowContext(ctx, `SELECT expires_at FROM servers WHERE id=$1 AND user_id=$2 FOR UPDATE`, s.ID, s.UserID).Scan(&current); err != nil {
-			return err
-		}
 		if current.Valid != (expected.ExpiresAt != nil) || (current.Valid && !current.Time.Equal(*expected.ExpiresAt)) {
 			return ErrServerExpiryChanged
 		}
+	}
+	o := ServerOptions{Notes: &s.Notes, SSHHostKey: &s.SSHHostKey}
+	if len(options) > 0 {
+		o = options[0]
+	}
+	if o.Notes == nil {
+		s.Notes = oldNotes
+	} else {
+		s.Notes = *o.Notes
+	}
+	if o.SSHHostKey == nil {
+		s.SSHHostKey = oldHostKey
+	} else {
+		s.SSHHostKey = *o.SSHHostKey
+	}
+	password, err := crypto.Encrypt(s.SSHPassword, db.EncryptionKey)
+	if err != nil {
+		return err
+	}
+	key, err := crypto.Encrypt(s.SSHKey, db.EncryptionKey)
+	if err != nil {
+		return err
+	}
+	if connectionMode == "agent" {
+		password, key = "", ""
+	} else if s.CredentialID == nil {
+		password, key, err = mergeSSHAuthentication(oldPassword, oldKey, password, key, s.ServerType, o.Authentication)
+		if err != nil {
+			return err
+		}
+		s.SSHAuthMethod = EffectiveSSHAuthMethod(password, key)
+	} else {
+		var credentialType, credentialPassword, credentialKey string
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(credential_type,'linux'),COALESCE(ssh_password,''),COALESCE(ssh_key,'') FROM credentials WHERE id=$1 AND user_id=$2 FOR SHARE`, *s.CredentialID, s.UserID).Scan(&credentialType, &credentialPassword, &credentialKey); err != nil {
+			return err
+		}
+		if credentialType != s.ServerType {
+			return ErrSSHAuthentication
+		}
+		if _, _, err := mergeSSHAuthentication("", "", credentialPassword, credentialKey, s.ServerType, SSHAuthUpdate{}); err != nil {
+			return err
+		}
+		// A linked credential is the only source of authentication. Do not keep
+		// dormant inline secrets that could unexpectedly revive after deletion.
+		password, key = "", ""
+		s.SSHAuthMethod = EffectiveSSHAuthMethod(credentialPassword, credentialKey)
 	}
 
 	result, err := tx.ExecContext(ctx,
 		`UPDATE servers SET agent_auto_name=CASE WHEN name IS DISTINCT FROM $1 THEN FALSE ELSE agent_auto_name END,
 		 name=$1, host=$2, port=$3, ssh_username=$4, ssh_host_key=$5, credential_id=$6,
 		 expires_at=$7, notes=$8, server_type=$9, billing_price=$10, billing_currency=$11, billing_cycle=$12, traffic_limit_bytes=$13, public_location=$14
-		 WHERE id=$15 AND user_id=$16`,
+		 ,ssh_password=$17,ssh_key=$18 WHERE id=$15 AND user_id=$16`,
 		s.Name, s.Host, s.Port, s.SSHUsername, s.SSHHostKey, s.CredentialID, s.ExpiresAt, s.Notes, s.ServerType,
-		s.BillingPrice, s.BillingCurrency, s.BillingCycle, s.TrafficLimit, s.PublicLocation, s.ID, s.UserID)
+		s.BillingPrice, s.BillingCurrency, s.BillingCycle, s.TrafficLimit, s.PublicLocation, s.ID, s.UserID, password, key)
 	if err != nil {
 		return err
 	}
@@ -333,44 +396,11 @@ func UpdateServerWithExpiryExpectation(ctx context.Context, db *DB, s *Server, e
 		return sql.ErrNoRows
 	}
 	if len(options) > 0 {
-		o := options[0]
 		if err := tx.QueryRowContext(ctx, `UPDATE servers SET is_public=COALESCE($1,is_public),monitoring_enabled=COALESCE($2,monitoring_enabled),auto_renew_enabled=COALESCE($3,auto_renew_enabled) WHERE id=$4 AND user_id=$5 RETURNING is_public,monitoring_enabled,auto_renew_enabled`, o.IsPublic, o.MonitoringEnabled, o.AutoRenewEnabled, s.ID, s.UserID).Scan(&s.IsPublic, &s.MonitoringEnabled, &s.AutoRenewEnabled); err != nil {
 			return err
 		}
 	}
-	if s.SSHPassword != "" {
-		enc, err := crypto.Encrypt(s.SSHPassword, db.EncryptionKey)
-		if err != nil {
-			return err
-		}
-		_, err = tx.ExecContext(ctx, `UPDATE servers SET ssh_password=$1 WHERE id=$2 AND user_id=$3`, enc, s.ID, s.UserID)
-		if err != nil {
-			return err
-		}
-	}
-	if s.ServerType == "windows" {
-		_, err = tx.ExecContext(ctx, `UPDATE servers SET ssh_key='', ssh_host_key='' WHERE id=$1 AND user_id=$2`, s.ID, s.UserID)
-		if err != nil {
-			return err
-		}
-	} else if s.SSHKey != "" {
-		enc, err := crypto.Encrypt(s.SSHKey, db.EncryptionKey)
-		if err != nil {
-			return err
-		}
-		_, err = tx.ExecContext(ctx, `UPDATE servers SET ssh_key=$1 WHERE id=$2 AND user_id=$3`, enc, s.ID, s.UserID)
-		if err != nil {
-			return err
-		}
-	}
 	return tx.Commit()
-}
-
-func UpdateServerSystemInfo(db *sql.DB, id uuid.UUID, cpuCores int, memTotal, diskTotal int64) error {
-	_, err := db.Exec(
-		`UPDATE servers SET cpu_cores=$1, memory_total_bytes=$2, disk_total_bytes=$3 WHERE id=$4`,
-		cpuCores, memTotal, diskTotal, id)
-	return err
 }
 
 func UpdateDockerInfo(db *sql.DB, id uuid.UUID, hasDocker bool, version string) error {
@@ -380,12 +410,7 @@ func UpdateDockerInfo(db *sql.DB, id uuid.UUID, hasDocker bool, version string) 
 	return err
 }
 
-// ResolveCredentials overwrites SSHUsername/SSHPassword/SSHKey from the linked credential
-// when CredentialID is set. Call after fetching a server that needs decrypted SSH creds.
-func (s *Server) ResolveCredentials(db *DB) error {
-	return s.ResolveCredentialsContext(context.Background(), db)
-}
-
+// ResolveCredentialsContext loads only the owner's linked credential.
 func (s *Server) ResolveCredentialsContext(ctx context.Context, db *DB) error {
 	if s.ConnectionMode == "agent" || s.CredentialID == nil {
 		return nil
@@ -442,16 +467,6 @@ func GetAllDockerInfo(db *sql.DB) ([]DockerInfoRow, error) {
 		out = append(out, r)
 	}
 	return out, rows.Err()
-}
-
-func ServerHasDirectSSHAuth(db *sql.DB, id, userID uuid.UUID) (bool, error) {
-	var hasAuth bool
-	err := db.QueryRow(
-		`SELECT COALESCE(ssh_password, '') <> '' OR COALESCE(ssh_key, '') <> ''
-		 FROM servers WHERE id=$1 AND user_id=$2`,
-		id, userID,
-	).Scan(&hasAuth)
-	return hasAuth, err
 }
 
 func DeleteServer(db *sql.DB, id, userID uuid.UUID) error {
@@ -665,6 +680,7 @@ func GetServersByIDsAndUserContext(ctx context.Context, db *DB, ids []uuid.UUID,
 		if s.SSHKey, err = crypto.Decrypt(encKey, db.EncryptionKey); err != nil {
 			return nil, fmt.Errorf("decrypt key for server %s: %w", s.Name, err)
 		}
+		s.SSHAuthMethod = EffectiveSSHAuthMethod(s.SSHPassword, s.SSHKey)
 		byID[s.ID] = s
 	}
 	if err := rows.Err(); err != nil {
@@ -699,22 +715,7 @@ func GetServerTags(db *sql.DB, serverID uuid.UUID) ([]Tag, error) {
 		}
 		tags = append(tags, t)
 	}
-	return tags, nil
-}
-
-func GetServerByID(db *sql.DB, id uuid.UUID) (*Server, error) {
-	s := &Server{}
-	err := db.QueryRow(
-		`SELECT id, user_id, name, host, port, ssh_username, ssh_password, ssh_key, COALESCE(ssh_host_key, ''), created_at,
-		 COALESCE(has_docker, FALSE), COALESCE(docker_version, '')
-		 FROM servers WHERE id=$1`, id,
-	).Scan(&s.ID, &s.UserID, &s.Name, &s.Host, &s.Port,
-		&s.SSHUsername, &s.SSHPassword, &s.SSHKey, &s.SSHHostKey, &s.CreatedAt,
-		&s.HasDocker, &s.DockerVersion)
-	if err != nil {
-		return nil, err
-	}
-	return s, nil
+	return tags, rows.Err()
 }
 
 // GetAllServers returns all servers with decrypted credentials (for collector).
@@ -726,7 +727,8 @@ func GetAllServers(db *DB) ([]Server, error) {
 		s.ssh_username, COALESCE(s.ssh_password, ''), COALESCE(s.ssh_key, ''),
 		COALESCE(s.ssh_host_key, ''), s.credential_id, COALESCE(s.server_type, 'linux'),
 		c.ssh_username, COALESCE(c.ssh_password, ''), COALESCE(c.ssh_key, ''),
-		s.connection_mode,s.is_public,s.monitoring_enabled,s.auto_renew_enabled
+		s.connection_mode,s.is_public,s.monitoring_enabled,s.auto_renew_enabled,
+		COALESCE(s.last_error_kind,''),COALESCE(s.last_error,''),s.last_error_at
 		FROM servers s
 		LEFT JOIN credentials c ON c.id = s.credential_id AND c.user_id = s.user_id WHERE s.monitoring_enabled`)
 	if err != nil {
@@ -740,10 +742,14 @@ func GetAllServers(db *DB) ([]Server, error) {
 		var credID sql.NullString
 		var credentialUsername sql.NullString
 		var credentialPassword, credentialKey string
+		var lastErrorAt sql.NullTime
 		if err := rows.Scan(&s.ID, &s.UserID, &s.Name, &s.Host, &s.Port,
 			&s.SSHUsername, &encPassword, &encKey, &s.SSHHostKey, &credID, &s.ServerType,
-			&credentialUsername, &credentialPassword, &credentialKey, &s.ConnectionMode, &s.IsPublic, &s.MonitoringEnabled, &s.AutoRenewEnabled); err != nil {
+			&credentialUsername, &credentialPassword, &credentialKey, &s.ConnectionMode, &s.IsPublic, &s.MonitoringEnabled, &s.AutoRenewEnabled, &s.LastErrorKind, &s.LastError, &lastErrorAt); err != nil {
 			return nil, err
+		}
+		if lastErrorAt.Valid {
+			s.LastErrorAt = &lastErrorAt.Time
 		}
 		if s.ConnectionMode == "agent" {
 			servers = append(servers, s)
@@ -775,6 +781,7 @@ func GetAllServers(db *DB) ([]Server, error) {
 			log.Printf("collector: decrypt key for %s failed: %v", s.Name, decErr)
 			continue
 		}
+		s.SSHAuthMethod = EffectiveSSHAuthMethod(s.SSHPassword, s.SSHKey)
 		servers = append(servers, s)
 	}
 	return servers, rows.Err()

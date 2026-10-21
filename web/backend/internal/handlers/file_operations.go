@@ -14,8 +14,8 @@ import (
 	"time"
 )
 
-func (handler *FileHandler) managed(httpContext *gin.Context) (services.ManagedFiles, func(), bool) {
-	store, closeStore, ok := handler.connect(httpContext)
+func (handler *FileHandler) managed(httpContext *gin.Context, directoryOnly ...bool) (services.ManagedFiles, func(), bool) {
+	store, closeStore, ok := handler.connect(httpContext, directoryOnly...)
 	if !ok {
 		return nil, nil, false
 	}

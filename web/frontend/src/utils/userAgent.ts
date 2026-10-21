@@ -43,10 +43,3 @@ export function describeUserAgent(userAgent: string): UserAgentSummary | null {
   if (!browser && !os) return null;
   return { browser, os };
 }
-
-/** One-line label such as "Chrome 140 · Windows"; falls back to the raw string. */
-export function userAgentLabel(userAgent: string): string {
-  const summary = describeUserAgent(userAgent);
-  if (!summary) return userAgent;
-  return [summary.browser, summary.os].filter(Boolean).join(' · ');
-}

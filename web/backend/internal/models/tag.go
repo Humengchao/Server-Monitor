@@ -232,7 +232,7 @@ func rollupMetrics(db *sql.DB, sourceTable, targetTable string, bucketSeconds in
 	if !allowed {
 		return fmt.Errorf("unsupported metric rollup %s -> %s", sourceTable, targetTable)
 	}
-	query := fmt.Sprintf(`INSERT INTO %s (server_id, cpu_percent, load_1, load_5, load_15, memory_used, memory_total,
+	query := fmt.Sprintf(`INSERT INTO %s AS existing (server_id, cpu_percent, load_1, load_5, load_15, memory_used, memory_total,
 		 disk_used_bytes, network_rx_bytes, network_tx_bytes, network_rx_total_bytes, network_tx_total_bytes,
 		 disk_rx_bytes, disk_tx_bytes, uptime_seconds, latency_ms, sample_count, recorded_at)
 		 SELECT server_id, AVG(cpu_percent)::DECIMAL(5,2), AVG(load_1)::DECIMAL(8,2), AVG(load_5)::DECIMAL(8,2), AVG(load_15)::DECIMAL(8,2),
@@ -250,7 +250,15 @@ func rollupMetrics(db *sql.DB, sourceTable, targetTable string, bucketSeconds in
 		 network_rx_bytes=EXCLUDED.network_rx_bytes, network_tx_bytes=EXCLUDED.network_tx_bytes,
 		 network_rx_total_bytes=EXCLUDED.network_rx_total_bytes, network_tx_total_bytes=EXCLUDED.network_tx_total_bytes,
 		 disk_rx_bytes=EXCLUDED.disk_rx_bytes, disk_tx_bytes=EXCLUDED.disk_tx_bytes,
-		 uptime_seconds=EXCLUDED.uptime_seconds, latency_ms=EXCLUDED.latency_ms, sample_count=EXCLUDED.sample_count`,
+		 uptime_seconds=EXCLUDED.uptime_seconds, latency_ms=EXCLUDED.latency_ms, sample_count=EXCLUDED.sample_count
+		 WHERE (existing.cpu_percent, existing.load_1, existing.load_5, existing.load_15,
+		 existing.memory_used, existing.memory_total, existing.disk_used_bytes,
+		 existing.network_rx_bytes, existing.network_tx_bytes, existing.network_rx_total_bytes, existing.network_tx_total_bytes,
+		 existing.disk_rx_bytes, existing.disk_tx_bytes, existing.uptime_seconds, existing.latency_ms, existing.sample_count)
+		 IS DISTINCT FROM (EXCLUDED.cpu_percent, EXCLUDED.load_1, EXCLUDED.load_5, EXCLUDED.load_15,
+		 EXCLUDED.memory_used, EXCLUDED.memory_total, EXCLUDED.disk_used_bytes,
+		 EXCLUDED.network_rx_bytes, EXCLUDED.network_tx_bytes, EXCLUDED.network_rx_total_bytes, EXCLUDED.network_tx_total_bytes,
+		 EXCLUDED.disk_rx_bytes, EXCLUDED.disk_tx_bytes, EXCLUDED.uptime_seconds, EXCLUDED.latency_ms, EXCLUDED.sample_count)`,
 		targetTable, sampleExpression, sourceTable)
 	_, err := db.Exec(query, since, until, bucketSeconds)
 	return err
@@ -275,7 +283,12 @@ func MetricRollupStart(db *sql.DB, table string, fallback time.Time, overlap tim
 		return time.Time{}, fmt.Errorf("unsupported rollup table %q", table)
 	}
 	var latest sql.NullTime
-	if err := db.QueryRow(fmt.Sprintf("SELECT MAX(recorded_at) FROM %s", table)).Scan(&latest); err != nil {
+	// The existing primary key starts with server_id. Read its last entry per
+	// server instead of scanning the complete retention tier every minute.
+	// Include disabled/offline servers: their history still needs maintenance.
+	if err := db.QueryRow(fmt.Sprintf(`SELECT MAX(m.recorded_at) FROM servers s
+		CROSS JOIN LATERAL (SELECT recorded_at FROM %s
+		WHERE server_id=s.id ORDER BY recorded_at DESC LIMIT 1) m`, table)).Scan(&latest); err != nil {
 		return time.Time{}, err
 	}
 	if !latest.Valid {

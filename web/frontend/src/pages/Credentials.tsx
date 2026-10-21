@@ -1,26 +1,16 @@
+import { apiError } from '../utils/apiError';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   Alert, Table, Button, Modal, Form, Input, Select, Space, Typography, Popconfirm, App, Tag, Card, Empty,
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, KeyOutlined, WindowsOutlined, DesktopOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import { credentialsApi, Credential } from '../api/credentials';
+import { credentialsApi, Credential, CredentialInput } from '../api/credentials';
 import { formatDateTime } from '../utils/format';
 
 const { Title, Text } = Typography;
 
-interface CredentialFormValues {
-  name: string;
-  ssh_username: string;
-  ssh_password?: string;
-  ssh_key?: string;
-  credential_type?: string;
-}
-
-function apiError(err: unknown, fallback: string): string {
-  const detail = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
-  return detail || fallback;
-}
+type CredentialFormValues = CredentialInput;
 
 export default function Credentials() {
   const { t, i18n } = useTranslation();
@@ -35,6 +25,8 @@ export default function Credentials() {
   const requestRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(false);
   const credentialType = Form.useWatch('credential_type', form) || 'linux';
+  const selectedAuth = Form.useWatch('ssh_auth_method', form) || 'password';
+  const authMethod = credentialType === 'windows' ? 'password' : selectedAuth;
 
   const load = useCallback(async () => {
     if (!mountedRef.current) return;
@@ -75,7 +67,9 @@ export default function Credentials() {
         ...values,
         name: typeof values.name === 'string' ? values.name.trim() : values.name,
         ssh_username: typeof values.ssh_username === 'string' ? values.ssh_username.trim() : values.ssh_username,
-        ssh_key: credentialType === 'windows' ? undefined : values.ssh_key,
+        ssh_auth_method: authMethod,
+        ssh_password: authMethod === 'password' ? values.ssh_password : undefined,
+        ssh_key: authMethod === 'key' ? values.ssh_key : undefined,
       };
       if (editing) {
         await credentialsApi.update(editing.id, payload);
@@ -120,6 +114,7 @@ export default function Credentials() {
       ssh_password: undefined,
       ssh_key: undefined,
       credential_type: cred.credential_type || 'linux',
+      ssh_auth_method: cred.ssh_auth_method || (cred.has_password ? 'password' : 'key'),
     });
     setModalOpen(true);
   };
@@ -233,25 +228,28 @@ export default function Credentials() {
             <Input placeholder={t(credentialType === 'windows' ? 'credential.nameWindowsPlaceholder' : 'credential.namePlaceholder')} />
           </Form.Item>
           <Form.Item name="credential_type" label={t('common.type')} initialValue="linux">
-            <Select onChange={(value) => { if (value === 'windows') form.setFieldValue('ssh_key', undefined); }}>
+            <Select onChange={(value) => { if (value === 'windows') form.setFieldsValue({ ssh_key: undefined, ssh_auth_method: 'password' }); }}>
               <Select.Option value="linux"><DesktopOutlined /> Linux</Select.Option>
               <Select.Option value="windows"><WindowsOutlined /> Windows</Select.Option>
             </Select>
           </Form.Item>
+          {credentialType !== 'windows' && <Form.Item name="ssh_auth_method" label={t('ssh.authMethod')} initialValue="password" extra={editing ? t('ssh.authHint') : undefined}>
+            <Select options={[{ value: 'password', label: t('ssh.passwordAuth') }, { value: 'key', label: t('ssh.keyAuth') }]} />
+          </Form.Item>}
           <Form.Item name="ssh_username" label={t(credentialType === 'windows' ? 'credential.username' : 'credential.sshUsername')} rules={[{ required: true, whitespace: true }]}>
             <Input placeholder={t(credentialType === 'windows' ? 'credential.usernamePlaceholder' : 'credential.sshUsernamePlaceholder')} />
           </Form.Item>
-          <Form.Item name="ssh_password" label={t(credentialType === 'windows' ? 'credential.password' : 'credential.sshPassword')} rules={credentialType === 'windows' && !editing ? [{ required: true }] : undefined}>
+          {authMethod === 'password' && <Form.Item name="ssh_password" label={t(credentialType === 'windows' ? 'credential.password' : 'credential.sshPassword')} rules={!editing?.has_password ? [{ required: true }] : undefined}>
             <Input.Password
               autoComplete="new-password"
-              placeholder={t(editing ? 'credential.sshPasswordKeepPlaceholder' : credentialType === 'windows' ? 'credential.passwordPlaceholder' : 'credential.sshPasswordPlaceholder')}
+              placeholder={t(editing?.has_password ? 'credential.sshPasswordKeepPlaceholder' : credentialType === 'windows' ? 'credential.passwordPlaceholder' : 'credential.sshPasswordPlaceholder')}
             />
-          </Form.Item>
-          {credentialType === 'linux' && <Form.Item name="ssh_key" label={t('credential.sshKey')}>
+          </Form.Item>}
+          {authMethod === 'key' && <Form.Item name="ssh_key" rules={!editing?.has_key ? [{ required: true, whitespace: true }] : undefined} label={t('credential.sshKey')}>
             <Input.TextArea
               autoComplete="off"
               rows={4}
-              placeholder={t(editing ? 'credential.sshKeyKeepPlaceholder' : 'credential.sshKeyPlaceholder')}
+              placeholder={t(editing?.has_key ? 'credential.sshKeyKeepPlaceholder' : 'credential.sshKeyPlaceholder')}
             />
           </Form.Item>}
         </Form>

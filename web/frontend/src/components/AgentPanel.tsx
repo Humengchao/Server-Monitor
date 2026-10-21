@@ -1,3 +1,4 @@
+import { formatDateTime } from '../utils/format';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, App, Button, Card, Space, Tag, Typography } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -16,7 +17,7 @@ function errorMessage(error: unknown, fallback: string) {
   return failure.response?.data?.error || failure.message || fallback;
 }
 export default function AgentPanel({ serverId, serverType, autoEnroll = false, onBound }: { serverId: string; serverType: string; autoEnroll?: boolean; onBound?: () => void }) {
-  const { t } = useTranslation('operations');
+  const { t, i18n } = useTranslation('operations');
   const { message, modal } = App.useApp();
   const [status, setStatus] = useState<{ serverId: string; value: AgentStatus } | null>(null);
   const [enrollment, setEnrollment] = useState<{ serverId: string; value: Enrollment; clock: ResponseClock } | null>(null);
@@ -104,7 +105,7 @@ export default function AgentPanel({ serverId, serverType, autoEnroll = false, o
     {error && <Alert type="warning" title={autoEnroll && operationError ? t('agentCommandFailed') : error} description={autoEnroll && operationError ? error : undefined} />}
     {autoEnroll && <Alert style={{ marginTop: 12 }} type={bound ? 'success' : 'info'} title={t(bound ? 'agentBound' : 'agentWaiting')} description={bound ? currentStatus?.hostname : undefined} />}
     {currentEnrollment && !bound && <div style={{ marginTop: 12 }}><Alert type={expired ? 'warning' : 'info'} title={t(expired ? 'ticketExpired' : 'ticketNotice')} description={t('privilege')} />
-      <Typography.Paragraph>{t('expiresAt')}: {new Date(currentEnrollment.expires_at).toLocaleString()}</Typography.Paragraph>
+      <Typography.Paragraph>{t('expiresAt')}: {formatDateTime(currentEnrollment.expires_at, i18n.language)}</Typography.Paragraph>
       {!expired && <><Typography.Paragraph>{serverType === 'windows' ? t('windowsInstall') : t('linuxInstall')}</Typography.Paragraph>
         <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{command}</pre></>}
       <Button disabled={!command || expired || busy} onClick={async () => { try { await copyToClipboard(command!); message.success(t('copied')); } catch { message.error(t('copyFailed')); } }}>{t('copy')}</Button>

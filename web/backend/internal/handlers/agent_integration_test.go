@@ -75,6 +75,10 @@ func TestAgentHTTPEnrollmentRemoteOperationsRevocationAndReenrollment(t *testing
 				return
 			}
 			c.Set("user_id", id)
+			// This fixture bypasses JWT parsing, so provide the same lifetime and
+			// revocation version that authenticated terminal routes receive.
+			c.Set("token_session_version", time.Unix(0, 0))
+			c.Set("token_expires_at", time.Now().Add(time.Hour))
 		}
 		c.Next()
 	})

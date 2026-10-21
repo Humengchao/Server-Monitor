@@ -159,7 +159,7 @@ func EnqueueUserNotification(ctx context.Context, db *DB, userID uuid.UUID, chan
 	if err != nil {
 		return nil, err
 	}
-	return ids, tx.Commit()
+	return ids, commitNotificationWork(tx, db.Raw)
 }
 
 // EnqueueUserNotificationTx lets producers commit their state change and its
@@ -273,7 +273,7 @@ func RetryNotificationDelivery(ctx context.Context, db *DB, id int64, userID uui
 	if err != nil {
 		return 0, err
 	}
-	return next, tx.Commit()
+	return next, commitNotificationWork(tx, db.Raw)
 }
 
 type PendingNotification struct {

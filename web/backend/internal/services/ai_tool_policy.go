@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"path"
 	"regexp"
 	"strings"
@@ -367,6 +366,9 @@ func aiSecretPath(filename string) bool {
 			return true
 		}
 	}
+	if strings.Contains(lower, "/redis/") || base == "redis.conf" || strings.HasSuffix(base, ".acl") {
+		return true
+	}
 	if base == ".env" || strings.HasPrefix(base, ".env.") || strings.HasSuffix(base, ".env") || strings.HasSuffix(base, "history") || strings.HasSuffix(base, "history.txt") || lower == "/etc/environment" {
 		return true
 	}
@@ -419,122 +421,22 @@ var aiSecretContent = regexp.MustCompile(`(?im)(-----BEGIN [A-Z ]*PRIVATE KEY---
 // credential store cannot make its contents eligible for model context.
 var aiPasswordHashContent = regexp.MustCompile(`(?:^|[\s:"'=])(?:\$(?:2[aby]\$[0-9]{2}\$[./A-Za-z0-9]{53}|(?:apr1|1|5|6)\$(?:rounds=[0-9]+\$)?[./A-Za-z0-9]{1,16}\$[./A-Za-z0-9]{22,86}|y\$[./A-Za-z0-9]+\$[./A-Za-z0-9]+\$[./A-Za-z0-9]+)|\{SHA\}[A-Za-z0-9+/]{27}=)`)
 
+// Redis directives and ACL passwords use whitespace and prefix tokens.
+var aiServiceSecretContent = regexp.MustCompile(`(?im)^\s*(?:(?:requirepass|masterauth|auth-pass|password|passwd|secret|token|api[_-]?key)\s+[^#\s]+|user\s+\S+[^\r\n]*(?:[>][^\s]+|#[a-f0-9]{64}))`)
+
 func aiContainsSecrets(content string) bool {
-	return aiSecretContent.MatchString(content) || aiPasswordHashContent.MatchString(content)
+	return aiSecretContent.MatchString(content) || aiPasswordHashContent.MatchString(content) || aiServiceSecretContent.MatchString(content)
 }
 
-// Automatic writes are limited to recognized declarative Nginx config. Unknown
-// application formats can execute hooks/plugins and therefore require review.
-// This intentionally does not pretend a filename suffix makes code harmless.
-func aiSafeConfiguration(filename, content, platform string) bool {
-	if platform != "linux" || !strings.HasPrefix(filename, "/etc/nginx/") || !strings.HasSuffix(filename, ".conf") || strings.Contains(content, "\x00") {
+// Only public OS identity files may enter model context without file-specific
+// approval. Arbitrary application files can contain unlabelled credentials.
+func aiPublicDiagnosticFile(filename, platform string) bool {
+	if platform != "linux" {
 		return false
 	}
-	allowed := map[string]bool{}
-	for _, name := range strings.Fields("worker_processes worker_connections worker_rlimit_nofile events http server location stream upstream listen server_name root index try_files return rewrite proxy_pass proxy_set_header proxy_http_version proxy_connect_timeout proxy_read_timeout proxy_send_timeout proxy_buffering proxy_buffers proxy_buffer_size proxy_cache_bypass proxy_redirect client_max_body_size client_body_timeout client_header_timeout keepalive_timeout keepalive_requests sendfile tcp_nopush tcp_nodelay gzip gzip_types gzip_vary gzip_min_length default_type error_page access_log error_log log_format pid ssl_certificate ssl_certificate_key ssl_protocols ssl_ciphers ssl_prefer_server_ciphers ssl_session_cache ssl_session_timeout add_header expires charset limit_req_zone limit_req limit_conn_zone limit_conn resolver resolver_timeout include") {
-		allowed[name] = true
-	}
-	// Parse complete directive boundaries while preserving quoted values.
-	// Directives controlling output paths get argument checks too: access_log
-	// aimed at /etc/shadow is destructive despite being a familiar directive.
-	quote := rune(0)
-	comment := false
-	depth, directives := 0, 0
-	segment := strings.Builder{}
-	check := func(boundary rune) bool {
-		line := strings.TrimSpace(segment.String())
-		segment.Reset()
-		if boundary == '}' {
-			depth--
-			return line == "" && depth >= 0
-		}
-		if line == "" {
-			return false
-		}
-		words := strings.Fields(line)
-		name := words[0]
-		if !allowed[name] {
-			return false
-		}
-		if boundary == '{' {
-			depth++
-			switch name {
-			case "events", "http", "stream", "server":
-				return len(words) == 1
-			case "location", "upstream":
-				return len(words) >= 2
-			default:
-				return false
-			}
-		}
-		if name == "events" || name == "http" || name == "stream" || name == "location" || name == "upstream" {
-			return false
-		}
-		directives++
-		if len(words) < 2 {
-			return false
-		}
-		value := words[1]
-		switch name {
-		case "root":
-			return aiStaticConfigPath(value, "/var/www", true) || aiStaticConfigPath(value, "/srv/www", true) || aiStaticConfigPath(value, "/usr/share/nginx/html", true)
-		case "access_log", "error_log":
-			return value == "off" || value == "stderr" || aiStaticConfigPath(value, "/var/log/nginx", false)
-		case "listen":
-			return !strings.HasPrefix(value, "unix:") && !strings.ContainsAny(value, "/$")
-		case "pid":
-			return value == "/run/nginx.pid" || value == "/var/run/nginx.pid"
-		case "include":
-			return value == "/etc/nginx/mime.types" || value == "mime.types" || value == "/etc/nginx/conf.d/*.conf" || value == "/etc/nginx/sites-enabled/*"
-		case "proxy_pass":
-			parsed, err := url.Parse(value)
-			return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != "" && parsed.User == nil && !strings.Contains(value, "$")
-		}
+	switch filename {
+	case "/etc/os-release", "/usr/lib/os-release", "/etc/debian_version", "/etc/alpine-release", "/etc/redhat-release":
 		return true
 	}
-	for _, r := range content {
-		if comment {
-			if r == '\n' {
-				comment = false
-			}
-			continue
-		}
-		if r == '\\' || r == '`' {
-			return false
-		}
-		if quote != 0 {
-			segment.WriteRune(r)
-			if r == quote {
-				quote = 0
-			}
-			continue
-		}
-		if r == '\'' || r == '"' {
-			quote = r
-			segment.WriteRune(r)
-			continue
-		}
-		if r == '#' {
-			comment = true
-			continue
-		}
-		if r == ';' || r == '{' || r == '}' {
-			if !check(r) {
-				return false
-			}
-			continue
-		}
-		segment.WriteRune(r)
-	}
-	if strings.Contains(content, "../") || strings.Contains(content, "$(") {
-		return false
-	}
-	return quote == 0 && depth == 0 && directives > 0 && strings.TrimSpace(segment.String()) == ""
-}
-
-func aiStaticConfigPath(value, directory string, allowDirectory bool) bool {
-	if strings.ContainsAny(value, "$\"'\\") || path.Clean(value) != value {
-		return false
-	}
-	return allowDirectory && value == directory || strings.HasPrefix(value, directory+"/")
+	return false
 }
