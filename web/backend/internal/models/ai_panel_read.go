@@ -178,7 +178,7 @@ type AIPanelHistory struct {
 }
 
 func GetAIPanelHistory(ctx context.Context, db *sql.DB, userID, serverID uuid.UUID, now time.Time, window string, limit int) (AIPanelHistory, error) {
-	result := AIPanelHistory{ObservedAt: now, ServerID: serverID, Range: window, Points: []json.RawMessage{}, Notes: "Only observed buckets are returned; missing buckets mean no collected data, not zero usage or proven downtime. Averages are weighted by recorded sample count, excluding invalid CPU samples. Raw, one-minute and fifteen-minute tiers are selected by display resolution with finer data filling gaps and the recent tail. Partial edges beyond finer retention use the stored coarse average. Legacy fifteen-minute averages without surviving finer data retain their original approximation. Disk percentages use current known disk capacity. This is monitoring history, not measured packet loss, jitter, or uptime availability."}
+	result := AIPanelHistory{ObservedAt: now, ServerID: serverID, Range: window, Points: []json.RawMessage{}, Notes: "Only observed buckets are returned; missing buckets mean no collected data, not zero usage or proven downtime. Averages are weighted by recorded sample count, excluding invalid CPU samples. Raw, one-minute and fifteen-minute tiers are selected by display resolution with finer data filling gaps and the recent tail. Partial edges beyond finer retention use the stored coarse average. Legacy fifteen-minute averages without complete surviving finer coverage retain their original approximation. Disk percentages use current known disk capacity. This is monitoring history, not measured packet loss, jitter, or uptime availability."}
 	durations := map[string]time.Duration{"1h": time.Hour, "24h": 24 * time.Hour, "7d": 7 * 24 * time.Hour}
 	duration, ok := durations[window]
 	if !ok || limit < 1 || limit > 120 || userID == uuid.Nil || serverID == uuid.Nil {
@@ -206,7 +206,11 @@ func GetAIPanelHistory(ctx context.Context, db *sql.DB, userID, serverID uuid.UU
  'disk_average_percent',ROUND(SUM(LEAST(disk_used_bytes::numeric/NULLIF(disk_total_bytes,0)*100,100)*samples) FILTER(WHERE disk_used_bytes>=0 AND disk_total_bytes>0)/NULLIF(SUM(samples) FILTER(WHERE disk_used_bytes>=0 AND disk_total_bytes>0),0),2),
  'latency_average_ms',ROUND(SUM(latency_ms::numeric*samples) FILTER(WHERE latency_ms>=0)/NULLIF(SUM(samples) FILTER(WHERE latency_ms>=0),0),2))
  FROM bucketed b JOIN servers s ON s.id=$1 AND s.user_id=$7 GROUP BY bucket ORDER BY bucket`
-	result.Points, err = aiPanelReadRows(ctx, db, query, serverID, result.Since, now, result.BucketSeconds, result.ExpectedBuckets, now, userID)
+	err = readMetricHistory(ctx, db, func(tx *sql.Tx) error {
+		var readErr error
+		result.Points, readErr = aiPanelReadRows(ctx, tx, query, serverID, result.Since, now, result.BucketSeconds, result.ExpectedBuckets, now, userID)
+		return readErr
+	})
 	result.ObservedBuckets = len(result.Points)
 	result.MissingBuckets = result.ExpectedBuckets - result.ObservedBuckets
 	return result, err

@@ -149,8 +149,10 @@ func GetMetrics(ctx context.Context, db *sql.DB, serverID uuid.UUID, since, unti
 	if err != nil {
 		return nil, err
 	}
-	rows, err := db.QueryContext(ctx,
-		metricHistorySourceCTE+`
+	points := []MetricPoint{}
+	err = readMetricHistory(ctx, db, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx,
+			metricHistorySourceCTE+`
 		SELECT ROUND(SUM(cpu_percent*samples)/SUM(samples),2),
 		       ROUND(SUM(load_1*samples)/SUM(samples),2), ROUND(SUM(load_5*samples)/SUM(samples),2), ROUND(SUM(load_15*samples)/SUM(samples),2),
 		       ROUND(SUM(memory_used::numeric*samples)/SUM(samples))::BIGINT, MAX(memory_total)::BIGINT, ROUND(SUM(disk_used_bytes::numeric*samples)/SUM(samples))::BIGINT,
@@ -161,25 +163,23 @@ func GetMetrics(ctx context.Context, db *sql.DB, serverID uuid.UUID, since, unti
 		       $2::timestamptz + bucket*$4*INTERVAL '1 second' AS bucket_time
 		FROM bucketed
 		GROUP BY bucket ORDER BY bucket`, serverID, since, until, bucketSecs, bucketCount, time.Now())
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var m MetricPoint
+			if err := rows.Scan(&m.CPUPercent, &m.Load1, &m.Load5, &m.Load15, &m.MemoryUsed, &m.MemoryTotal, &m.DiskUsed,
+				&m.NetworkRxBytes, &m.NetworkTxBytes, &m.NetworkRxTotal, &m.NetworkTxTotal,
+				&m.DiskRxBytes, &m.DiskTxBytes, &m.UptimeSeconds, &m.LatencyMS, &m.RecordedAt); err != nil {
+				return err
+			}
+			points = append(points, m)
+		}
+		return rows.Err()
+	})
 	if err != nil {
 		return nil, err
-	}
-	defer rows.Close()
-	var points []MetricPoint
-	for rows.Next() {
-		var m MetricPoint
-		if err := rows.Scan(&m.CPUPercent, &m.Load1, &m.Load5, &m.Load15, &m.MemoryUsed, &m.MemoryTotal, &m.DiskUsed,
-			&m.NetworkRxBytes, &m.NetworkTxBytes, &m.NetworkRxTotal, &m.NetworkTxTotal,
-			&m.DiskRxBytes, &m.DiskTxBytes, &m.UptimeSeconds, &m.LatencyMS, &m.RecordedAt); err != nil {
-			return nil, err
-		}
-		points = append(points, m)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if points == nil {
-		points = []MetricPoint{}
 	}
 	return points, nil
 }

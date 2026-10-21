@@ -41,8 +41,31 @@ func (*metricsConnection) Prepare(string) (driver.Stmt, error) {
 }
 func (*metricsConnection) Close() error { return nil }
 func (*metricsConnection) Begin() (driver.Tx, error) {
-	return nil, errors.New("unexpected transaction")
+	return metricsTransaction{}, nil
 }
+func (*metricsConnection) BeginTx(ctx context.Context, options driver.TxOptions) (driver.Tx, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !options.ReadOnly {
+		return nil, errors.New("history transaction must be read-only")
+	}
+	return metricsTransaction{}, nil
+}
+func (*metricsConnection) ExecContext(ctx context.Context, query string, _ []driver.NamedValue) (driver.Result, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if query != "SET LOCAL jit=off" {
+		return nil, errors.New("unexpected statement")
+	}
+	return driver.RowsAffected(0), nil
+}
+
+type metricsTransaction struct{}
+
+func (metricsTransaction) Commit() error   { return nil }
+func (metricsTransaction) Rollback() error { return nil }
 func (c *metricsConnection) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
 	return c.query(ctx, query, args)
 }
@@ -271,6 +294,13 @@ func TestMetricsRequestsCancelDatabaseWork(t *testing.T) {
 			}
 			if response.Code == http.StatusOK {
 				t.Fatalf("canceled query reported success: %s", response.Body)
+			}
+			// database/sql may finish the canceled transaction's rollback in
+			// its context watcher after the handler has returned. Require prompt
+			// release without depending on goroutine scheduling order.
+			deadline := time.Now().Add(time.Second)
+			for db.Stats().InUse != 0 && time.Now().Before(deadline) {
+				time.Sleep(time.Millisecond)
 			}
 			if db.Stats().InUse != 0 {
 				t.Fatal("canceled request retained its database connection")
