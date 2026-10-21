@@ -91,7 +91,7 @@ func initialAIConfiguredMessages(server *models.Server, prompt, mode string, opt
 		panel += " This single-server task may read account-level panel summaries, but every alert-rule mutation must target the selected server. Use a fleet task for account-wide rule changes."
 	}
 	messages[0].Content += "\n" + panel
-	policy := "Execution policy: STANDARD. Routine verified actions run immediately. High-risk and unknown actions pause for the user's exact-action approval."
+	policy := "Execution policy: STANDARD. Routine verified actions, including composed read-only diagnostics described by run_command, run immediately; do not ask for permission before them. Use state fields and metadata for initial diagnostics. systemctl status is reduced to state properties because full logs/process arguments can contain credentials. Reading logs or private application content, high-risk operations and unverified commands pause for the user's exact-action review. An unverified command is not necessarily dangerous: explain the actual review reason."
 	if mode == "readonly" {
 		policy = "Execution policy: READ ONLY. Do not install, modify, delete, execute unknown commands, or call external plugin tools. Verified server inspection and the read-only Server Monitor tools are authorized."
 	} else if mode == "automatic" {

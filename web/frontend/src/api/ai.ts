@@ -20,7 +20,7 @@ export interface AITask {
   prompt: string; status: AITaskStatus; error: string; created_at: string; updated_at: string; prompt_tokens: number; completion_tokens: number;
   approval_mode?: AIApprovalMode; skills?: Array<{ id: string; name: string }>; plugins?: Array<{ id: string; name: string }>;
 }
-export interface AIEvent { id: number; kind: 'user' | 'assistant' | 'system' | 'tool'; content: string; created_at: string; action_id?: string }
+export interface AIEvent { id: number; kind: 'user' | 'assistant' | 'system' | 'tool'; content: string; created_at: string; action_id?: string; phase?: 'progress' | 'final' }
 export type AIActionStatus = 'pending' | 'approved' | 'running' | 'succeeded' | 'failed' | 'rejected' | 'interrupted';
 export interface AIAction {
   id: string; tool_name: string; arguments: Record<string, unknown>; summary: string; command: string; requires_approval: boolean; risk_reason: string;

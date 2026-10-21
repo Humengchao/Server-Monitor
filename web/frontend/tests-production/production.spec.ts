@@ -108,6 +108,15 @@ async function isolateBrowser(page: Page, origin: string) {
   const server = host(fixtureID, { name: 'Deployment fixture', has_docker: true });
   server.latest_metrics!.recorded_at = timestamp;
   const metric = server.latest_metrics!;
+  const taskID = '22222222-2222-4222-8222-222222222222';
+  const actionID = '33333333-3333-4333-8333-333333333333';
+  const aiTask = { id: taskID, scope: 'server', server_id: fixtureID, server_name: server.name, server_type: 'linux', provider_id: 'fixture-provider', provider_name: 'Fixture provider', model: 'fixture', prompt: 'Deployment fixture health', status: 'completed', error: '', steps: 2, prompt_tokens: 20, completion_tokens: 10, approval_mode: 'standard', skills: [], plugins: [], created_at: timestamp, updated_at: timestamp };
+  const aiDetail = { task: aiTask, events: [
+    { id: 1, kind: 'user', content: aiTask.prompt, created_at: timestamp },
+    { id: 2, kind: 'assistant', phase: 'progress', content: 'Checking fixture health.', created_at: timestamp },
+    { id: 3, kind: 'tool', action_id: actionID, content: 'Inspect server', created_at: timestamp },
+    { id: 4, kind: 'assistant', phase: 'final', content: '# Deployment result\nAll fixture checks passed.', created_at: timestamp },
+  ], actions: [{ id: actionID, tool_name: 'run_command', arguments: { command: 'uptime' }, summary: 'Inspect server', command: 'uptime', requires_approval: false, risk_reason: '', mutating: false, status: 'succeeded', output: 'fixture healthy', error: '', exit_code: 0, truncated: false, unknown: false, duration_ms: 10, created_at: timestamp, completed_at: timestamp }] };
   const file = { name: 'fixture.yaml', path: '/tmp/fixture.yaml', size: 14, modified_at: timestamp, mode: '-rw-r--r--', is_file: true, is_dir: false, is_symlink: false };
   const fixtures: Record<string, unknown> = {
     '/api/auth/me': { id: 'fixture', username: 'Fixture' },
@@ -127,7 +136,8 @@ async function isolateBrowser(page: Page, origin: string) {
     '/api/alerts/rules': [], '/api/alerts/events': [], '/api/alerts/events/page': { events: [] },
     '/api/credentials': [], '/api/tags': [], '/api/network/checks': [],
     '/api/notifications/channels': [], '/api/notifications/deliveries': { deliveries: [] },
-    '/api/ai/providers': [], '/api/ai/skills': [], '/api/ai/plugins': [], '/api/ai/tasks': { tasks: [] },
+    '/api/ai/providers': [], '/api/ai/skills': [], '/api/ai/plugins': [], '/api/ai/tasks': { tasks: [aiTask] },
+    [`/api/ai/tasks/${taskID}`]: aiDetail,
     '/api/public/status': {
       overall: 'operational', generated_at: timestamp, nodes: [], privacy: { anonymized: false, hidden_fields: [] },
       summary: { total: 0, online: 0, degraded: 0, offline: 0, memory_used: 0, memory_total: 0, disk_used: 0, disk_total: 0, traffic_total_bytes: 0, network_rx_bytes: 0, network_tx_bytes: 0, remaining_value: 0 },
@@ -197,6 +207,12 @@ test('published pages and nested lazy modules render with isolated business data
       await expect(page.locator('.cm-content')).toContainText('enabled: true');
       await expect(page.locator('.cm-line span[class]').first()).toBeVisible();
       await page.locator('.ant-modal-footer').getByRole('button', { name: en['files.close'], exact: true }).click();
+    }
+    if (item.path === '/ai') {
+      await page.locator('.ai-history-item').filter({ hasText: 'Deployment fixture health' }).click();
+      await expect(page.locator('.ai-process')).not.toHaveAttribute('open');
+      await expect(page.locator('.ai-event-final')).toContainText('All fixture checks passed.');
+      await expect(page.getByText('All fixture checks passed.', { exact: true })).toBeInViewport();
     }
     expect(state.faults, item.path).toEqual([]);
   }

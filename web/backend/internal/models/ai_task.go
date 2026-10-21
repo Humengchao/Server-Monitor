@@ -51,6 +51,7 @@ type AITask struct {
 type AIEvent struct {
 	ID        int64      `json:"id"`
 	Kind      string     `json:"kind"`
+	Phase     string     `json:"phase,omitempty"`
 	Content   string     `json:"content"`
 	ActionID  *uuid.UUID `json:"action_id,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
@@ -228,13 +229,13 @@ func AITaskDetails(ctx context.Context, db *sql.DB, id, user uuid.UUID) (AITask,
 	}
 	events := []AIEvent{}
 	actions := []AIAction{}
-	rows, err := db.QueryContext(ctx, `SELECT id,kind,content,action_id,created_at FROM ai_events WHERE task_id=$1 ORDER BY id LIMIT 500`, id)
+	rows, err := db.QueryContext(ctx, `SELECT id,kind,phase,content,action_id,created_at FROM ai_events WHERE task_id=$1 ORDER BY id LIMIT 500`, id)
 	if err != nil {
 		return t, nil, nil, err
 	}
 	for rows.Next() {
 		var e AIEvent
-		if err = rows.Scan(&e.ID, &e.Kind, &e.Content, &e.ActionID, &e.CreatedAt); err != nil {
+		if err = rows.Scan(&e.ID, &e.Kind, &e.Phase, &e.Content, &e.ActionID, &e.CreatedAt); err != nil {
 			rows.Close()
 			return t, nil, nil, err
 		}

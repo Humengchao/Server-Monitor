@@ -224,7 +224,7 @@ func aiSensitiveService(name string) bool {
 // This is an allowlist grammar, not an attempt to prove arbitrary shell text
 // safe with a regex. Accepted inputs contain only separated inert tokens and
 // must match an entire known operation with known options.
-func aiAutomaticCommand(server *models.Server, command string) (AIAction, bool) {
+func aiAutomaticSimpleCommand(server *models.Server, command string) (AIAction, bool) {
 	if strings.ContainsAny(command, "\r\n\t;|&><`$(){}[]\\\"'!*?~%\x00") {
 		return AIAction{}, false
 	}
@@ -297,18 +297,32 @@ func aiAutomaticCommand(server *models.Server, command string) (AIAction, bool) 
 
 func aiCommandRiskReason(command string) string {
 	lower := strings.ToLower(command)
-	if strings.ContainsAny(command, "\r\n;|&><`$()") {
-		return "Shell composition, redirection, or expansion can execute additional actions; review the exact command"
-	}
-	for _, word := range []string{"rm ", "remove-item", "del ", "rmdir", "format", "mkfs", "wipefs", "diskpart", "dd ", "reinstall", "reset", "purge", "uninstall", "autoremove", "reboot", "shutdown", "restart-computer", "stop-computer", "docker prune", "docker system", "--privileged", "--mount", "-v "} {
-		if strings.Contains(lower, word) {
-			return "This command can delete data, reinstall software, reboot, or grant privileged host access"
+	// Label a known destructive operation, not a substring in a literal
+	// argument (e.g. grep 'format' or an unrecognized Format-Table option).
+	for _, platform := range []string{"linux", "windows"} {
+		parts, ok := aiParseDiagnostic(command, platform)
+		if !ok {
+			continue
+		}
+		for _, part := range parts {
+			program := strings.ToLower(part.words[0])
+			if aiIn(program, "rm remove-item del rmdir format mkfs mkfs.ext4 mkfs.xfs wipefs diskpart dd reboot shutdown restart-computer stop-computer") || program == "docker" && len(part.words) > 1 && aiIn(part.words[1], "prune system run") {
+				return "This command can delete data, reinstall software, reboot, or grant privileged host access"
+			}
 		}
 	}
 	if strings.Contains(lower, "encodedcommand") || strings.Contains(lower, "-enc ") || strings.Contains(lower, "base64") {
 		return "Encoded or indirect scripts conceal the actions that will execute"
 	}
-	return "This program or argument combination is outside the automatically verified command set"
+	for _, part := range []string{"journalctl", "docker logs", "docker inspect", "compose config", "printenv", "/.ssh/", "/etc/shadow", ".env", "get-content", "get-eventlog", "get-winevent"} {
+		if strings.Contains(lower, part) {
+			return "Review needed: this output may contain credentials or private application data that would be sent to the model provider"
+		}
+	}
+	if strings.ContainsAny(command, "\r\n;|&><`$()") {
+		return "Review needed: at least one operation or shell construct in this command could not be verified automatically"
+	}
+	return "Review needed: this program or argument combination is not yet covered by automatic verification"
 }
 
 func aiFilePath(value, platform string) (string, error) {

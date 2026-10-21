@@ -2,6 +2,7 @@ import i18n from './index';
 
 const en = {
   conversation: 'Task conversation',
+  result: 'Result', processDetails: 'Execution details', processActions: 'Actions: {{count}}', processFailures: '{{count}} unsuccessful', processComplete: 'Execution details are available to review.', processApproval: 'Review the pending action below to continue.', sendShortcut: 'Enter to send · Shift+Enter for a new line',
   taskScope: 'Task scope', scope_fleet: 'Entire panel', scope_server: 'Single server', fleetTarget: 'Server Monitor / All servers', openAlerts: 'Alert rules',
   fleetHint: 'Read monitoring data across your account and manage alert rules. Remote server commands are unavailable in this scope.', serverHint: 'Manage this server and its alert rules, with monitoring data from your account for context.',
   exampleFleet: 'Analyze all servers and prioritize current risks', exampleMetrics: 'Compare CPU trends over the last 24 hours', exampleAlert: 'Add an alert for CPU above 90% for 5 minutes on a server', exampleServerMetrics: 'Analyze this server’s last 24 hours of monitoring data',
@@ -42,6 +43,7 @@ const en = {
 };
 const zh: typeof en = {
   conversation: '任务对话',
+  result: '结果', processDetails: '执行过程', processActions: '{{count}} 项操作', processFailures: '{{count}} 项未成功', processComplete: '可展开查看执行说明、命令与输出。', processApproval: '请在下方核对待批准的操作。', sendShortcut: 'Enter 发送 · Shift+Enter 换行',
   taskScope: '任务范围', scope_fleet: '整个面板', scope_server: '单台服务器', fleetTarget: 'Server Monitor / 全部服务器', openAlerts: '告警规则',
   fleetHint: '读取本账号全部服务器的监控数据，管理告警规则；此范围不执行服务器远程命令。', serverHint: '管理这台服务器及其告警规则，也可结合本账号的监控数据分析。',
   exampleFleet: '分析所有服务器当前状态，优先指出风险', exampleMetrics: '对比所有服务器最近 24 小时的 CPU 趋势', exampleAlert: '为一台服务器添加 CPU 超过 90% 持续 5 分钟告警', exampleServerMetrics: '分析这台服务器最近 24 小时的监控数据',

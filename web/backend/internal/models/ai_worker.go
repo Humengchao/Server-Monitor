@@ -61,7 +61,45 @@ func SaveAIValidationReply(ctx context.Context, db *sql.DB, id uuid.UUID, worker
 	return saveAIConversation(ctx, db, id, worker, messages, "", 0, 0, 0)
 }
 
+// The model response is persisted before its action starts. Task status alone
+// therefore cannot distinguish an explanation from a final answer, especially
+// while a follow-up or failed action is being processed. Read only the fields
+// needed for this public marker; private reasoning remains in messages.
+func aiConversationEventPhase(messages json.RawMessage, content string) (string, error) {
+	if content == "" {
+		return "", nil
+	}
+	var conversation []struct {
+		Role      string            `json:"role"`
+		Content   string            `json:"content"`
+		ToolCalls []json.RawMessage `json:"tool_calls"`
+	}
+	if err := json.Unmarshal(messages, &conversation); err != nil {
+		return "", errors.New("invalid conversation for assistant event")
+	}
+	for i := len(conversation) - 1; i >= 0; i-- {
+		message := conversation[i]
+		// Rejected multi-tool replies are appended before the model step is
+		// saved. They do not turn that step's explanation into a final answer.
+		if message.Role == "tool" {
+			continue
+		}
+		if message.Role != "assistant" || message.Content != content {
+			break
+		}
+		if len(message.ToolCalls) > 0 {
+			return "progress", nil
+		}
+		return "final", nil
+	}
+	return "", errors.New("assistant event does not match the saved model response")
+}
+
 func saveAIConversation(ctx context.Context, db *sql.DB, id uuid.UUID, worker string, messages json.RawMessage, content string, promptTokens, completionTokens int64, steps int) error {
+	phase, err := aiConversationEventPhase(messages, content)
+	if err != nil {
+		return err
+	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -75,7 +113,7 @@ func saveAIConversation(ctx context.Context, db *sql.DB, id uuid.UUID, worker st
 		return err
 	}
 	if content != "" {
-		if _, err = tx.ExecContext(ctx, `INSERT INTO ai_events(task_id,kind,content) VALUES($1,'assistant',$2)`, id, content); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO ai_events(task_id,kind,phase,content) VALUES($1,'assistant',$2,$3)`, id, phase, content); err != nil {
 			return err
 		}
 	}

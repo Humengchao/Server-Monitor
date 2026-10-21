@@ -94,7 +94,6 @@ export default function AppLayout() {
   }, [location.pathname, refreshAlertBadge]);
 
   const menuItems = [
-    { key: '/ai', icon: <RobotOutlined />, label: t('title', { ns: 'ai' }) },
     { key: '/dashboard', icon: <DashboardOutlined />, label: t('nav.servers') },
     {
       key: '/alerts',
@@ -110,6 +109,7 @@ export default function AppLayout() {
     { key: '/files', icon: <FolderOpenOutlined />, label: t('nav.files') },
     { key: '/network', icon: <CloudServerOutlined />, label: op('network') },
     { key: '/logs', icon: <HistoryOutlined />, label: op('logs') },
+    { key: '/ai', icon: <RobotOutlined />, label: t('title', { ns: 'ai' }) },
     { key: '/notifications', icon: <BellOutlined />, label: op('notifications') },
     { key: '/backups', icon: <FolderOpenOutlined />, label: op('backups') },
     { key: '/credentials', icon: <KeyOutlined />, label: t('nav.credentials') },

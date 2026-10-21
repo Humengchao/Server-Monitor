@@ -104,6 +104,246 @@ test('a task needs one owned server and submits immediately once without a plann
   expect(state.errors).toEqual([]);
 });
 
+for (const viewport of [{ width: 1366, height: 768 }, { width: 390, height: 600 }]) {
+  test(`Enter sends once, Shift+Enter inserts a line, and IME confirmation never sends at ${viewport.width}px`, async ({ page }) => {
+    const state = await setup(page);
+    await page.setViewportSize(viewport);
+    await page.goto('/ai');
+    const input = page.getByRole('textbox', { name: 'Task instructions' });
+    await expect(page.getByRole('button', { name: 'Start task', exact: true })).toBeDisabled();
+    await input.press('Enter');
+    expect(state.writes).toHaveLength(0);
+    await input.fill('Check services');
+    await input.press('Shift+Enter');
+    await input.press('a');
+    await expect(input).toHaveValue('Check services\na');
+    await input.dispatchEvent('compositionstart');
+    await input.dispatchEvent('keydown', { key: 'Enter', code: 'Enter' });
+    await input.dispatchEvent('compositionend');
+    await input.dispatchEvent('keydown', { key: 'Enter', code: 'Enter', isComposing: true });
+    await input.dispatchEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 229 });
+    await input.dispatchEvent('keydown', { key: 'Enter', code: 'Enter', repeat: true });
+    expect(state.writes).toHaveLength(0);
+    state.holdCreate = true;
+    await input.press('Enter');
+    await input.dispatchEvent('keydown', { key: 'Enter', code: 'Enter' });
+    await expect.poll(() => state.writes.filter(item => item.path === '/api/ai/tasks').length).toBe(1);
+    expect(state.writes[0].body.prompt).toBe('Check services\na');
+    const created = task('keyboard', 'completed');
+    state.details.set(created.id, { task: created, events: [{ id: 1, kind: 'assistant', phase: 'final', content: 'Services verified.', created_at: created.created_at }], actions: [] });
+    await state.held!.fulfill({ status: 202, json: created });
+    await expect(page).toHaveURL(/task=keyboard/);
+    await input.fill('检查内存');
+    await input.press('Enter');
+    await expect.poll(() => state.writes.filter(item => item.path.endsWith('/messages')).length).toBe(1);
+    expect(state.writes.find(item => item.path.endsWith('/messages'))?.body.message).toBe('检查内存');
+    expect(state.errors).toEqual([]);
+  });
+}
+
+test('Enter cannot submit a draft without its required server', async ({ page }) => {
+  const state = await setup(page);
+  await page.goto('/ai?scope=server');
+  const input = page.getByRole('textbox', { name: 'Task instructions' });
+  await input.fill('Read logs');
+  await input.press('Enter');
+  await expect(input).toHaveValue('Read logs');
+  expect(state.writes).toHaveLength(0);
+});
+
+test('each turn collapses progress and command output while keeping results and user messages visible', async ({ page }, testInfo) => {
+  const state = await setup(page);
+  const selected = task('compact-conversation', 'running');
+  const at = selected.created_at;
+  const detail: AITaskDetail = { task: selected, events: [
+    { id: 1, kind: 'user', content: 'Check service health', created_at: at },
+    { id: 2, kind: 'assistant', phase: 'progress', content: 'First I will inspect the service state.', created_at: at },
+    { id: 3, kind: 'tool', action_id: 'action-one', content: 'internal action record', created_at: at },
+    { id: 4, kind: 'tool', action_id: 'action-one', content: 'duplicate completion record', created_at: at },
+    { id: 5, kind: 'assistant', phase: 'final', content: '## Health result\n\nAll services are healthy.', created_at: at },
+    { id: 6, kind: 'user', content: 'Check disk next', created_at: at },
+    { id: 7, kind: 'assistant', phase: 'progress', content: 'Now checking available disk capacity.', created_at: at },
+  ], actions: [action({ requires_approval: false, status: 'succeeded', command: 'systemctl status nginx', summary: 'Read service health', output: 'active (running)', exit_code: 0 })] };
+  state.details.set(selected.id, detail);
+  await page.goto('/ai?task=compact-conversation');
+  const turns = page.locator('.ai-conversation-turn');
+  await expect(turns).toHaveCount(2);
+  await expect(page.getByText('Check service health', { exact: true })).toBeVisible();
+  await expect(page.getByText('Check disk next', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Health result', exact: true })).toBeVisible();
+  await expect(turns.first().locator('.ai-process')).not.toHaveAttribute('open');
+  await expect(turns.last().locator('.ai-process')).not.toHaveAttribute('open');
+  await expect(page.locator('.ai-action-card')).toHaveCount(1);
+  await expect(page.locator('.ai-command')).not.toBeVisible();
+  await expect(turns.first().getByText('First I will inspect the service state.', { exact: true })).not.toBeVisible();
+  await expect(turns.last().locator('.ai-process-status')).toContainText('Now checking available disk capacity.');
+  await expect(turns.last().locator('.ai-event-final')).toHaveCount(0);
+  await expect(page.getByText('PRIVATE REASONING MUST NOT RENDER')).toHaveCount(0);
+  await turns.first().locator('.ai-process > summary').click();
+  await expect(page.locator('.ai-command')).toBeVisible();
+  await page.locator('.ai-action-output summary').click();
+  await expect(page.locator('.ai-action-output pre')).toHaveText('active (running)');
+  detail.task.status = 'completed';
+  detail.events.push({ id: 8, kind: 'assistant', phase: 'final', content: 'Disk capacity is sufficient.', created_at: at });
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(page.getByText('Disk capacity is sufficient.', { exact: true })).toBeVisible();
+  await expect(turns.first().locator('.ai-process')).toHaveAttribute('open', '');
+  await expect(turns.last().locator('.ai-process')).not.toHaveAttribute('open');
+  await expect(page.locator('.ai-action-output pre')).toBeVisible();
+  await turns.first().locator('.ai-process > summary').click();
+  await page.reload();
+  await expect(page.getByText('Disk capacity is sufficient.', { exact: true })).toBeInViewport();
+  await page.screenshot({ path: testInfo.outputPath('ai-compact-results.png'), fullPage: true, animations: 'disabled' });
+  await page.setViewportSize({ width: 320, height: 600 });
+  await page.reload();
+  await expect(page.getByText('Disk capacity is sufficient.', { exact: true })).toBeInViewport();
+  await page.screenshot({ path: testInfo.outputPath('ai-compact-results-mobile.png'), fullPage: true, animations: 'disabled' });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(state.errors).toEqual([]);
+});
+
+test('pending approval stays outside collapsed details and failure or unknown outcomes remain clear', async ({ page }) => {
+  const state = await setup(page);
+  const selected = task('compact-approval', 'awaiting_approval');
+  const detail: AITaskDetail = { task: selected, events: [
+    { id: 1, kind: 'user', content: 'Update the application', created_at: selected.created_at },
+    { id: 2, kind: 'assistant', phase: 'progress', content: 'The old files need removal first.', created_at: selected.created_at },
+  ], actions: [action()] };
+  state.details.set(selected.id, detail);
+  await page.goto('/ai?task=compact-approval');
+  await expect(page.locator('.ai-process')).not.toHaveAttribute('open');
+  await expect(page.getByRole('button', { name: 'Approve action', exact: true })).toBeVisible();
+  await expect(page.locator('.ai-command')).toBeVisible();
+  await expect(page.locator('.ai-process .ai-approval-buttons')).toHaveCount(0);
+  detail.task = { ...detail.task, status: 'interrupted', error: 'The connection was interrupted.' };
+  detail.actions[0] = { ...detail.actions[0], status: 'interrupted', unknown: true, error: 'Connection interrupted' };
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(page.getByText('The connection was interrupted.', { exact: true })).toBeVisible();
+  await expect(page.locator('.ai-conversation-turn > .ant-alert')).toContainText('Execution outcome is unknown');
+  await expect(page.locator('.ai-process-warning')).toHaveText('1 unsuccessful');
+  await expect(page.locator('.ai-process')).not.toHaveAttribute('open');
+  await expect(page.locator('.ai-event-final')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Approve action', exact: true })).toHaveCount(0);
+  expect(state.errors).toEqual([]);
+});
+
+test('a legacy completed turn keeps its answer visible when a new user message starts another turn', async ({ page }) => {
+  const state = await setup(page);
+  const selected = task('legacy-turns', 'awaiting_input');
+  state.details.set(selected.id, { task: selected, events: [
+    { id: 1, kind: 'user', content: 'Inspect memory', created_at: selected.created_at },
+    { id: 2, kind: 'assistant', content: 'I will check memory.', created_at: selected.created_at },
+    { id: 3, kind: 'tool', action_id: 'action-one', content: 'Read result', created_at: selected.created_at },
+    { id: 4, kind: 'assistant', content: 'Memory usage is normal.', created_at: selected.created_at },
+    { id: 5, kind: 'user', content: 'Check another server', created_at: selected.created_at },
+    { id: 6, kind: 'assistant', content: 'Which server should I inspect?', created_at: selected.created_at },
+  ], actions: [action({ requires_approval: false, status: 'succeeded', summary: 'Read memory', command: 'free -h' })] });
+  await page.goto('/ai?task=legacy-turns');
+  await expect(page.getByText('Memory usage is normal.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Which server should I inspect?', { exact: true })).toBeVisible();
+  await expect(page.getByText('I will check memory.', { exact: true })).not.toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Task instructions' })).toBeVisible();
+  expect(state.errors).toEqual([]);
+});
+
+test('legacy progress followed by a same-timestamp action is not presented as a final result', async ({ page }) => {
+  const state = await setup(page);
+  const selected = task('legacy-no-result');
+  const detail: AITaskDetail = { task: selected, events: [
+    { id: 1, kind: 'user', content: 'Inspect the server', created_at: selected.created_at },
+    { id: 2, kind: 'assistant', content: 'I will inspect the server now.', created_at: selected.created_at },
+    { id: 3, kind: 'tool', action_id: 'action-one', content: 'Read result', created_at: selected.created_at },
+  ], actions: [action({ requires_approval: false, status: 'succeeded', summary: 'Inspect server', command: 'uname -a' })] };
+  state.details.set(selected.id, detail);
+  await page.goto('/ai?task=legacy-no-result');
+  await expect(page.locator('.ai-process')).not.toHaveAttribute('open');
+  await expect(page.locator('.ai-event-final')).toHaveCount(0);
+  await expect(page.locator('.ai-process .ai-event-assistant')).toContainText('I will inspect the server now.');
+  detail.events.push(
+    { id: 4, kind: 'user', content: 'Check memory too', created_at: selected.created_at },
+    { id: 5, kind: 'assistant', content: 'Memory is healthy.', created_at: selected.created_at },
+  );
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(page.locator('.ai-conversation-turn')).toHaveCount(2);
+  await expect(page.locator('.ai-conversation-turn').first().locator('.ai-event-final')).toHaveCount(0);
+  await expect(page.locator('.ai-conversation-turn').last().locator('.ai-event-final')).toHaveText(/Memory is healthy\./);
+  expect(state.errors).toEqual([]);
+});
+
+for (const width of [1366, 320]) {
+  test(`completed conversations open at the latest result's beginning at ${width}px`, async ({ page }, testInfo) => {
+    const state = await setup(page);
+    await page.setViewportSize({ width, height: 720 });
+    const selected = task('result-position');
+    const content = '## Health report\n\nThe services are healthy.\n\n' + Array.from({ length: 25 }, (_, i) => `### Detail ${i + 1}\n\nService status and capacity are verified.\n\n`).join('');
+    state.details.set(selected.id, { task: selected, events: [
+      { id: 1, kind: 'user', content: 'Review server health and resource usage', created_at: selected.created_at },
+      { id: 2, kind: 'assistant', phase: 'progress', content: 'Inspecting services and resource metrics.', created_at: selected.created_at },
+      { id: 3, kind: 'assistant', phase: 'final', content, created_at: selected.created_at },
+    ], actions: [] });
+    await page.goto('/ai?task=result-position');
+    await expect(page.getByRole('heading', { name: 'Health report', exact: true })).toBeInViewport();
+    await expect(page.getByText('The services are healthy.', { exact: true })).toBeInViewport({ ratio: 1 });
+    const conversation = page.getByRole('region', { name: 'Task conversation', exact: true });
+    expect(await conversation.evaluate(element => element.scrollTop)).toBeGreaterThan(40);
+    expect(await conversation.evaluate(element => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeGreaterThan(500);
+    const input = page.getByRole('textbox', { name: 'Task instructions' });
+    await input.fill('Next request');
+    await expect(input).toBeFocused();
+    await page.screenshot({ path: testInfo.outputPath(`ai-result-start-${width}.png`), fullPage: true, animations: 'disabled' });
+    expect(await page.evaluate(() => document.documentElement.scrollTop)).toBe(0);
+    await conversation.evaluate(element => element.scrollTo(0, 0));
+    await page.evaluate(() => { window.history.pushState({}, '', '/ai'); window.dispatchEvent(new PopStateEvent('popstate')); });
+    await expect(page.getByRole('heading', { name: 'What would you like to do?', exact: true })).toBeVisible();
+    await page.evaluate(() => { window.history.pushState({}, '', '/ai?task=result-position'); window.dispatchEvent(new PopStateEvent('popstate')); });
+    await expect(page.getByText('The services are healthy.', { exact: true })).toBeInViewport({ ratio: 1 });
+    expect(state.errors).toEqual([]);
+  });
+}
+
+for (const reading of ['following', 'history', 'expanded'] as const) {
+  test(`a newly completed result respects ${reading} conversation reading`, async ({ page }) => {
+    const state = await setup(page);
+    await page.clock.install();
+    await page.setViewportSize({ width: 320, height: 720 });
+    const selected = task(`live-${reading}`, 'running');
+    const detail: AITaskDetail = { task: selected, events: [
+      { id: 1, kind: 'user', content: 'First request', created_at: selected.created_at },
+      { id: 2, kind: 'assistant', phase: 'final', content: '## Previous report\n\n' + 'Existing report text.\n\n'.repeat(20), created_at: selected.created_at },
+      { id: 3, kind: 'user', content: 'Inspect services now', created_at: selected.created_at },
+      { id: 4, kind: 'assistant', phase: 'progress', content: 'Inspecting current service state.', created_at: selected.created_at },
+    ], actions: [] };
+    state.details.set(selected.id, detail);
+    await page.goto(`/ai?task=${selected.id}`);
+    const body = page.getByRole('region', { name: 'Task conversation', exact: true });
+    const process = page.locator('.ai-conversation-turn').last().locator('.ai-process');
+    await expect(process.locator('summary')).toBeInViewport();
+    if (reading === 'history') {
+      await body.evaluate(element => element.scrollTo(0, 0));
+      await expect.poll(() => body.evaluate(element => element.scrollTop)).toBe(0);
+    } else if (reading === 'expanded') {
+      await process.locator('summary').click();
+      await expect(process).toHaveAttribute('open', '');
+    }
+    await body.focus();
+    const before = await body.evaluate(element => element.scrollTop);
+    detail.task = { ...detail.task, status: 'completed' };
+    detail.events.push({ id: 5, kind: 'assistant', phase: 'final', content: '## Current report\n\nThe current service check succeeded.\n\n' + 'Additional details.\n\n'.repeat(20), created_at: selected.created_at });
+    await page.clock.runFor(2100);
+    await expect(page.getByRole('heading', { name: 'Current report', exact: true })).toBeVisible();
+    await expect(body).toBeFocused();
+    if (reading === 'following') {
+      await expect(page.getByRole('heading', { name: 'Current report', exact: true })).toBeInViewport();
+      await expect(page.getByText('The current service check succeeded.', { exact: true })).toBeInViewport({ ratio: 1 });
+    } else {
+      expect(Math.abs((await body.evaluate(element => element.scrollTop)) - before)).toBeLessThanOrEqual(2);
+      await expect(page.getByText('The current service check succeeded.', { exact: true })).not.toBeInViewport();
+      if (reading === 'expanded') await expect(process).toHaveAttribute('open', '');
+    }
+    expect(state.errors).toEqual([]);
+  });
+}
+
 test('the entire panel starts without choosing a server and keeps its scope for follow-ups', async ({ page }) => {
   const state = await setup(page);
   await page.goto('/ai');
@@ -395,8 +635,9 @@ for (const decision of ['approve', 'reject'] as const) {
 
 test('routine actions show output and token usage; follow-up and cancellation use the existing task', async ({ page }) => {
   const state = await setup(page);
-  state.details.set('finished', { task: task('finished'), events: [{ id: 1, kind: 'assistant', content: 'Nginx is running.', created_at: new Date(observedAt).toISOString() }], actions: [action({ requires_approval: false, status: 'succeeded', command: 'systemctl status nginx', summary: 'Check nginx', output: 'active (running)', exit_code: 0, duration_ms: 120, truncated: true })] });
+  state.details.set('finished', { task: task('finished'), events: [{ id: 1, kind: 'assistant', phase: 'final', content: 'Nginx is running.', created_at: new Date(observedAt).toISOString() }], actions: [action({ requires_approval: false, status: 'succeeded', command: 'systemctl status nginx', summary: 'Check nginx', output: 'active (running)', exit_code: 0, duration_ms: 120, truncated: true })] });
   await page.goto('/ai?task=finished');
+  await page.locator('.ai-process > summary').click();
   await expect(page.locator('.ai-action-card')).toContainText('active (running)');
   await expect(page.getByText('Output was truncated by the server.')).toBeVisible();
   await expect(page.locator('.ai-task-usage')).toContainText('Input 120');
@@ -515,7 +756,7 @@ test('assistant Markdown renders tables and code safely while command output sta
   const externalRequests: string[] = [];
   page.on('request', request => { if (request.url().includes('tracking.invalid')) externalRequests.push(request.url()); });
   const markdown = '# Server health\n\n**2 services are healthy.**\n\n| Service | State |\n| --- | --- |\n| `nginx` | Running |\n| docker | Running |\n\n```bash\nsystemctl status nginx\n```\n\n[Docs](https://example.com/docs) [bad](javascript:alert%281%29) [data](data:text/html,test)\n\n![Private tracker](https://tracking.invalid/pixel?secret=test)\n\n<script>window.markdownExecuted = true</script>\n\n<img src="https://tracking.invalid/raw" onerror="alert(1)" />';
-  state.details.set('markdown', { task: task('markdown'), events: [{ id: 1, kind: 'assistant', content: markdown, created_at: new Date(observedAt).toISOString() }], actions: [action({ requires_approval: false, status: 'succeeded', command: 'printf "**literal**"', output: '**raw output**\n| name | value |', exit_code: 0 })] });
+  state.details.set('markdown', { task: task('markdown'), events: [{ id: 1, kind: 'assistant', phase: 'final', content: markdown, created_at: new Date(observedAt).toISOString() }], actions: [action({ requires_approval: false, status: 'succeeded', command: 'printf "**literal**"', output: '**raw output**\n| name | value |', exit_code: 0 })] });
   await page.goto('/ai?task=markdown');
   const rendered = page.locator('.ai-event-assistant .ai-markdown');
   await expect(rendered.getByRole('heading', { name: 'Server health' })).toBeVisible();
@@ -528,6 +769,7 @@ test('assistant Markdown renders tables and code safely while command output sta
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   await rendered.getByRole('button', { name: 'Copy code' }).click();
   expect((await page.evaluate(() => navigator.clipboard.readText())).replace(/\r\n/g, '\n')).toBe('systemctl status nginx\n');
+  await page.locator('.ai-process > summary').click();
   const output = page.locator('.ai-action-output');
   await expect(output.locator('pre')).not.toBeVisible();
   await output.locator('summary').click();
@@ -807,7 +1049,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 1366, height: 768
     state.tasks = [selected, ...Array.from({ length: 29 }, (_, index) => ({ ...task(`other-${index}`), prompt: `历史任务 ${index + 1} · 检查服务器状态` }))];
     state.details.set('layout', { task: selected, events: [
       { id: 1, kind: 'user', content: selected.prompt, created_at: selected.created_at },
-      { id: 2, kind: 'assistant', content: introduction + Array.from({ length: 20 }, (_, index) => `### 检查项 ${index + 1}\n\n服务启动正常，资源使用稳定。可以继续查看日志或检查监听端口。\n\n`).join(''), created_at: selected.created_at },
+      { id: 2, kind: 'assistant', phase: 'final', content: introduction + Array.from({ length: 20 }, (_, index) => `### 检查项 ${index + 1}\n\n服务启动正常，资源使用稳定。可以继续查看日志或检查监听端口。\n\n`).join(''), created_at: selected.created_at },
     ], actions: [action({ status: 'succeeded', requires_approval: false, command: 'systemctl list-units --type=service --state=running', output: Array.from({ length: 100 }, (_, index) => `service-${index}.service loaded active running`).join('\n'), exit_code: 0 })] });
     await page.goto('/ai?task=layout');
     const conversation = page.getByRole('region', { name: '任务对话', exact: true });
@@ -825,6 +1067,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 1366, height: 768
     await page.keyboard.press('End');
     await expect.poll(() => conversation.evaluate(element => element.scrollTop)).toBeGreaterThan(100);
     await expect(page.locator('.ai-action-output pre')).not.toBeVisible();
+    await page.locator('.ai-process > summary').click();
     await page.locator('.ai-action-output summary').click();
     await expect(page.locator('.ai-action-output pre')).toBeVisible();
     expect(await page.locator('.ai-action-output pre').evaluate(element => element.clientHeight)).toBeLessThanOrEqual(180);

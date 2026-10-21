@@ -1,16 +1,18 @@
 import { apiError } from '../utils/apiError';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Alert, App, AutoComplete, Button, Drawer, Empty, Form, Input, Modal, Select, Space, Spin, Switch, Tag, Typography } from 'antd';
 import { ApiOutlined, BellOutlined, CheckOutlined, CloseOutlined, CloudServerOutlined, CodeOutlined, DashboardOutlined, DeleteOutlined, EditOutlined, ExperimentOutlined, HistoryOutlined, KeyOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SafetyCertificateOutlined, SendOutlined, SettingOutlined, StopOutlined } from '@ant-design/icons';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { aiApi } from '../api/ai';
-import type { AIAction, AIApprovalMode, AIModelCatalog, AIPlugin, AIProvider, AIProviderInput, AIProviderKind, AISkill, AITask, AITaskDetail, AITaskInput, AITaskScope, AITaskStatus } from '../api/ai';
+import type { AIAction, AIApprovalMode, AIEvent, AIModelCatalog, AIPlugin, AIProvider, AIProviderInput, AIProviderKind, AISkill, AITask, AITaskDetail, AITaskInput, AITaskScope, AITaskStatus } from '../api/ai';
 import { serversApi } from '../api/servers';
 import type { Server } from '../api/servers';
 import { usePolling } from '../hooks/usePolling';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { formatDateTime, formatTime, formatDate } from '../utils/format';
+import { conversationTurns } from '../utils/aiConversation';
+import type { AIConversationTurn } from '../utils/aiConversation';
 import AIMarkdown from '../components/AIMarkdown';
 import AIExtensions from '../components/AIExtensions';
 import '../i18n/ai';
@@ -143,6 +145,41 @@ function ActionCard({ action, task, canDecide, busy, onDecision }: { action: AIA
   </article>;
 }
 
+function ConversationEvent({ event, result = false }: { event: AIEvent; result?: boolean }) {
+  const { t, i18n } = useTranslation('ai');
+  return <article className={`ai-event ai-event-${event.kind}${result ? ' ai-event-final' : ''}`}>
+    <header><span>{event.kind === 'assistant' && <RobotOutlined />}{t(result ? 'result' : event.kind)}</span><time>{formatDateTime(event.created_at, i18n.language)}</time></header>
+    {event.kind === 'assistant' ? <AIMarkdown>{event.content}</AIMarkdown> : <div>{event.content}</div>}
+  </article>;
+}
+
+function ConversationTurn({ turn, task, busy, onDecision }: { turn: AIConversationTurn; task: AITask; busy: boolean; onDecision: (action: AIAction, decision: 'approve' | 'reject') => void }) {
+  const { t } = useTranslation('ai');
+  const [expanded, setExpanded] = useState(false);
+  const canDecide = turn.latest && task.status === 'awaiting_approval';
+  const approvals = turn.process.filter(item => canDecide && item.action?.requires_approval && item.action.status === 'pending');
+  const process = turn.process.filter(item => !approvals.includes(item));
+  const actions = turn.process.flatMap(item => item.action ? [item.action] : []);
+  const failures = actions.filter(action => ['failed', 'rejected', 'interrupted'].includes(action.status)).length;
+  const outcomeUnknown = actions.some(action => action.unknown);
+  const status = turn.latest ? task.status : 'completed';
+  const last = turn.process.at(-1);
+  const currentAction = actions.find(action => action.status === 'running') || approvals[0]?.action;
+  const latestText = currentAction?.summary || last?.action?.summary || last?.event?.content || t('noEvents');
+  const statusText = !turn.latest || task.status === 'completed' ? t('processComplete') : latestText.replace(/\s+/g, ' ').trim();
+  const showProcess = !!turn.process.length || (turn.latest && activeStatuses.includes(task.status));
+  return <section className="ai-conversation-turn">
+    {turn.user && <ConversationEvent event={turn.user} />}
+    {showProcess && <details className="ai-process" open={expanded} onToggle={event => setExpanded(event.currentTarget.open)}>
+      <summary aria-label={t('processDetails')}><span className="ai-process-heading"><CodeOutlined aria-hidden="true" /><strong>{t('processDetails')}</strong><span className="ai-process-count">{t('processActions', { count: actions.length })}</span>{failures > 0 && <span className="ai-process-warning">{t('processFailures', { count: failures })}</span>}</span><span className="ai-process-status" role={turn.latest ? 'status' : undefined}><span className={`ai-process-state ai-process-state-${status}`}>{['running', 'queued'].includes(status) && <ReloadOutlined spin aria-hidden="true" />}{t(status)}</span><span>{statusText}</span></span></summary>
+      <div className="ai-process-content">{process.map(item => item.action ? <ActionCard key={item.key} action={item.action} task={task} canDecide={false} busy={busy} onDecision={onDecision} /> : item.event && <ConversationEvent key={item.key} event={item.event} />)}{!process.length && <p className="ai-event-waiting">{t(approvals.length ? 'processApproval' : 'noEvents')}</p>}</div>
+    </details>}
+    {outcomeUnknown && <Alert type="warning" showIcon title={t('unknown')} />}
+    {approvals.map(item => <ActionCard key={item.key} action={item.action!} task={task} canDecide busy={busy} onDecision={onDecision} />)}
+    {turn.results.map(event => <ConversationEvent key={event.id} event={event} result />)}
+  </section>;
+}
+
 type Submission = AITaskInput & { taskId?: string; workspace: string };
 export default function AI() {
   const { t, i18n } = useTranslation('ai');
@@ -182,6 +219,12 @@ export default function AI() {
   const historyRequest = useRef<AbortController | null>(null);
   const detailRequest = useRef<AbortController | null>(null);
   const mutation = useRef<AbortController | null>(null);
+  const composing = useRef(false);
+  const conversationBody = useRef<HTMLDivElement>(null);
+  const followConversation = useRef(true);
+  const readingDetails = useRef(false);
+  const programmaticScrollTop = useRef<number | null>(null);
+  const conversationPosition = useRef({ task: '', target: '' });
   const selectedTask = useRef(taskId);
   const selectedWorkspace = useRef(workspace);
   const decisionModal = useRef<ReturnType<typeof modal.confirm> | null>(null);
@@ -281,6 +324,8 @@ export default function AI() {
       value = { request_id: crypto.randomUUID(), prompt: text, scope, server_id: scope === 'server' ? currentTask?.server_id || serverId : undefined, provider_id: currentTask?.provider_id || providerId, approval_mode: currentTask?.approval_mode || approvalMode, skill_ids: currentTask?.skills?.map(skill => skill.id) || [...skillIds], plugin_ids: currentTask?.plugins?.map(plugin => plugin.id) || [...pluginIds], taskId: taskId || undefined, workspace };
     }
     setSubmitting(true);
+    followConversation.current = true;
+    readingDetails.current = false;
     const controller = new AbortController(); mutation.current = controller;
     // A read started before the submission must not restore a completed task
     // over the newer queued/running response.
@@ -330,19 +375,32 @@ export default function AI() {
       onOk: async () => { if (!await act(task.id, signal => aiApi.decide(task.id, action.id, decision, signal), t('decisionSaved'))) throw new Error('decision not saved'); },
     });
   };
-  const timeline = useMemo(() => {
-    if (!current) return [];
-    const actions = new Map(current.actions.map(action => [action.id, action]));
-    const rendered = new Set<string>();
-    const items: Array<{ key: string; time: string; event?: AITaskDetail['events'][number]; action?: AIAction }> = [];
-    for (const event of current.events) {
-      const action = event.action_id ? actions.get(event.action_id) : undefined;
-      if (action) { if (!rendered.has(action.id)) { items.push({ key: `action-${action.id}`, time: action.created_at, action }); rendered.add(action.id); } }
-      else items.push({ key: `event-${event.id}`, time: event.created_at, event });
+  const turns = useMemo(() => current ? conversationTurns(current) : [], [current]);
+  useLayoutEffect(() => {
+    if (!current) {
+      conversationPosition.current = { task: '', target: '' };
+      return;
     }
-    for (const action of current.actions) if (!rendered.has(action.id)) items.push({ key: `action-${action.id}`, time: action.created_at, action });
-    return items.sort((a, b) => Date.parse(a.time) - Date.parse(b.time));
-  }, [current]);
+    const body = conversationBody.current;
+    const turn = turns.at(-1);
+    if (!body || !turn) return;
+    const result = turn.results.at(-1);
+    const targetKey = `${turn.key}:${result ? `result-${result.id}` : 'progress'}`;
+    const previous = conversationPosition.current;
+    const firstRead = previous.task !== current.task.id;
+    const targetChanged = previous.target !== targetKey;
+    conversationPosition.current = { task: current.task.id, target: targetKey };
+    if (!firstRead && (!targetChanged || !followConversation.current)) return;
+    const lastTurn = body.querySelector('.ai-conversation-turn:last-child');
+    const target = result ? lastTurn?.querySelector('.ai-event-final:last-child') : lastTurn?.querySelector('.ai-process > summary');
+    if (!target) return;
+    // Show the beginning of a result, including long answers. Limit scrolling
+    // to the conversation pane and keep focus in the user's current control.
+    body.scrollTop = Math.max(0, body.scrollTop + target.getBoundingClientRect().top - body.getBoundingClientRect().top - 12);
+    programmaticScrollTop.current = body.scrollTop;
+    followConversation.current = true;
+    readingDetails.current = false;
+  }, [current, turns]);
   const historyPanel = <aside className="ai-sidebar" aria-label={t('history')}><header><span><HistoryOutlined />{t('history')}</span><Button type="text" size="small" icon={<PlusOutlined />} aria-label={t('newTask')} disabled={submitting} onClick={freshTask} /></header>
         {historyError && <Alert type="warning" title={t('loadFailed')} action={<Button size="small" onClick={() => { void readHistory(); }}>{t('retry')}</Button>} />}
         <div className="ai-history-list">{rows.map(task => <button key={task.id} type="button" className={`ai-history-item${task.id === taskId ? ' selected' : ''}`} aria-current={task.id === taskId ? 'page' : undefined} disabled={submitting} onClick={() => selectTask(task.id)}><strong>{task.prompt}</strong><span>{task.scope === 'fleet' ? t('fleetTarget') : task.server_name}</span><footer><Tag color={statusColors[task.status]}>{t(task.status)}</Tag><time>{formatDate(task.created_at, i18n.language)}</time></footer></button>)}{!rows.length && <div className="ai-history-empty"><HistoryOutlined /><span>{t('noHistory')}</span></div>}</div>
@@ -355,7 +413,21 @@ export default function AI() {
       {compact ? <><div className="ai-mobile-toolbar"><Button type="text" icon={<HistoryOutlined />} aria-label={t('history')} onClick={() => setHistoryOpen(true)}>{t('history')}</Button><Button type="text" icon={<PlusOutlined />} aria-label={t('newTask')} disabled={submitting} onClick={freshTask}>{t('newTask')}</Button></div><Drawer open={historyOpen} title={t('history')} placement="left" width="min(320px, calc(100vw - 32px))" className="ai-history-drawer" onClose={() => setHistoryOpen(false)}>{historyPanel}</Drawer></> : historyPanel}
       <section className="ai-conversation" aria-label={t('title')}>
         {currentTask ? <header className="ai-task-header"><div><span className="ai-task-server">{currentTask.scope === 'fleet' ? <DashboardOutlined /> : <CloudServerOutlined />}{currentTask.scope === 'fleet' ? t('fleetTarget') : currentTask.server_name}{currentTask.scope !== 'fleet' && <Tag>{currentTask.server_type}</Tag>}</span><small>{currentTask.provider_name} · {currentTask.model}</small><div className="ai-task-capabilities"><Tag className={`ai-mode-tag ai-mode-${currentTask.approval_mode || 'standard'}`} icon={<SafetyCertificateOutlined />}>{t(`mode_${currentTask.approval_mode || 'standard'}`)}</Tag><Link className="ai-panel-link" to="/alerts"><BellOutlined aria-hidden="true" />{t('openAlerts')}</Link>{currentTask.skills?.map(skill => <Tag key={skill.id}>Skill · {skill.name}</Tag>)}{currentTask.plugins?.map(plugin => <Tag key={plugin.id}>MCP · {plugin.name}</Tag>)}</div></div><Space wrap><Tag color={statusColors[currentTask.status]}>{t(currentTask.status)}</Tag><Button type="text" icon={<ReloadOutlined />} aria-label={t('refresh')} onClick={() => { void readTask(); }} />{canCancel && <Button danger icon={<StopOutlined />} aria-label={t('cancelTask')} disabled={actionBusy || submitting} onClick={() => { void act(currentTask.id, signal => aiApi.cancel(currentTask.id, signal), t('cancelRequested')); }}>{t('cancelTask')}</Button>}</Space></header> : null}
-        <div className="ai-conversation-body" role="region" aria-label={t('conversation')} tabIndex={0}>
+        <div className="ai-conversation-body" ref={conversationBody} role="region" aria-label={t('conversation')} tabIndex={0} onWheel={() => { readingDetails.current = false; }} onTouchMove={() => { readingDetails.current = false; }} onKeyDown={event => {
+          if (['Home', 'End', 'PageUp', 'PageDown', 'ArrowUp', 'ArrowDown'].includes(event.key)) readingDetails.current = false;
+        }} onScroll={event => {
+          const body = event.currentTarget;
+          if (readingDetails.current) return;
+          if (programmaticScrollTop.current !== null && Math.abs(body.scrollTop - programmaticScrollTop.current) < 1) return;
+          programmaticScrollTop.current = null;
+          followConversation.current = body.scrollHeight - body.clientHeight - body.scrollTop < 40;
+        }} onClickCapture={event => {
+          if (event.target instanceof Element && event.target.closest('summary')) {
+            followConversation.current = false;
+            readingDetails.current = true;
+            programmaticScrollTop.current = null;
+          }
+        }}>
           {!taskId && <div className="ai-welcome"><span className="ai-welcome-icon"><RobotOutlined /></span><Typography.Title level={3}>{t('welcomeTitle')}</Typography.Title><p>{t('welcomeHint')}</p><div className="ai-prompt-examples">{(selectedScope === 'fleet' ? ['exampleFleet', 'exampleMetrics', 'exampleAlert'] : ['exampleInspect', 'exampleInstall', 'exampleServerMetrics']).map(key => <button type="button" key={key} aria-label={t(key)} disabled={submitting || !!uncertain} onClick={() => setPrompt(t(key))}>{selectedScope === 'fleet' ? <DashboardOutlined /> : <CodeOutlined />}{t(key)}</button>)}</div></div>}
           {!taskId && <div className="ai-draft-settings">
           <div className="ai-scope-selector" role="radiogroup" aria-label={t('taskScope')}>{(['fleet', 'server'] as AITaskScope[]).map(scope => <button key={scope} type="button" role="radio" aria-label={t(`scope_${scope}`)} aria-checked={selectedScope === scope} className={selectedScope === scope ? 'selected' : ''} disabled={submitting || !!uncertain} onClick={() => selectScope(scope)}>{scope === 'fleet' ? <DashboardOutlined /> : <CloudServerOutlined />}<span>{t(`scope_${scope}`)}</span></button>)}</div>
@@ -370,12 +442,16 @@ export default function AI() {
           {detailError && <Alert type="warning" showIcon title={t(detailError)} action={<Button onClick={() => { void readTask(); }}>{t('retry')}</Button>} />}
           {currentTask?.error && <Alert type="error" showIcon title={currentTask.error} />}
           {currentTask && ['cancel_requested', 'canceled', 'interrupted'].includes(currentTask.status) && <Alert type="info" showIcon title={t(currentTask.status === 'canceled' ? 'canceledHint' : 'cancelHint')} />}
-          {current && <div className="ai-timeline">{timeline.map(item => item.action ? <ActionCard key={item.key} action={item.action} task={current.task} canDecide={current.task.status === 'awaiting_approval'} busy={actionBusy || submitting} onDecision={decide} /> : item.event && <article key={item.key} className={`ai-event ai-event-${item.event.kind}`}><header><span>{item.event.kind === 'assistant' && <RobotOutlined />}{t(item.event.kind)}</span><time>{formatDateTime(item.event.created_at, i18n.language)}</time></header>{item.event.kind === 'assistant' ? <AIMarkdown>{item.event.content}</AIMarkdown> : <div>{item.event.content}</div>}</article>)}{!timeline.length && <p className="ai-event-waiting">{t('noEvents')}</p>}</div>}
+          {current && <div className="ai-timeline">{turns.map(turn => <ConversationTurn key={`${current.task.id}:${turn.key}`} turn={turn} task={current.task} busy={actionBusy || submitting} onDecision={decide} />)}</div>}
         </div>
         {currentTask && <div className="ai-task-usage"><span>{t('tokens')}: {t('inputTokens')} {currentTask.prompt_tokens.toLocaleString()} · {t('outputTokens')} {currentTask.completion_tokens.toLocaleString()}</span><span>{t('updated', { time: formatTime(currentTask.updated_at, i18n.language) })}</span></div>}
         <div className="ai-composer">
           {uncertain && <Alert type="warning" showIcon title={t('submitUncertain')} action={<Button disabled={submitting} loading={submitting} aria-label={t('retrySubmission')} onClick={() => { void send(uncertain); }}>{t('retrySubmission')}</Button>} />}
-          {(!taskId || canFollowup) ? <><Input.TextArea aria-label={t('taskPrompt')} value={uncertain?.prompt ?? prompt} onChange={event => setPrompt(event.target.value)} placeholder={t(taskId ? 'followupPlaceholder' : selectedScope === 'fleet' ? 'fleetPlaceholder' : 'placeholder')} autoSize={{ minRows: 2, maxRows: 3 }} maxLength={16000} disabled={submitting || !!uncertain} /><div className="ai-composer-footer"><p><SafetyCertificateOutlined />{currentTask ? t(currentTask.scope === 'fleet' ? 'shareFleetSelected' : 'shareSelected', { server: currentTask.server_name, provider: currentTask.provider_name }) : selectedScope === 'fleet' && chosenProvider ? t('shareFleetSelected', { provider: chosenProvider.name }) : chosenServer && chosenProvider ? t('shareSelected', { server: chosenServer.name, provider: chosenProvider.name }) : t('shareHint')}</p><Button type="primary" icon={<SendOutlined />} aria-label={t(taskId ? 'followup' : 'submit')} aria-busy={submitting} loading={submitting} disabled={submitting || actionBusy || !!uncertain || !prompt.trim() || (!taskId && ((selectedScope === 'server' && !chosenServer) || !chosenProvider?.enabled || !chosenProvider.has_api_key || extensionsUnavailable))} onClick={() => { void send(); }}>{t(taskId ? 'followup' : 'submit')}</Button></div></> : currentTask ? <p className="ai-composer-state">{t(activeStatuses.includes(currentTask.status) ? currentTask.status === 'awaiting_input' ? 'waiting' : 'working' : 'readOnly')}</p> : null}
+          {(!taskId || canFollowup) ? <><Input.TextArea aria-label={t('taskPrompt')} aria-describedby="ai-send-shortcut" value={uncertain?.prompt ?? prompt} onChange={event => setPrompt(event.target.value)} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} onKeyDown={event => {
+            if (event.key !== 'Enter' || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey || composing.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+            event.preventDefault();
+            if (!event.repeat && !submitting && !actionBusy && !uncertain) void send();
+          }} placeholder={t(taskId ? 'followupPlaceholder' : selectedScope === 'fleet' ? 'fleetPlaceholder' : 'placeholder')} autoSize={{ minRows: 2, maxRows: 3 }} maxLength={16000} disabled={submitting || !!uncertain} /><small id="ai-send-shortcut" className="ai-send-shortcut">{t('sendShortcut')}</small><div className="ai-composer-footer"><p><SafetyCertificateOutlined />{currentTask ? t(currentTask.scope === 'fleet' ? 'shareFleetSelected' : 'shareSelected', { server: currentTask.server_name, provider: currentTask.provider_name }) : selectedScope === 'fleet' && chosenProvider ? t('shareFleetSelected', { provider: chosenProvider.name }) : chosenServer && chosenProvider ? t('shareSelected', { server: chosenServer.name, provider: chosenProvider.name }) : t('shareHint')}</p><Button type="primary" icon={<SendOutlined />} aria-label={t(taskId ? 'followup' : 'submit')} aria-busy={submitting} loading={submitting} disabled={submitting || actionBusy || !!uncertain || !prompt.trim() || (!taskId && ((selectedScope === 'server' && !chosenServer) || !chosenProvider?.enabled || !chosenProvider.has_api_key || extensionsUnavailable))} onClick={() => { void send(); }}>{t(taskId ? 'followup' : 'submit')}</Button></div></> : currentTask ? <p className="ai-composer-state">{t(activeStatuses.includes(currentTask.status) ? currentTask.status === 'awaiting_input' ? 'waiting' : 'working' : 'readOnly')}</p> : null}
           <small className="ai-background-note">{t('leaveHint')}{currentTask && canCancel ? ` ${t('cancelHint')}` : ''}</small>
         </div>
       </section>

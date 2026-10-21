@@ -66,6 +66,9 @@ CREATE TABLE IF NOT EXISTS ai_events (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_ai_events_task ON ai_events(task_id,id);
+-- Older events do not distinguish an explanation from a final response.
+-- Preserve that unknown state rather than guessing from the task's status.
+ALTER TABLE ai_events ADD COLUMN IF NOT EXISTS phase TEXT NOT NULL DEFAULT '' CHECK (phase IN ('','progress','final'));
 CREATE TABLE IF NOT EXISTS ai_task_messages (
     task_id UUID NOT NULL REFERENCES ai_tasks(id) ON DELETE CASCADE,
     request_id UUID NOT NULL,
